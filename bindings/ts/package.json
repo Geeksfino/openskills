@@ -1,0 +1,19 @@
+{
+  "name": "@openskills/runtime",
+  "version": "0.2.0",
+  "description": "OpenSkill Runtime TypeScript bindings (napi-rs)",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "openskills_ts.node"
+  ],
+  "scripts": {
+    "build": "napi build --platform --release"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0",
+    "typescript": "^5.3.3"
+  }
+}

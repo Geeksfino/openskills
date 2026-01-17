@@ -1,0 +1,15 @@
+[package]
+name = "openskills_ts"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "OpenSkill Runtime TS bindings (napi-rs)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2.16", features = ["napi8"] }
+napi-derive = "2.16"
+openskills-runtime = { path = "../../runtime" }
+serde_json = "1.0"

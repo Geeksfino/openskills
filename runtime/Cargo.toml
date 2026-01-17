@@ -1,0 +1,44 @@
+[package]
+name = "openskills-runtime"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Claude Skills compatible runtime with WASM sandbox"
+repository = "https://github.com/finogeeks/openskills"
+keywords = ["claude", "skills", "wasm", "sandbox", "agent"]
+categories = ["development-tools", "wasm"]
+
+[lib]
+crate-type = ["rlib"]
+
+[[bin]]
+name = "openskills-runtime"
+path = "src/bin/openskills-runtime.rs"
+
+[dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+# Hashing for audit
+sha2 = "0.10"
+hex = "0.4"
+
+# Filesystem traversal
+walkdir = "2.4"
+dirs = "5.0"
+
+# URL parsing for network permissions
+url = "2.5"
+
+# WASM runtime
+wasmtime = { version = "20.0.2", features = ["component-model"] }
+wasmtime-wasi = "20.0.2"
+cap-std = "2.0"
+
+[dev-dependencies]
+tempfile = "3.10"
