@@ -21,3 +21,10 @@ dist/
 .cache/
 coverage/
 .nyc_output/
+
+# Rust library artifacts
+*.rlib
+
+# Test binaries
+test_*
+*_test
