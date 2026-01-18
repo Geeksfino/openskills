@@ -50,8 +50,10 @@ use validator::validate_skill;
 // Re-exports for public API
 pub use audit::{AuditRecord as RuntimeAuditRecord, ExecutionStatus as RuntimeExecutionStatus};
 pub use errors::OpenSkillError as RuntimeError;
-pub use manifest::{HooksConfig, SkillManifest, WasmConfig};
+pub use manifest::{constraints, HooksConfig, SkillManifest, WasmConfig};
+pub use skill_parser::parse_skill_md;
 pub use registry::{SkillDescriptor, SkillLocation};
+pub use validator::{analyze_skill_tokens, validate_skill_path, TokenAnalysis, ValidationResult, ValidationStats};
 
 /// Runtime configuration for skill discovery.
 #[derive(Debug, Clone)]
@@ -247,6 +249,93 @@ impl OpenSkillRuntime {
         self.registry.list()
     }
 
+    /// Validate a skill directory by reading and parsing SKILL.md.
+    pub fn validate_skill_directory<P: AsRef<Path>>(path: P) -> ValidationResult {
+        validate_skill_path(path.as_ref())
+    }
+
+    /// Analyze token usage for a skill directory.
+    pub fn analyze_skill_directory<P: AsRef<Path>>(path: P) -> TokenAnalysis {
+        analyze_skill_tokens(path.as_ref())
+    }
+
+    /// Format available skill metadata for system prompt injection.
+    ///
+    /// Returns a human-readable list of skills intended to be appended to the
+    /// system prompt so the model knows what it can invoke. Only user-invocable
+    /// skills are included by default.
+    pub fn get_system_prompt_metadata(&self) -> String {
+        let skills: Vec<SkillDescriptor> = self
+            .list_skills()
+            .into_iter()
+            .filter(|skill| skill.user_invocable)
+            .collect();
+
+        if skills.is_empty() {
+            return String::new();
+        }
+
+        let mut prompt = String::from("You have access to the following skills:\n\n");
+        for skill in skills {
+            prompt.push_str(&format!("- {}: {}\n", skill.id, skill.description));
+        }
+        prompt.push_str(
+            "\nTo use a skill, activate it when the user's request matches the skill's purpose.",
+        );
+        prompt
+    }
+
+    /// Format available skill metadata as JSON for structured system prompts.
+    ///
+    /// Returns a JSON string like:
+    /// {"skills":[{"id":"code-review","description":"...","location":"project","user_invocable":true}]}
+    pub fn get_system_prompt_metadata_json(&self) -> Result<String, OpenSkillError> {
+        let skills: Vec<SkillDescriptor> = self
+            .list_skills()
+            .into_iter()
+            .filter(|skill| skill.user_invocable)
+            .collect();
+
+        if skills.is_empty() {
+            return Ok(String::new());
+        }
+
+        let payload = serde_json::json!({
+            "skills": skills.iter().map(|skill| {
+                serde_json::json!({
+                    "id": skill.id,
+                    "description": skill.description,
+                    "location": skill.location,
+                    "user_invocable": skill.user_invocable,
+                })
+            }).collect::<Vec<_>>()
+        });
+
+        Ok(payload.to_string())
+    }
+
+    /// Get a compact, one-line summary of available skills.
+    ///
+    /// Example: "Skills: code-review, test-generator (2 total)"
+    pub fn get_system_prompt_summary(&self) -> String {
+        let skill_names: Vec<String> = self
+            .list_skills()
+            .into_iter()
+            .filter(|skill| skill.user_invocable)
+            .map(|skill| skill.id)
+            .collect();
+
+        if skill_names.is_empty() {
+            return String::new();
+        }
+
+        format!(
+            "Skills: {} ({} total)",
+            skill_names.join(", "),
+            skill_names.len()
+        )
+    }
+
     /// Activate a skill by ID (load full SKILL.md content).
     ///
     /// This implements the "activation" step of progressive disclosure:
@@ -361,5 +450,16 @@ mod tests {
     fn test_runtime_from_nonexistent_directory() {
         let runtime = OpenSkillRuntime::from_directory("/nonexistent/path");
         assert!(runtime.list_skills().is_empty());
+    }
+
+    #[test]
+    fn test_system_prompt_helpers_empty() {
+        let runtime = OpenSkillRuntime::new();
+        assert_eq!(runtime.get_system_prompt_metadata(), "");
+        assert_eq!(runtime.get_system_prompt_summary(), "");
+        assert_eq!(
+            runtime.get_system_prompt_metadata_json().unwrap_or_default(),
+            ""
+        );
     }
 }

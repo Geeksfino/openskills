@@ -2,7 +2,9 @@
 //!
 //! Claude Skills compatible runtime with WASM sandbox.
 
-use openskills_runtime::{ExecutionOptions, OpenSkillRuntime};
+use openskills_runtime::{
+    analyze_skill_tokens, validate_skill_path, ExecutionOptions, OpenSkillRuntime,
+};
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -12,16 +14,20 @@ fn print_usage() {
     eprintln!("OpenSkills Runtime - Claude Skills compatible with WASM sandbox");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  openskills-runtime discover [--project-root <path>]");
-    eprintln!("  openskills-runtime list [--dir <path>]");
-    eprintln!("  openskills-runtime activate <skill-id> [--dir <path>]");
-    eprintln!("  openskills-runtime execute <skill-id> [options]");
+    eprintln!("  openskills discover [--project-root <path>]");
+    eprintln!("  openskills list [--dir <path>]");
+    eprintln!("  openskills activate <skill-id> [--dir <path>]");
+    eprintln!("  openskills execute <skill-id> [options]");
+    eprintln!("  openskills validate <skill-path> [options]");
+    eprintln!("  openskills analyze <skill-path> [options]");
     eprintln!();
     eprintln!("Commands:");
     eprintln!("  discover      Discover skills from standard locations (~/.claude/skills/, .claude/skills/)");
     eprintln!("  list          List skills from a specific directory");
     eprintln!("  activate      Load full skill content (SKILL.md instructions)");
     eprintln!("  execute       Execute a skill's WASM module in sandbox");
+    eprintln!("  validate      Validate a skill's format and structure");
+    eprintln!("  analyze       Analyze token usage for a skill");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --project-root, -p   Project root for relative path resolution");
@@ -29,6 +35,7 @@ fn print_usage() {
     eprintln!("  --input, -i          Input JSON string (for execute)");
     eprintln!("  --input-file, -f     Input JSON file path (for execute)");
     eprintln!("  --timeout-ms, -t     Timeout in ms (for execute)");
+    eprintln!("  --warnings           Show validation warnings");
     eprintln!("  --json               Output as JSON");
     eprintln!("  --help, -h           Show help");
 }
@@ -48,6 +55,8 @@ fn main() {
         "list" => cmd_list(&args[2..]),
         "activate" => cmd_activate(&args[2..]),
         "execute" => cmd_execute(&args[2..]),
+        "validate" => cmd_validate(&args[2..]),
+        "analyze" => cmd_analyze(&args[2..]),
         "--help" | "-h" => {
             print_usage();
         }
@@ -334,6 +343,150 @@ fn cmd_execute(args: &[String]) {
         Err(err) => {
             eprintln!("Execution failed: {}", err);
             process::exit(1);
+        }
+    }
+}
+
+fn cmd_validate(args: &[String]) {
+    let mut skill_path: Option<String> = None;
+    let mut json_output = false;
+    let mut show_warnings = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => {
+                json_output = true;
+            }
+            "--warnings" => {
+                show_warnings = true;
+            }
+            arg if !arg.starts_with('-') && skill_path.is_none() => {
+                skill_path = Some(arg.to_string());
+            }
+            _ => {
+                eprintln!("Unknown option: {}", args[i]);
+                process::exit(1);
+            }
+        }
+        i += 1;
+    }
+
+    let skill_path = skill_path.unwrap_or_else(|| {
+        eprintln!("Missing skill path");
+        print_usage();
+        process::exit(1);
+    });
+
+    let result = validate_skill_path(std::path::Path::new(&skill_path));
+
+    if json_output {
+        let output = serde_json::json!({
+            "path": skill_path,
+            "valid": result.errors.is_empty(),
+            "errors": result.errors,
+            "warnings": result.warnings,
+            "stats": result.stats,
+        });
+        println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    } else {
+        if result.errors.is_empty() {
+            println!("Validation passed: {}", skill_path);
+        } else {
+            println!("Validation failed: {}", skill_path);
+        }
+
+        if let Some(ref stats) = result.stats {
+            println!("Name: {} ({} chars)", stats.name, stats.name_len);
+            println!(
+                "Description: {} chars",
+                stats.description_len
+            );
+            println!(
+                "Instructions: {} chars",
+                stats.instructions_len
+            );
+        }
+
+        if !result.errors.is_empty() {
+            println!();
+            println!("Errors:");
+            for err in &result.errors {
+                println!("  - {}", err);
+            }
+        }
+
+        if show_warnings && !result.warnings.is_empty() {
+            println!();
+            println!("Warnings:");
+            for warn in &result.warnings {
+                println!("  - {}", warn);
+            }
+        }
+    }
+
+    if !result.errors.is_empty() {
+        process::exit(1);
+    }
+}
+
+fn cmd_analyze(args: &[String]) {
+    let mut skill_path: Option<String> = None;
+    let mut json_output = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => {
+                json_output = true;
+            }
+            arg if !arg.starts_with('-') && skill_path.is_none() => {
+                skill_path = Some(arg.to_string());
+            }
+            _ => {
+                eprintln!("Unknown option: {}", args[i]);
+                process::exit(1);
+            }
+        }
+        i += 1;
+    }
+
+    let skill_path = skill_path.unwrap_or_else(|| {
+        eprintln!("Missing skill path");
+        print_usage();
+        process::exit(1);
+    });
+
+    let analysis = analyze_skill_tokens(std::path::Path::new(&skill_path));
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&analysis).unwrap_or_default());
+    } else {
+        println!("Token Analysis: {}", skill_path);
+        println!();
+        if let Some(error) = analysis.error.as_ref() {
+            println!("Error: {}", error);
+            process::exit(1);
+        }
+
+        println!("Tier 1 (Metadata):");
+        println!("  Name:        {} chars", analysis.name_len);
+        println!("  Description: {} chars", analysis.description_len);
+        println!("  Estimated:   ~{} tokens", analysis.tier1_tokens);
+        println!();
+        println!("Tier 2 (Instructions):");
+        println!("  Length:      {} chars", analysis.instructions_len);
+        println!("  Estimated:   ~{} tokens", analysis.tier2_tokens);
+        println!();
+        println!("Total:");
+        println!("  Estimated:   ~{} tokens", analysis.total_tokens);
+
+        if analysis.tier1_tokens > 150 {
+            println!();
+            println!("Warning: Tier 1 is large, consider shortening description.");
+        }
+        if analysis.tier2_tokens > 1500 {
+            println!("Warning: Tier 2 is large, consider moving content to references.");
         }
     }
 }

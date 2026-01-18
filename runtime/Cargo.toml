@@ -12,7 +12,7 @@ categories = ["development-tools", "wasm"]
 crate-type = ["rlib"]
 
 [[bin]]
-name = "openskills-runtime"
+name = "openskills"
 path = "src/bin/openskills-runtime.rs"
 
 [dependencies]

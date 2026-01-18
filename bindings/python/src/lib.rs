@@ -1,9 +1,10 @@
 use openskills_runtime::{
-    ExecutionOptions, LoadedSkill, OpenSkillRuntime, RuntimeConfig, RuntimeExecutionStatus,
+    ExecutionOptions, OpenSkillRuntime, RuntimeConfig, RuntimeExecutionStatus,
     SkillLocation,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use pyo3::Bound;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -64,9 +65,9 @@ impl OpenSkillRuntimeWrapper {
             .discover_skills()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for s in skills {
-            let item = PyDict::new(py);
+            let item = PyDict::new_bound(py);
             item.set_item("id", s.id)?;
             item.set_item("description", s.description)?;
             item.set_item(
@@ -79,7 +80,7 @@ impl OpenSkillRuntimeWrapper {
                 },
             )?;
             item.set_item("user_invocable", s.user_invocable)?;
-            list.append(item)?;
+            list.append(item.as_any())?;
         }
 
         Ok(list.into())
@@ -92,9 +93,9 @@ impl OpenSkillRuntimeWrapper {
             .load_from_directory(dir)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for s in skills {
-            let item = PyDict::new(py);
+            let item = PyDict::new_bound(py);
             item.set_item("id", s.id)?;
             item.set_item("description", s.description)?;
             item.set_item(
@@ -107,7 +108,7 @@ impl OpenSkillRuntimeWrapper {
                 },
             )?;
             item.set_item("user_invocable", s.user_invocable)?;
-            list.append(item)?;
+            list.append(item.as_any())?;
         }
 
         Ok(list.into())
@@ -118,9 +119,9 @@ impl OpenSkillRuntimeWrapper {
         let runtime = self.inner.lock().unwrap();
         let skills = runtime.list_skills();
 
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for s in skills {
-            let item = PyDict::new(py);
+            let item = PyDict::new_bound(py);
             item.set_item("id", s.id)?;
             item.set_item("description", s.description)?;
             item.set_item(
@@ -133,7 +134,7 @@ impl OpenSkillRuntimeWrapper {
                 },
             )?;
             item.set_item("user_invocable", s.user_invocable)?;
-            list.append(item)?;
+            list.append(item.as_any())?;
         }
 
         Ok(list.into())
@@ -146,14 +147,14 @@ impl OpenSkillRuntimeWrapper {
             .activate_skill(&skill_id)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        let skill = PyDict::new(py);
-        skill.set_item("id", loaded.id)?;
-        skill.set_item("name", loaded.manifest.name)?;
-        skill.set_item("description", loaded.manifest.description)?;
+        let skill = PyDict::new_bound(py);
+        skill.set_item("id", loaded.id.clone())?;
+        skill.set_item("name", loaded.manifest.name.clone())?;
+        skill.set_item("description", loaded.manifest.description.clone())?;
         skill.set_item("allowed_tools", loaded.manifest.get_allowed_tools())?;
-        skill.set_item("model", loaded.manifest.model)?;
-        skill.set_item("context", loaded.manifest.context)?;
-        skill.set_item("agent", loaded.manifest.agent)?;
+        skill.set_item("model", loaded.manifest.model.clone())?;
+        skill.set_item("context", loaded.manifest.context.clone())?;
+        skill.set_item("agent", loaded.manifest.agent.clone())?;
         skill.set_item("user_invocable", loaded.manifest.is_user_invocable())?;
         skill.set_item(
             "location",
@@ -170,11 +171,12 @@ impl OpenSkillRuntimeWrapper {
     }
 
     /// Execute a skill's WASM module
+    #[pyo3(signature = (skill_id, input=None, timeout_ms=None, memory_mb=None))]
     fn execute_skill(
         &self,
-        py: Python,
+        py: Python<'_>,
         skill_id: String,
-        input: Option<&PyAny>,
+        input: Option<Bound<'_, PyAny>>,
         timeout_ms: Option<u64>,
         memory_mb: Option<u64>,
     ) -> PyResult<PyObject> {
@@ -182,9 +184,9 @@ impl OpenSkillRuntimeWrapper {
 
         // Convert Python object to JSON if provided
         let input_val: Option<Value> = if let Some(input_obj) = input {
-            let json_module = py.import("json")?;
+            let json_module = py.import_bound("json")?;
             let json_dumps = json_module.getattr("dumps")?;
-            let json_str: String = json_dumps.call1((input_obj,))?.extract()?;
+            let json_str: String = json_dumps.call1((input_obj.as_ref(),))?.extract()?;
             Some(
                 serde_json::from_str(&json_str).map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
@@ -209,9 +211,9 @@ impl OpenSkillRuntimeWrapper {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Serialization error: {e}"
             )))?;
-        let json_module = py.import("json")?;
-        let json_loads = json_module.getattr("loads")?;
-        let output = json_loads.call1((json_str,))?;
+            let json_module = py.import_bound("json")?;
+            let json_loads = json_module.getattr("loads")?;
+            let output: PyObject = json_loads.call1((json_str,))?.into();
 
         let exit_status = match result.audit.exit_status {
             RuntimeExecutionStatus::Success => "success".to_string(),
@@ -220,7 +222,7 @@ impl OpenSkillRuntimeWrapper {
             RuntimeExecutionStatus::Failed(msg) => format!("failed:{}", msg),
         };
 
-        let audit = PyDict::new(py);
+        let audit = PyDict::new_bound(py);
         audit.set_item("skill_id", result.audit.skill_id)?;
         audit.set_item("version", result.audit.version)?;
         audit.set_item("input_hash", result.audit.input_hash)?;
@@ -232,7 +234,7 @@ impl OpenSkillRuntimeWrapper {
         audit.set_item("stdout", result.audit.stdout)?;
         audit.set_item("stderr", result.audit.stderr)?;
 
-        let response = PyDict::new(py);
+        let response = PyDict::new_bound(py);
         response.set_item("output", output)?;
         response.set_item("stdout", result.stdout)?;
         response.set_item("stderr", result.stderr)?;
@@ -251,7 +253,7 @@ impl OpenSkillRuntimeWrapper {
 }
 
 #[pymodule]
-fn openskills(_py: Python, m: &PyModule) -> PyResult<()> {
+fn openskills(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OpenSkillRuntimeWrapper>()?;
     Ok(())
 }

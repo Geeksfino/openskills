@@ -35,6 +35,26 @@ Welcome to the OpenSkills documentation. This directory contains comprehensive d
   - Extension points
   - Current implementation status
 
+### Architecture Analysis
+
+- **[Claude Skills Comparison](claude-skills-comparison.md)**: Detailed comparison with Claude Skills official architecture
+  - Progressive disclosure implementation analysis
+  - Feature-by-feature comparison
+  - Gaps and recommendations
+  - Implementation scores
+
+- **[Architecture Comparison Diagrams](architecture-comparison.md)**: Visual architecture diagrams
+  - Progressive disclosure flow diagrams
+  - Context fork mechanism
+  - Permission model comparison
+  - Token optimization comparison
+
+- **[Enhancement Proposals](enhancement-proposals.md)**: Concrete implementation proposals
+  - System prompt metadata injection
+  - Ask-before-act permission system
+  - Context fork mechanism
+  - Validation CLI tooling
+
 ## Quick Links
 
 - **Getting Started**: See [Developer Guide - Quick Start](developers.md#quick-start)

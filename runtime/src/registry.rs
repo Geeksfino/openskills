@@ -238,6 +238,7 @@ impl SkillRegistry {
     }
 
     /// Get all skills.
+    #[allow(dead_code)] // May be useful for future API extensions
     pub fn all(&self) -> impl Iterator<Item = &Skill> {
         self.skills.values()
     }

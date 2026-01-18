@@ -199,16 +199,16 @@ println!("{}", result.output);
 
 ```bash
 # Discover skills from standard locations
-openskills-runtime discover
+openskills discover
 
 # List skills from a specific directory
-openskills-runtime list --dir ./skills
+openskills list --dir ./skills
 
 # Activate (load full content)
-openskills-runtime activate my-skill --json
+openskills activate my-skill --json
 
 # Execute WASM module
-openskills-runtime execute my-skill --input '{"query": "hello"}'
+openskills execute my-skill --input '{"query": "hello"}'
 ```
 
 ## Compatibility Notes

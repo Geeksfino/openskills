@@ -7,4 +7,4 @@ cd "$ROOT"
 echo "Building Rust runtime (library + binary)..."
 cargo build -p openskills-runtime --release --bins
 
-echo "Built: $ROOT/target/release/openskills-runtime"
+echo "Built: $ROOT/target/release/openskills"

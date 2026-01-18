@@ -76,7 +76,7 @@ OpenSkills uses a Rust core runtime with language bindings:
     └──────┬──────┘
            │
     ┌──────▼──────┐
-    │ Rust Core   │  (openskills-runtime)
+│ Rust Core   │  (openskills)
     └──────┬──────┘
            │
     ┌──────▼──────┐
@@ -118,6 +118,7 @@ openskills/
 - **[Contributing Guide](docs/contributing.md)**: How to contribute to OpenSkills
 - **[Architecture](docs/architecture.md)**: Internal architecture and design
 - **[Specification](docs/spec.md)**: Complete runtime specification
+- **[Analysis Summary](ANALYSIS_SUMMARY.md)**: ⭐ Claude Skills architecture comparison & analysis
 
 See [docs/README.md](docs/README.md) for documentation index.
 

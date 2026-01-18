@@ -33,11 +33,13 @@ impl PermissionEnforcer {
     }
 
     /// Create with default WASM config.
+    #[allow(dead_code)] // Used in tests
     pub fn with_defaults(allowed_tools: Vec<String>, skill_root: PathBuf) -> Self {
         Self::new(allowed_tools, WasmConfig::default(), skill_root)
     }
 
     /// Check if a tool is allowed.
+    #[allow(dead_code)] // Used in tests
     pub fn is_tool_allowed(&self, tool: &str) -> bool {
         // Empty allowed_tools means all tools are allowed (no restriction)
         if self.allowed_tools.is_empty() {
@@ -67,6 +69,7 @@ impl PermissionEnforcer {
     }
 
     /// Check if network access to a URL is allowed.
+    #[allow(dead_code)] // Used in tests
     pub fn is_network_allowed(&self, url: &str) -> Result<bool, OpenSkillError> {
         // No network hosts allowed = no network access
         if self.wasm_config.network.allow.is_empty() {
@@ -89,11 +92,13 @@ impl PermissionEnforcer {
     }
 
     /// Get the timeout in milliseconds.
+    #[allow(dead_code)] // May be useful for future API extensions
     pub fn timeout_ms(&self) -> u64 {
         self.wasm_config.timeout_ms
     }
 
     /// Get the memory limit in MB.
+    #[allow(dead_code)] // May be useful for future API extensions
     pub fn memory_mb(&self) -> u64 {
         self.wasm_config.memory_mb
     }

@@ -3,6 +3,10 @@
 use crate::errors::OpenSkillError;
 use crate::manifest::{constraints, SkillManifest};
 use crate::registry::Skill;
+use crate::skill_parser::parse_skill_md;
+use serde::Serialize;
+use std::fs;
+use std::path::Path;
 
 /// Validate a skill's manifest against Claude Skills spec constraints.
 pub fn validate_skill(skill: &Skill) -> Result<(), OpenSkillError> {
@@ -108,6 +112,198 @@ pub fn validate_description(description: &str) -> Result<(), OpenSkillError> {
     }
 
     Ok(())
+}
+
+/// Validation results for a skill directory.
+#[derive(Debug, Clone, Serialize)]
+pub struct ValidationResult {
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub stats: Option<ValidationStats>,
+}
+
+/// Stats collected during validation.
+#[derive(Debug, Clone, Serialize)]
+pub struct ValidationStats {
+    pub name: String,
+    pub name_len: usize,
+    pub description_len: usize,
+    pub instructions_len: usize,
+    pub has_wasm: bool,
+}
+
+/// Token analysis report for a skill.
+#[derive(Debug, Clone, Serialize)]
+pub struct TokenAnalysis {
+    pub path: String,
+    pub name_len: usize,
+    pub description_len: usize,
+    pub instructions_len: usize,
+    pub tier1_tokens: usize,
+    pub tier2_tokens: usize,
+    pub total_tokens: usize,
+    pub error: Option<String>,
+}
+
+/// Validate a skill directory by reading and parsing SKILL.md.
+pub fn validate_skill_path(path: &Path) -> ValidationResult {
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+
+    let skill_md = path.join("SKILL.md");
+    if !skill_md.exists() {
+        errors.push("SKILL.md not found".to_string());
+        return ValidationResult {
+            errors,
+            warnings,
+            stats: None,
+        };
+    }
+
+    let content = match fs::read_to_string(&skill_md) {
+        Ok(c) => c,
+        Err(err) => {
+            errors.push(format!("Failed to read SKILL.md: {}", err));
+            return ValidationResult {
+                errors,
+                warnings,
+                stats: None,
+            };
+        }
+    };
+
+    let parsed = match parse_skill_md(&content) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            errors.push(format!("Invalid SKILL.md: {}", err));
+            return ValidationResult {
+                errors,
+                warnings,
+                stats: None,
+            };
+        }
+    };
+
+    let name_len = parsed.manifest.name.len();
+    if name_len == 0 || name_len > constraints::MAX_NAME_LENGTH {
+        errors.push(format!(
+            "Skill name must be 1-{} characters",
+            constraints::MAX_NAME_LENGTH
+        ));
+    }
+
+    if let Err(err) = validate_name(&parsed.manifest.name) {
+        errors.push(err.to_string());
+    }
+
+    let description_len = parsed.manifest.description.len();
+    if let Err(err) = validate_description(&parsed.manifest.description) {
+        errors.push(err.to_string());
+    }
+
+    let instructions_len = parsed.instructions.len();
+    if instructions_len == 0 {
+        warnings.push("Instructions are empty".to_string());
+    } else if instructions_len > 10000 {
+        warnings.push("Instructions are long; consider moving details to resources".to_string());
+    }
+
+    if description_len > 500 {
+        warnings.push("Description is long; consider shortening for better discovery".to_string());
+    }
+
+    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if !dir_name.is_empty() && dir_name != parsed.manifest.name {
+        errors.push(format!(
+            "Skill directory '{}' does not match manifest name '{}'",
+            dir_name, parsed.manifest.name
+        ));
+    }
+
+    let has_wasm = find_wasm_module(path);
+    let stats = ValidationStats {
+        name: parsed.manifest.name,
+        name_len,
+        description_len,
+        instructions_len,
+        has_wasm,
+    };
+
+    ValidationResult {
+        errors,
+        warnings,
+        stats: Some(stats),
+    }
+}
+
+/// Analyze token usage for a skill directory.
+pub fn analyze_skill_tokens(path: &Path) -> TokenAnalysis {
+    let mut analysis = TokenAnalysis {
+        path: path.to_string_lossy().to_string(),
+        name_len: 0,
+        description_len: 0,
+        instructions_len: 0,
+        tier1_tokens: 0,
+        tier2_tokens: 0,
+        total_tokens: 0,
+        error: None,
+    };
+
+    let skill_md = path.join("SKILL.md");
+    let content = match fs::read_to_string(&skill_md) {
+        Ok(c) => c,
+        Err(err) => {
+            analysis.error = Some(format!("Failed to read SKILL.md: {}", err));
+            return analysis;
+        }
+    };
+
+    let parsed = match parse_skill_md(&content) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            analysis.error = Some(format!("Invalid SKILL.md: {}", err));
+            return analysis;
+        }
+    };
+
+    analysis.name_len = parsed.manifest.name.len();
+    analysis.description_len = parsed.manifest.description.len();
+    analysis.instructions_len = parsed.instructions.len();
+
+    // Rough estimate: 1 token ~= 4 chars. Add small overhead for YAML keys.
+    let tier1_chars = analysis.name_len + analysis.description_len + 50;
+    analysis.tier1_tokens = tier1_chars / 4;
+    analysis.tier2_tokens = analysis.instructions_len / 4;
+    analysis.total_tokens = analysis.tier1_tokens + analysis.tier2_tokens;
+
+    analysis
+}
+
+fn find_wasm_module(skill_dir: &Path) -> bool {
+    let candidates = [
+        "skill.wasm",
+        "wasm/skill.wasm",
+        "module.wasm",
+        "main.wasm",
+    ];
+
+    if candidates
+        .iter()
+        .any(|candidate| skill_dir.join(candidate).exists())
+    {
+        return true;
+    }
+
+    if let Ok(entries) = fs::read_dir(skill_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "wasm").unwrap_or(false) {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
