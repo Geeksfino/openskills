@@ -11,9 +11,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-#### TypeScript Developer (New Project - Mastra)
+#### TypeScript Developer (Simple Example - AI SDK)
 ```bash
-cd mastra
+cd simple
 npm install
 npm run start
 ```
@@ -38,7 +38,7 @@ npm run advanced
 
 ### Basic Integration (TypeScript)
 ```typescript
-import { OpenSkillRuntime } from "@openskills/runtime";
+import { OpenSkillRuntime } from "@finogeek/openskills";
 
 const runtime = OpenSkillRuntime.fromDirectory("./examples/skills");
 runtime.discoverSkills();
@@ -73,5 +73,5 @@ print(result.get("output", ""))
 
 ### Next Steps
 - Read the integration guide: `GUIDE.md`
-- Browse the examples: `langchain-js/`, `langchain-python/`, `mastra/`
+- Browse the examples: `langchain-js/`, `langchain-python/`, `simple/`
 - Build your own skills under `examples/skills`

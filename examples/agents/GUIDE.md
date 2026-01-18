@@ -14,7 +14,7 @@ OpenSkills:
 
 #### Pattern A: Single Tool (Simple)
 Expose one tool that can execute any skill by ID. This is the pattern used by
-the minimal examples in `langchain-python` and `mastra`.
+the minimal examples in `langchain-python` and `simple`.
 
 **Pros:** Less code, faster to wire up  
 **Cons:** Agent must supply `skill_id` in tool calls
@@ -35,7 +35,7 @@ use a skill.
 #### 1) Initialize Runtime
 **TypeScript**
 ```typescript
-import { OpenSkillRuntime } from "@openskills/runtime";
+import { OpenSkillRuntime } from "@finogeek/openskills";
 
 const runtime = OpenSkillRuntime.fromDirectory("./examples/skills");
 runtime.discoverSkills();

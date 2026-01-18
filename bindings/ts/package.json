@@ -1,5 +1,5 @@
 {
-  "name": "@openskills/runtime",
+  "name": "@finogeek/openskills",
   "version": "0.2.0",
   "description": "OpenSkill Runtime TypeScript bindings (napi-rs)",
   "license": "MIT",
@@ -8,10 +8,27 @@
   "files": [
     "index.js",
     "index.d.ts",
-    "openskills_ts.node"
+    "*.node"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Geeksfino/openskills.git",
+    "directory": "bindings/ts"
+  },
+  "keywords": [
+    "openskills",
+    "claude",
+    "skills",
+    "wasm",
+    "runtime",
+    "napi-rs"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
   "scripts": {
     "build": "napi build --platform --release",
+    "postbuild": "node scripts/postbuild.js",
     "test": "node test/index.test.js"
   },
   "devDependencies": {

@@ -1,0 +1,20 @@
+{
+  "name": "openskills-simple-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^1.0.0",
+    "@finogeek/openskills": "file:../../bindings/ts",
+    "ai": "^6.0.0",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "tsx": "^4.19.1",
+    "typescript": "^5.9.3"
+  }
+}

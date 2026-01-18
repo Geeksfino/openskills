@@ -1,5 +1,5 @@
 // @ts-ignore - example dependencies are installed by the user
-import { OpenSkillRuntime } from "@openskills/runtime";
+import { OpenSkillRuntime } from "@finogeek/openskills";
 // @ts-ignore - example dependencies are installed by the user
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";

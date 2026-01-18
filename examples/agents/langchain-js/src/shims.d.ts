@@ -1,2 +1,2 @@
-declare module "@openskills/runtime";
+declare module "@finogeek/openskills";
 declare module "@langchain/core/tools";

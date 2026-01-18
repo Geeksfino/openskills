@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { OpenSkillRuntime } from "@openskills/runtime";
+import { OpenSkillRuntime } from "@finogeek/openskills";
 import { ChatOpenAI } from "@langchain/openai";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { initializeAgentExecutorWithOptions } from "langchain/agents";

@@ -5,13 +5,13 @@ TypeScript/Node.js bindings for OpenSkills Runtime - Claude Skills compatible ru
 ## Installation
 
 ```bash
-npm install @openskills/runtime
+npm install @finogeek/openskills
 ```
 
 ## Usage
 
 ```typescript
-import { OpenSkillRuntime } from '@openskills/runtime';
+import { OpenSkillRuntime } from '@finogeek/openskills';
 
 // Create runtime (discovers from standard locations)
 const runtime = new OpenSkillRuntime();
