@@ -25,7 +25,7 @@ fn test_load_all_claude_skills() {
     
     println!("Discovered {} skills", skills.len());
     for skill in &skills {
-        println!("- {} ({:?})", skill.id, skill.location);
+        println!("- {} ({})", skill.id, skill.location);
     }
 
     assert!(!skills.is_empty(), "Should discover at least one skill");

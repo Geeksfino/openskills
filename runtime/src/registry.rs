@@ -10,6 +10,7 @@ use crate::manifest::SkillManifest;
 use crate::skill_parser::parse_skill_md;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -41,6 +42,17 @@ pub enum SkillLocation {
     Nested,
     /// Custom/explicit path
     Custom,
+}
+
+impl fmt::Display for SkillLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SkillLocation::Personal => write!(f, "personal"),
+            SkillLocation::Project => write!(f, "project"),
+            SkillLocation::Nested => write!(f, "nested"),
+            SkillLocation::Custom => write!(f, "custom"),
+        }
+    }
 }
 
 /// Skill descriptor for listing (progressive disclosure - only name/description).
