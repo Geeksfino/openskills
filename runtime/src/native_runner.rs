@@ -92,18 +92,37 @@ mod macos {
                 .iter()
                 .any(|t| t == "Bash" || t == "Terminal");
 
-        let mut read_paths = enforcer.filesystem_read_paths();
-        let write_paths = enforcer.filesystem_write_paths();
-
-        let (program, args, program_path) = command_for_script(script_type, script_path)?;
-        if let Some(path) = program_path.as_ref().and_then(|p| p.parent()) {
-            read_paths.push(path.to_path_buf());
-        }
-
+        // Canonicalize skill_root first to ensure path consistency
         let skill_root = skill
             .root
             .canonicalize()
             .unwrap_or_else(|_| skill.root.clone());
+
+        // Get paths from enforcer and canonicalize them to match canonicalized skill_root
+        let mut read_paths: Vec<PathBuf> = enforcer
+            .filesystem_read_paths()
+            .iter()
+            .map(|p| {
+                p.canonicalize()
+                    .unwrap_or_else(|_| p.to_path_buf())
+            })
+            .collect();
+        let write_paths: Vec<PathBuf> = enforcer
+            .filesystem_write_paths()
+            .iter()
+            .map(|p| {
+                p.canonicalize()
+                    .unwrap_or_else(|_| p.to_path_buf())
+            })
+            .collect();
+
+        let (program, args, program_path) = command_for_script(script_type, script_path)?;
+        if let Some(path) = program_path.as_ref().and_then(|p| p.parent()) {
+            let canonicalized_path = path
+                .canonicalize()
+                .unwrap_or_else(|_| path.to_path_buf());
+            read_paths.push(canonicalized_path);
+        }
         let profile = build_seatbelt_profile(
             &skill_root,
             &read_paths,
