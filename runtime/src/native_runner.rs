@@ -321,12 +321,6 @@ mod macos {
             ));
         }
 
-        if let Some(exec_path) = exec_path {
-            profile.push_str(&format!(
-                "(allow file-read* file-map-executable (subpath \"{}\"))\n",
-                escape_path(exec_path.to_string_lossy().as_ref())
-            ));
-        }
 
         for temp_path in TEMP_PATHS {
             profile.push_str(&format!(
