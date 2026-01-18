@@ -2,6 +2,7 @@
   "name": "@openskills/runtime",
   "version": "0.2.0",
   "description": "OpenSkill Runtime TypeScript bindings (napi-rs)",
+  "license": "MIT",
   "main": "index.js",
   "types": "index.d.ts",
   "files": [
