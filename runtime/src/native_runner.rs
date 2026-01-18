@@ -105,7 +105,9 @@ mod macos {
 
         let input_json = serde_json::to_string(&input)?;
         let allow_network = allowed_tools.iter().any(|t| t == "WebSearch" || t == "Fetch");
-        let allow_process = matches!(script_type, ScriptType::Shell | ScriptType::Python)
+        // Only Shell scripts get process permissions by default.
+        // Python scripts require explicit Bash/Terminal permission to spawn subprocesses.
+        let allow_process = script_type == ScriptType::Shell
             || allowed_tools
                 .iter()
                 .any(|t| t == "Bash" || t == "Terminal");
@@ -380,12 +382,17 @@ mod macos {
         // 4. Allow writes only to specific paths
         profile.push_str("(version 1)\n(deny default)\n");
 
-        // Core permissions needed for any process
+        // Core permissions needed for interpreter execution
+        // process-exec: needed to execute the interpreter binary itself
+        // mach-lookup: needed for process execution on macOS
+        // signal: needed for signal handling
         profile.push_str("(allow sysctl-read)\n");
         profile.push_str("(allow process-exec)\n");
-        profile.push_str("(allow process-fork)\n");
         profile.push_str("(allow mach-lookup)\n");
         profile.push_str("(allow signal)\n");
+        
+        // process-fork: only allow when explicitly permitted (Bash/Terminal tools)
+        // This prevents subprocess spawning without explicit permission
 
         // Allow broad file reads - this is essential for Python and other interpreters
         // to access their libraries, modules, and system resources.
@@ -437,6 +444,9 @@ mod macos {
 
         // Process permissions if shell/terminal tools are allowed
         if allow_process {
+            // Allow process-fork for subprocess spawning
+            profile.push_str("(allow process-fork)\n");
+            // Allow all other process operations
             profile.push_str("(allow process*)\n");
         }
 
