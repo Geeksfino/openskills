@@ -394,12 +394,8 @@ mod macos {
         // process-fork: only allow when explicitly permitted (Bash/Terminal tools)
         // This prevents subprocess spawning without explicit permission
 
-        // Allow broad file reads - this is essential for Python and other interpreters
-        // to access their libraries, modules, and system resources.
-        // Claude Code uses this approach: allow reads broadly, deny writes specifically.
-        profile.push_str("(allow file-read*)\n");
-
-        // Deny sensitive credential and config paths
+        // Deny sensitive credential and config paths FIRST (before allow-all)
+        // Seatbelt uses first-match-wins, so deny rules must come before allow rules
         let home = std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string());
         for sensitive_path in SENSITIVE_DENY_PATHS {
             let expanded = sensitive_path.replace('~', &home);
@@ -408,6 +404,12 @@ mod macos {
                 escape_path(&expanded)
             ));
         }
+
+        // Allow broad file reads - this is essential for Python and other interpreters
+        // to access their libraries, modules, and system resources.
+        // This comes AFTER deny rules so sensitive paths are protected.
+        // Claude Code uses this approach: allow reads broadly, deny writes specifically.
+        profile.push_str("(allow file-read*)\n");
 
         // Allow /dev/null writes (needed for output redirection)
         profile.push_str("(allow file-write* (literal \"/dev/null\"))\n");
