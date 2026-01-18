@@ -4,7 +4,7 @@ This document describes the internal architecture of OpenSkills Runtime.
 
 ## Overview
 
-OpenSkills is built with Rust as the core runtime, providing a WASM-based sandbox for executing Claude Skills. The architecture emphasizes:
+OpenSkills is built with Rust as the core runtime, providing a WASM-based sandbox and a native seatbelt sandbox on macOS for executing Claude Skills. The architecture emphasizes:
 
 - **Security**: WASM sandboxing with capability-based permissions
 - **Performance**: Efficient skill discovery and execution
@@ -54,7 +54,15 @@ Responsible for:
 - Network allowlist enforcement
 - Deterministic execution support
 
-### 4. Permission System (`permissions.rs`)
+### 4. Native Runner (`native_runner.rs`)
+
+Responsible for:
+- Executing native Python and shell scripts (macOS only)
+- Building seatbelt profiles from permissions
+- Capturing stdout/stderr
+- Timeout enforcement
+
+### 5. Permission System (`permissions.rs`)
 
 Responsible for:
 - Mapping `allowed-tools` to WASI capabilities
@@ -68,7 +76,7 @@ Responsible for:
 - `Bash` → Full filesystem access
 - `WebSearch` → Network access
 
-### 5. Audit System (`audit.rs`)
+### 6. Audit System (`audit.rs`)
 
 Responsible for:
 - Recording execution traces
@@ -108,23 +116,21 @@ Responsible for:
    ├─> Load full skill (Tier 2) if not cached
    ├─> Validate input against schema
    ├─> Create PermissionEnforcer
-   └─> Call executor based on ExecutionKind
+   └─> Auto-detect execution mode
 
 2. Executor.execute()
-   ├─> For Wasm:
+   ├─> For WASM:
    │   ├─> Load WASM module
    │   ├─> Configure WASI context
    │   ├─> Set up permissions
    │   ├─> Execute with timeout
    │   └─> Capture output
    │
-   ├─> For Http:
-   │   ├─> Check network permissions
-   │   ├─> Make HTTP request
-   │   └─> Parse response
-   │
-   └─> For Local:
-       └─> (Currently disabled)
+   └─> For Native (macOS):
+       ├─> Build seatbelt profile
+       ├─> Execute Python/shell script
+       ├─> Enforce filesystem/network permissions
+       └─> Capture output
 
 3. Post-execution
    ├─> Validate output against schema
@@ -158,6 +164,12 @@ The runtime implements three-tier loading:
 - **Isolation**: Each execution runs in isolated WASM instance
 - **Capabilities**: Filesystem access via WASI preopens
 - **Network**: Domain allowlist enforcement
+
+### Native Seatbelt Sandbox (macOS)
+
+- **Isolation**: Script execution is restricted by seatbelt profile
+- **Filesystem**: Subpath read/write allowlists from `allowed-tools`
+- **Network**: Allowed only when `WebSearch`/`Fetch` are enabled
 - **Timeouts**: Epoch interruption for timeout enforcement
 - **Memory**: Configurable memory limits
 

@@ -29,6 +29,18 @@ pub enum OpenSkillError {
     #[error("wasm execution failed: {0}")]
     WasmError(String),
 
+    /// Native execution failure.
+    #[error("native execution failed: {0}")]
+    NativeExecutionError(String),
+
+    /// Seatbelt sandbox error.
+    #[error("seatbelt error: {0}")]
+    SeatbeltError(String),
+
+    /// Unsupported platform for native execution.
+    #[error("unsupported platform: {0}")]
+    UnsupportedPlatform(String),
+
     /// IO error.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

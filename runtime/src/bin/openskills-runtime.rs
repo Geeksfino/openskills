@@ -28,7 +28,7 @@ fn print_usage() {
     eprintln!("  discover      Discover skills from standard locations (~/.claude/skills/, .claude/skills/)");
     eprintln!("  list          List skills from a specific directory");
     eprintln!("  activate      Load full skill content (SKILL.md instructions)");
-    eprintln!("  execute       Execute a skill's WASM module in sandbox");
+    eprintln!("  execute       Execute a skill's WASM or native script in sandbox");
     eprintln!("  build         Compile TypeScript/JavaScript skill to WASM component");
     eprintln!("  validate      Validate a skill's format and structure");
     eprintln!("  analyze       Analyze token usage for a skill");

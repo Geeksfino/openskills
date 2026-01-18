@@ -10,7 +10,7 @@ OpenSkills is **syntactically 100% compatible** with Claude Skills, meaning any 
 
 1. **100% Syntactic Compatibility**: OpenSkills reads and executes skills using the exact same SKILL.md format as Claude Skills. Skills can be shared between Claude Code and OpenSkills without modification.
 
-2. **WASM as Sandbox**: Instead of OS-level sandboxing (seatbelt on macOS, seccomp on Linux), OpenSkills uses **WASM/WASI 0.3** (component model) for secure execution. This provides:
+2. **WASM-first Sandbox**: OpenSkills uses **WASM/WASI 0.3** (component model) for secure execution, with an optional native seatbelt sandbox on macOS for Python and shell scripts. This provides:
    - **Cross-platform consistency**: Same security model on macOS, Linux, Windows
    - **Capability-based security**: Fine-grained permissions via WASI
    - **Memory safety**: WASM's linear memory model prevents buffer overflows
@@ -34,16 +34,11 @@ OpenSkills' WASM-first approach has some limitations compared to native executio
 
 ### Not Supported (Currently)
 
-1. **Native Python Scripts**: 
-   - ML-oriented Python scripts (NumPy, Pandas, SciPy) cannot run natively
-   - Python must be compiled to WASM (limited ecosystem compatibility)
-   - Heavy numerical computation is better suited for native execution
+1. **Native Scripts on Non-macOS**:
+   - Native Python and shell scripts are supported only on macOS (seatbelt)
+   - Linux seccomp support is planned
 
-2. **OS-Level Shell Scripts**:
-   - Direct shell script execution (`.sh`, `.bash`) is not supported
-   - Shell scripts must be rewritten in JavaScript/TypeScript or compiled to WASM
-
-3. **Build Workflow Required**:
+2. **Build Workflow Required (for WASM)**:
    - JavaScript/TypeScript skills must be compiled to WASM components before execution
    - Developers need to run `openskills build` to compile source to `wasm/skill.wasm`
    - This adds a build step compared to "drop-in" native scripts
@@ -66,10 +61,7 @@ OpenSkills will evolve to address limitations while maintaining its WASM-first p
 
 1. **More WASM-Ready Scripts**: We'll provide an expanding library of pre-built WASM components and templates for common tasks, reducing the need for custom compilation.
 
-2. **Native Scripting Support**: We plan to add **seatbelt/seccomp** sandboxing support for native scripts (Python, shell) as a complementary execution path. This will allow:
-   - Native Python scripts with OS-level sandboxing (seatbelt on macOS, seccomp on Linux)
-   - Shell script execution with restricted permissions
-   - Hybrid approach: WASM for most tasks, native sandboxing for heavy compute
+2. **Native Scripting Support**: Native Python and shell scripts are supported on macOS via seatbelt. Linux seccomp support is planned to complete cross-platform native sandboxing.
 
 3. **Improved Tooling**: Better build tools and templates to make WASM compilation more transparent for developers.
 
@@ -77,11 +69,12 @@ OpenSkills will evolve to address limitations while maintaining its WASM-first p
 
 - ✅ **100% Claude Skills Compatible**: Full SKILL.md format support
 - 🔒 **WASM/WASI 0.3 Sandbox**: Secure execution via component model
+- 🧰 **Native Seatbelt Sandbox (macOS)**: Execute Python and shell scripts
 - 📊 **Progressive Disclosure**: Efficient tiered loading (metadata → instructions → resources)
 - 🔌 **Multi-Language**: Rust core with TypeScript and Python bindings
 - 🛡️ **Capability-Based Security**: Fine-grained permissions via WASI
 - 🏗️ **Build Tool**: `openskills build` for compiling TS/JS to WASM components
-- 🌐 **Cross-Platform**: Identical behavior on macOS, Linux, Windows
+- 🌐 **Cross-Platform**: WASM execution is identical on macOS, Linux, Windows
 
 ## Quick Start
 
@@ -155,7 +148,7 @@ OpenSkills uses a Rust core runtime with language bindings:
     └──────┬──────┘
            │
     ┌──────▼──────┐
-    │  Wasmtime   │  (WASM/WASI 0.3 execution)
+    │ Execution  │  (WASM/WASI 0.3 + seatbelt on macOS)
     └─────────────┘
 ```
 
@@ -163,8 +156,8 @@ OpenSkills uses a Rust core runtime with language bindings:
 
 1. **Skill Discovery**: Scans directories for SKILL.md files
 2. **Progressive Loading**: Loads metadata → instructions → resources on demand
-3. **WASM Execution**: Executes `wasm/skill.wasm` in Wasmtime with WASI 0.3 capabilities
-4. **Permission Enforcement**: WASI capabilities mapped from `allowed-tools` in manifest
+3. **Execution**: Runs `wasm/skill.wasm` in Wasmtime or native `.py/.sh` via seatbelt on macOS
+4. **Permission Enforcement**: Capabilities mapped from `allowed-tools` for WASM or seatbelt
 5. **Audit Logging**: All executions logged with input/output hashes
 
 ## Comparison: OpenSkills vs Claude Code
@@ -172,12 +165,12 @@ OpenSkills uses a Rust core runtime with language bindings:
 | Aspect | Claude Code | OpenSkills |
 |--------|-------------|------------|
 | **SKILL.md Format** | ✅ Full support | ✅ 100% compatible |
-| **Sandbox** | seatbelt/seccomp | WASM/WASI 0.3 |
-| **Cross-platform** | OS-specific | Identical everywhere |
-| **Script Execution** | Native (Python, shell) | WASM components |
+| **Sandbox** | seatbelt/seccomp | WASM/WASI 0.3 + seatbelt (macOS) |
+| **Cross-platform** | OS-specific | WASM identical, native macOS only |
+| **Script Execution** | Native (Python, shell) | WASM components + native (macOS) |
 | **Build Required** | No | Yes (TS/JS → WASM) |
-| **Native Python** | ✅ Supported | ❌ Not supported |
-| **Shell Scripts** | ✅ Supported | ❌ Not supported |
+| **Native Python** | ✅ Supported | ✅ macOS (seatbelt) |
+| **Shell Scripts** | ✅ Supported | ✅ macOS (seatbelt) |
 | **Use Case** | Desktop users, arbitrary skills | Enterprise agents, trusted developers |
 
 ## Project Structure
@@ -188,6 +181,7 @@ openskills/
 │   ├── src/
 │   │   ├── build.rs      # Build tool for TS/JS → WASM
 │   │   ├── wasm_runner.rs # WASI 0.3 execution
+│   │   ├── native_runner.rs # Seatbelt execution (macOS)
 │   │   └── ...
 │   └── BUILD.md          # Build tool documentation
 ├── bindings/             # Language bindings
@@ -231,7 +225,8 @@ cargo build --release
 - ✅ **Python Bindings**: Working (requires Python ≤3.13)
 - ✅ **WASM Execution**: WASI 0.3 component model fully supported
 - ✅ **Build Tool**: `openskills build` for TS/JS compilation
-- 🚧 **Native Scripting**: Seatbelt/seccomp support planned
+- ✅ **Native Scripting**: Seatbelt sandbox (macOS)
+- 🚧 **Native Scripting (Linux)**: Seccomp support planned
 
 ## License
 

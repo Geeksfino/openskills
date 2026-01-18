@@ -4,9 +4,9 @@
 //! https://code.claude.com/docs/en/skills
 //!
 //! Key differences from Claude Code's native implementation:
-//! - Uses WASM/WASI sandbox instead of OS-level sandboxing (seatbelt/seccomp)
-//! - Provides capability-based security through WASI
-//! - Cross-platform consistent behavior
+//! - Uses WASM/WASI sandbox by default, with native seatbelt support on macOS
+//! - Provides capability-based security through WASI or OS-level sandboxing
+//! - Cross-platform consistent behavior for WASM execution
 //!
 //! # Architecture
 //!
@@ -20,8 +20,9 @@
 //!                               │
 //!                               ▼
 //! ┌─────────────────────────────────────────────────────────────────┐
-//! │                     WASM Execution Sandbox                       │
-//! │  - Wasmtime + WASI (filesystem, env, network capabilities)       │
+//! │                    Execution Sandbox                             │
+//! │  - WASM/WASI 0.3 (component model)                               │
+//! │  - Native seatbelt sandbox (macOS)                               │
 //! │  - Permission enforcement from allowed-tools                     │
 //! │  - Audit logging                                                 │
 //! └─────────────────────────────────────────────────────────────────┘
@@ -33,6 +34,7 @@ mod context;
 mod errors;
 mod executor;
 mod manifest;
+mod native_runner;
 mod permission_callback;
 mod permissions;
 mod registry;

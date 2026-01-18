@@ -1,10 +1,11 @@
-//! Skill execution with WASM sandbox.
+//! Skill execution with WASM sandbox and native sandbox support.
 //!
-//! Executes skill scripts in a WASM sandbox instead of native execution
-//! with OS-level sandboxing (seatbelt/seccomp).
+//! Executes skill scripts in a WASM sandbox or, on supported platforms,
+//! in a native OS-level sandbox (seatbelt/seccomp).
 
 use crate::audit::ExecutionStatus;
 use crate::errors::OpenSkillError;
+use crate::native_runner::{detect_script_type, execute_native, ScriptType};
 use crate::permissions::{map_tools_to_capabilities, PermissionEnforcer};
 use crate::registry::Skill;
 use crate::wasm_runner::execute_wasm;
@@ -38,12 +39,17 @@ pub struct ExecutionOptions {
     pub wasm_module: Option<String>,
 }
 
-/// Execute a skill's WASM module.
+#[derive(Debug)]
+enum ExecutionMode {
+    Wasm { wasm_module: String },
+    Native { script_path: PathBuf, script_type: ScriptType },
+}
+
+/// Execute a skill's WASM module or native script in a sandbox.
 ///
 /// For Claude Skills compatibility:
 /// - Skills are primarily instructional (Claude follows the instructions)
-/// - WASM execution is for sandboxed script/tool execution
-/// - This replaces OS-level sandboxing with capability-based WASM sandbox
+/// - Script execution is sandboxed (WASM or native seatbelt/seccomp)
 pub fn execute_skill(
     skill: &Skill,
     options: ExecutionOptions,
@@ -61,28 +67,10 @@ pub fn execute_skill(
     }
 
     let enforcer = PermissionEnforcer::new(
-        allowed_tools,
+        allowed_tools.clone(),
         wasm_config.clone(),
         skill.root.clone(),
     );
-
-    // Determine WASM module path
-    let wasm_module = options
-        .wasm_module
-        .or_else(|| find_wasm_module(&skill.root))
-        .ok_or_else(|| {
-            OpenSkillError::WasmError(
-                "No WASM module found in skill directory".to_string(),
-            )
-        })?;
-
-    let wasm_path = skill.root.join(&wasm_module);
-    if !wasm_path.exists() {
-        return Err(OpenSkillError::WasmError(format!(
-            "WASM module not found: {}",
-            wasm_path.display()
-        )));
-    }
 
     // Prepare input
     let input = options.input.unwrap_or_else(|| {
@@ -92,14 +80,61 @@ pub fn execute_skill(
         })
     });
 
-    // Execute in WASM sandbox
-    execute_wasm(
-        skill,
-        &wasm_module,
-        input,
-        wasm_config.timeout_ms,
-        &enforcer,
-    )
+    match detect_execution_mode(&skill.root, options.wasm_module)? {
+        ExecutionMode::Wasm { wasm_module } => {
+            let wasm_path = skill.root.join(&wasm_module);
+            if !wasm_path.exists() {
+                return Err(OpenSkillError::WasmError(format!(
+                    "WASM module not found: {}",
+                    wasm_path.display()
+                )));
+            }
+            execute_wasm(
+                skill,
+                &wasm_module,
+                input,
+                wasm_config.timeout_ms,
+                &enforcer,
+            )
+        }
+        ExecutionMode::Native {
+            script_path,
+            script_type,
+        } => execute_native(
+            skill,
+            &script_path,
+            script_type,
+            input,
+            wasm_config.timeout_ms,
+            &enforcer,
+            &allowed_tools,
+        ),
+    }
+}
+
+fn detect_execution_mode(
+    skill_root: &PathBuf,
+    wasm_override: Option<String>,
+) -> Result<ExecutionMode, OpenSkillError> {
+    if let Some(wasm_module) = wasm_override {
+        return Ok(ExecutionMode::Wasm { wasm_module });
+    }
+
+    if let Some(wasm_module) = find_wasm_module(skill_root) {
+        return Ok(ExecutionMode::Wasm { wasm_module });
+    }
+
+    if let Some(script_path) = find_native_script(skill_root) {
+        let script_type = detect_script_type(&script_path)?;
+        return Ok(ExecutionMode::Native {
+            script_path,
+            script_type,
+        });
+    }
+
+    Err(OpenSkillError::NativeExecutionError(
+        "No executable artifact found (expected .wasm, .py, or .sh)".to_string(),
+    ))
 }
 
 /// Find a WASM module in the skill directory.
@@ -133,13 +168,77 @@ fn find_wasm_module(skill_root: &PathBuf) -> Option<String> {
     None
 }
 
+/// Find a native script in the skill directory.
+fn find_native_script(skill_root: &PathBuf) -> Option<PathBuf> {
+    let candidates = [
+        "script.py",
+        "main.py",
+        "src/main.py",
+        "index.py",
+        "src/index.py",
+        "script.sh",
+        "main.sh",
+        "src/main.sh",
+        "index.sh",
+        "src/index.sh",
+        "script.bash",
+        "main.bash",
+        "src/main.bash",
+        "index.bash",
+        "src/index.bash",
+    ];
+
+    for candidate in candidates {
+        let path = skill_root.join(candidate);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    for dir in [skill_root.to_path_buf(), skill_root.join("src")] {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                        let ext = ext.to_ascii_lowercase();
+                        if ext == "py" || ext == "sh" || ext == "bash" {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_find_wasm_module_none() {
         let path = PathBuf::from("/nonexistent");
         assert!(find_wasm_module(&path).is_none());
+    }
+
+    #[test]
+    fn test_find_native_script_none() {
+        let path = PathBuf::from("/nonexistent");
+        assert!(find_native_script(&path).is_none());
+    }
+
+    #[test]
+    fn test_find_native_script_detects_python() {
+        let temp = TempDir::new().unwrap();
+        let skill_root = temp.path();
+        let script_path = skill_root.join("script.py");
+        std::fs::write(&script_path, "print('ok')").unwrap();
+
+        let found = find_native_script(&skill_root.to_path_buf());
+        assert_eq!(found.unwrap(), script_path);
     }
 }
