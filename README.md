@@ -83,7 +83,12 @@ OpenSkills will evolve to address limitations while maintaining its WASM-first p
 ```bash
 # Rust (from source)
 git clone <repository-url>
-cd openskills/runtime
+cd openskills
+
+# Initialize submodules (required for tests and examples)
+git submodule update --init --recursive
+
+cd runtime
 cargo build --release
 
 # TypeScript
@@ -207,6 +212,11 @@ openskills/
 ## Building
 
 ```bash
+# Clone with submodules (for tests and examples)
+git clone <repository-url>
+cd openskills
+git submodule update --init --recursive
+
 # Build everything
 ./scripts/build_all.sh
 
@@ -217,6 +227,14 @@ cargo build --release
 # Build bindings
 ./scripts/build_bindings.sh
 ```
+
+### Submodules
+
+The `examples/claude-official-skills` directory is a git submodule pointing to [anthropics/skills](https://github.com/anthropics/skills). This provides access to official Claude Skills for testing and reference.
+
+- **Initial clone**: Use `git clone --recursive <url>` or run `git submodule update --init --recursive` after cloning
+- **Updating**: `cd examples/claude-official-skills && git pull && cd ../.. && git add examples/claude-official-skills && git commit`
+- **Tests**: The test suite gracefully skips tests if the submodule is not initialized
 
 ## Status
 
