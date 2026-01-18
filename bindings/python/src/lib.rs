@@ -1,10 +1,9 @@
 use openskills_runtime::{
-    ExecutionOptions, OpenSkillRuntime, RuntimeConfig, RuntimeExecutionStatus,
-    SkillLocation,
+    ExecutionContext, ExecutionOptions, OpenSkillRuntime, OutputType, RuntimeConfig,
+    RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-use pyo3::Bound;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -12,6 +11,16 @@ use std::sync::Mutex;
 #[pyclass]
 struct OpenSkillRuntimeWrapper {
     inner: Mutex<OpenSkillRuntime>,
+}
+
+#[pyclass]
+struct SkillExecutionSessionWrapper {
+    inner: Mutex<SkillExecutionSession>,
+}
+
+#[pyclass]
+struct ExecutionContextWrapper {
+    inner: Mutex<ExecutionContext>,
 }
 
 #[pymethods]
@@ -48,10 +57,10 @@ impl OpenSkillRuntimeWrapper {
         let config = RuntimeConfig {
             custom_directories: custom_directories
                 .into_iter()
-                .map(|s| PathBuf::from(s))
+                .map(PathBuf::from)
                 .collect(),
             use_standard_locations,
-            project_root: project_root.map(|s| PathBuf::from(s)),
+            project_root: project_root.map(PathBuf::from),
         };
         Self {
             inner: Mutex::new(OpenSkillRuntime::from_config(config)),
@@ -59,15 +68,15 @@ impl OpenSkillRuntimeWrapper {
     }
 
     /// Discover skills from standard locations (~/.claude/skills/, .claude/skills/, nested)
-    fn discover_skills(&self, py: Python) -> PyResult<PyObject> {
+    fn discover_skills(&self, py: Python) -> PyResult<Py<PyAny>> {
         let mut runtime = self.inner.lock().unwrap();
         let skills = runtime
             .discover_skills()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        let list = PyList::empty_bound(py);
+        let list = PyList::empty(py);
         for s in skills {
-            let item = PyDict::new_bound(py);
+            let item = PyDict::new(py);
             item.set_item("id", s.id)?;
             item.set_item("description", s.description)?;
             item.set_item(
@@ -87,15 +96,15 @@ impl OpenSkillRuntimeWrapper {
     }
 
     /// Load skills from a specific directory (additive - can be called multiple times)
-    fn load_from_directory(&self, py: Python, dir: String) -> PyResult<PyObject> {
+    fn load_from_directory(&self, py: Python, dir: String) -> PyResult<Py<PyAny>> {
         let mut runtime = self.inner.lock().unwrap();
         let skills = runtime
             .load_from_directory(dir)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        let list = PyList::empty_bound(py);
+        let list = PyList::empty(py);
         for s in skills {
-            let item = PyDict::new_bound(py);
+            let item = PyDict::new(py);
             item.set_item("id", s.id)?;
             item.set_item("description", s.description)?;
             item.set_item(
@@ -115,13 +124,13 @@ impl OpenSkillRuntimeWrapper {
     }
 
     /// List skills (progressive disclosure - descriptors only)
-    fn list_skills(&self, py: Python) -> PyResult<PyObject> {
+    fn list_skills(&self, py: Python) -> PyResult<Py<PyAny>> {
         let runtime = self.inner.lock().unwrap();
         let skills = runtime.list_skills();
 
-        let list = PyList::empty_bound(py);
+        let list = PyList::empty(py);
         for s in skills {
-            let item = PyDict::new_bound(py);
+            let item = PyDict::new(py);
             item.set_item("id", s.id)?;
             item.set_item("description", s.description)?;
             item.set_item(
@@ -141,13 +150,13 @@ impl OpenSkillRuntimeWrapper {
     }
 
     /// Activate a skill (load full SKILL.md content)
-    fn activate_skill(&self, py: Python, skill_id: String) -> PyResult<PyObject> {
+    fn activate_skill(&self, py: Python, skill_id: String) -> PyResult<Py<PyAny>> {
         let runtime = self.inner.lock().unwrap();
         let loaded = runtime
             .activate_skill(&skill_id)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        let skill = PyDict::new_bound(py);
+        let skill = PyDict::new(py);
         skill.set_item("id", loaded.id.clone())?;
         skill.set_item("name", loaded.manifest.name.clone())?;
         skill.set_item("description", loaded.manifest.description.clone())?;
@@ -179,14 +188,14 @@ impl OpenSkillRuntimeWrapper {
         input: Option<Bound<'_, PyAny>>,
         timeout_ms: Option<u64>,
         memory_mb: Option<u64>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let mut runtime = self.inner.lock().unwrap();
 
         // Convert Python object to JSON if provided
         let input_val: Option<Value> = if let Some(input_obj) = input {
-            let json_module = py.import_bound("json")?;
+            let json_module = py.import("json")?;
             let json_dumps = json_module.getattr("dumps")?;
-            let json_str: String = json_dumps.call1((input_obj.as_ref(),))?.extract()?;
+            let json_str: String = json_dumps.call1((input_obj,))?.extract()?;
             Some(
                 serde_json::from_str(&json_str).map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
@@ -211,9 +220,9 @@ impl OpenSkillRuntimeWrapper {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Serialization error: {e}"
             )))?;
-            let json_module = py.import_bound("json")?;
+            let json_module = py.import("json")?;
             let json_loads = json_module.getattr("loads")?;
-            let output: PyObject = json_loads.call1((json_str,))?.into();
+            let output: Py<PyAny> = json_loads.call1((json_str,))?.into();
 
         let exit_status = match result.audit.exit_status {
             RuntimeExecutionStatus::Success => "success".to_string(),
@@ -222,7 +231,7 @@ impl OpenSkillRuntimeWrapper {
             RuntimeExecutionStatus::Failed(msg) => format!("failed:{}", msg),
         };
 
-        let audit = PyDict::new_bound(py);
+        let audit = PyDict::new(py);
         audit.set_item("skill_id", result.audit.skill_id)?;
         audit.set_item("version", result.audit.version)?;
         audit.set_item("input_hash", result.audit.input_hash)?;
@@ -234,7 +243,7 @@ impl OpenSkillRuntimeWrapper {
         audit.set_item("stdout", result.audit.stdout)?;
         audit.set_item("stderr", result.audit.stderr)?;
 
-        let response = PyDict::new_bound(py);
+        let response = PyDict::new(py);
         response.set_item("output", output)?;
         response.set_item("stdout", result.stdout)?;
         response.set_item("stderr", result.stderr)?;
@@ -250,10 +259,263 @@ impl OpenSkillRuntimeWrapper {
             .is_tool_allowed(&skill_id, &tool)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
+
+    /// Start an instruction-based skill session (for context: fork behavior).
+    #[pyo3(signature = (skill_id, input=None, parent_context=None))]
+    fn start_skill_session(
+        &self,
+        py: Python<'_>,
+        skill_id: String,
+        input: Option<Bound<'_, PyAny>>,
+        parent_context: Option<&ExecutionContextWrapper>,
+    ) -> PyResult<SkillExecutionSessionWrapper> {
+        let mut runtime = self.inner.lock().unwrap();
+
+        let input_val: Option<Value> = if let Some(input_obj) = input {
+            let json_module = py.import("json")?;
+            let json_dumps = json_module.getattr("dumps")?;
+            let json_str: String = json_dumps.call1((input_obj,))?.extract()?;
+            Some(
+                serde_json::from_str(&json_str).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
+                })?,
+            )
+        } else {
+            None
+        };
+
+        let parent = parent_context
+            .map(|ctx| ctx.inner.lock().unwrap().clone());
+        let parent_ref = parent.as_ref();
+
+        let session = runtime
+            .start_skill_session(&skill_id, input_val, parent_ref)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        Ok(SkillExecutionSessionWrapper {
+            inner: Mutex::new(session),
+        })
+    }
+
+    /// Finish a skill session and return an execution result.
+    #[pyo3(signature = (session, output, *, stdout = "", stderr = "", exit_status = None))]
+    fn finish_skill_session(
+        &self,
+        py: Python<'_>,
+        session: &SkillExecutionSessionWrapper,
+        output: Bound<'_, PyAny>,
+        stdout: &str,
+        stderr: &str,
+        exit_status: Option<String>,
+    ) -> PyResult<Py<PyAny>> {
+        let mut runtime = self.inner.lock().unwrap();
+        let json_module = py.import("json")?;
+        let json_dumps = json_module.getattr("dumps")?;
+        let json_str: String = json_dumps.call1((output,))?.extract()?;
+        let output_val: Value = serde_json::from_str(&json_str).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
+        })?;
+
+        let status = parse_execution_status(exit_status);
+        let session = session.inner.lock().unwrap();
+
+        let result = runtime
+            .finish_skill_session(
+                session.clone(),
+                output_val,
+                stdout.to_string(),
+                stderr.to_string(),
+                status,
+            )
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        // Convert Value to JSON string, then parse to Python object
+        let result_json = serde_json::to_string(&result.output)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Serialization error: {e}"
+            )))?;
+        let json_loads = json_module.getattr("loads")?;
+        let output_obj: Py<PyAny> = json_loads.call1((result_json,))?.into();
+
+        let exit_status = match result.audit.exit_status {
+            RuntimeExecutionStatus::Success => "success".to_string(),
+            RuntimeExecutionStatus::Timeout => "timeout".to_string(),
+            RuntimeExecutionStatus::PermissionDenied => "permission_denied".to_string(),
+            RuntimeExecutionStatus::Failed(msg) => format!("failed:{}", msg),
+        };
+
+        let audit = PyDict::new(py);
+        audit.set_item("skill_id", result.audit.skill_id)?;
+        audit.set_item("version", result.audit.version)?;
+        audit.set_item("input_hash", result.audit.input_hash)?;
+        audit.set_item("output_hash", result.audit.output_hash)?;
+        audit.set_item("start_time_ms", result.audit.start_time_ms)?;
+        audit.set_item("duration_ms", result.audit.duration_ms)?;
+        audit.set_item("permissions_used", result.audit.permissions_used)?;
+        audit.set_item("exit_status", exit_status)?;
+        audit.set_item("stdout", result.audit.stdout)?;
+        audit.set_item("stderr", result.audit.stderr)?;
+
+        let response = PyDict::new(py);
+        response.set_item("output", output_obj)?;
+        response.set_item("stdout", result.stdout)?;
+        response.set_item("stderr", result.stderr)?;
+        response.set_item("audit", audit)?;
+
+        Ok(response.into())
+    }
+
+    /// Check if a tool call is permitted for a skill (ask-before-act for risky tools).
+    #[pyo3(signature = (skill_id, tool, description=None))]
+    fn check_tool_permission(
+        &self,
+        skill_id: String,
+        tool: String,
+        description: Option<String>,
+    ) -> PyResult<bool> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .check_tool_permission(&skill_id, &tool, description, std::collections::HashMap::new())
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+}
+
+#[pymethods]
+impl SkillExecutionSessionWrapper {
+    fn is_forked(&self) -> PyResult<bool> {
+        Ok(self.inner.lock().unwrap().is_forked())
+    }
+
+    fn context_id(&self) -> PyResult<Option<String>> {
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .context_id()
+            .map(|id| id.to_string()))
+    }
+
+    fn record_tool_call(&self, py: Python<'_>, tool: String, output: Bound<'_, PyAny>) -> PyResult<()> {
+        let json_module = py.import("json")?;
+        let json_dumps = json_module.getattr("dumps")?;
+        let json_str: String = json_dumps.call1((output,))?.extract()?;
+        let output_val: Value = serde_json::from_str(&json_str).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
+        })?;
+        self.inner.lock().unwrap().record_tool_call(&tool, &output_val);
+        Ok(())
+    }
+
+    fn record_result(&self, py: Python<'_>, output: Bound<'_, PyAny>) -> PyResult<()> {
+        let json_module = py.import("json")?;
+        let json_dumps = json_module.getattr("dumps")?;
+        let json_str: String = json_dumps.call1((output,))?.extract()?;
+        let output_val: Value = serde_json::from_str(&json_str).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
+        })?;
+        self.inner.lock().unwrap().record_result(&output_val);
+        Ok(())
+    }
+
+    fn record_stdout(&self, stdout: String) {
+        self.inner.lock().unwrap().record_stdout_if_present(&stdout);
+    }
+
+    fn record_stderr(&self, stderr: String) {
+        self.inner.lock().unwrap().record_stderr_if_present(&stderr);
+    }
+
+    fn summarize(&self) -> PyResult<String> {
+        Ok(self.inner.lock().unwrap().summarize_fork())
+    }
+}
+
+#[pymethods]
+impl ExecutionContextWrapper {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(ExecutionContext::new()),
+        }
+    }
+
+    fn fork(&self) -> ExecutionContextWrapper {
+        let forked = self.inner.lock().unwrap().fork();
+        ExecutionContextWrapper {
+            inner: Mutex::new(forked),
+        }
+    }
+
+    fn id(&self) -> PyResult<String> {
+        Ok(self.inner.lock().unwrap().id().to_string())
+    }
+
+    fn is_forked(&self) -> PyResult<bool> {
+        Ok(self.inner.lock().unwrap().is_forked())
+    }
+
+    fn parent_id(&self) -> PyResult<Option<String>> {
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .parent_id()
+            .map(|id| id.to_string()))
+    }
+
+    fn summary(&self) -> PyResult<Option<String>> {
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .summary()
+            .map(|s| s.to_string()))
+    }
+
+    fn record_output(&self, output_type: String, content: String) -> PyResult<()> {
+        let output_type = parse_output_type(&output_type)?;
+        self.inner
+            .lock()
+            .unwrap()
+            .record_output(output_type, content);
+        Ok(())
+    }
+
+    fn summarize(&self) -> PyResult<String> {
+        Ok(self.inner.lock().unwrap().summarize())
+    }
 }
 
 #[pymodule]
 fn openskills(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OpenSkillRuntimeWrapper>()?;
+    m.add_class::<SkillExecutionSessionWrapper>()?;
+    m.add_class::<ExecutionContextWrapper>()?;
     Ok(())
+}
+
+fn parse_execution_status(status: Option<String>) -> openskills_runtime::RuntimeExecutionStatus {
+    match status.as_deref() {
+        Some("timeout") => openskills_runtime::RuntimeExecutionStatus::Timeout,
+        Some("permission_denied") => openskills_runtime::RuntimeExecutionStatus::PermissionDenied,
+        Some(s) if s.starts_with("failed:") => {
+            openskills_runtime::RuntimeExecutionStatus::Failed(
+                s.trim_start_matches("failed:").to_string(),
+            )
+        }
+        _ => openskills_runtime::RuntimeExecutionStatus::Success,
+    }
+}
+
+fn parse_output_type(value: &str) -> PyResult<OutputType> {
+    match value.to_ascii_lowercase().as_str() {
+        "stdout" => Ok(OutputType::Stdout),
+        "stderr" => Ok(OutputType::Stderr),
+        "toolcall" | "tool_call" | "tool" => Ok(OutputType::ToolCall),
+        "result" => Ok(OutputType::Result),
+        _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Invalid output_type: {}",
+            value
+        ))),
+    }
 }

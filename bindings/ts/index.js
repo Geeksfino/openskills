@@ -310,6 +310,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { OpenSkillRuntimeWrapper } = nativeBinding
+const { SkillExecutionSessionWrapper, ExecutionContextWrapper, OpenSkillRuntimeWrapper } = nativeBinding
 
+module.exports.SkillExecutionSessionWrapper = SkillExecutionSessionWrapper
+module.exports.ExecutionContextWrapper = ExecutionContextWrapper
 module.exports.OpenSkillRuntimeWrapper = OpenSkillRuntimeWrapper

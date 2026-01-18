@@ -1,8 +1,8 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use openskills_runtime::{
-    ExecutionOptions,OpenSkillRuntime, RuntimeConfig, RuntimeExecutionStatus,
-    SkillLocation,
+    ExecutionContext, ExecutionOptions, OpenSkillRuntime, OutputType, RuntimeConfig,
+    RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
 };
 use std::sync::Mutex;
 
@@ -59,6 +59,77 @@ pub struct ExecutionResult {
     pub stdout: String,
     pub stderr: String,
     pub audit: AuditRecord,
+}
+
+#[napi]
+pub struct SkillExecutionSessionWrapper {
+    inner: Mutex<SkillExecutionSession>,
+}
+
+#[napi]
+pub struct ExecutionContextWrapper {
+    inner: Mutex<ExecutionContext>,
+}
+
+#[napi]
+impl ExecutionContextWrapper {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(ExecutionContext::new()),
+        }
+    }
+
+    #[napi]
+    pub fn fork(&self) -> ExecutionContextWrapper {
+        let forked = self.inner.lock().unwrap().fork();
+        ExecutionContextWrapper {
+            inner: Mutex::new(forked),
+        }
+    }
+
+    #[napi]
+    pub fn id(&self) -> String {
+        self.inner.lock().unwrap().id().to_string()
+    }
+
+    #[napi]
+    pub fn is_forked(&self) -> bool {
+        self.inner.lock().unwrap().is_forked()
+    }
+
+    #[napi]
+    pub fn parent_id(&self) -> Option<String> {
+        self.inner
+            .lock()
+            .unwrap()
+            .parent_id()
+            .map(|id| id.to_string())
+    }
+
+    #[napi]
+    pub fn summary(&self) -> Option<String> {
+        self.inner
+            .lock()
+            .unwrap()
+            .summary()
+            .map(|s| s.to_string())
+    }
+
+    #[napi]
+    pub fn record_output(&self, output_type: String, content: String) -> Result<()> {
+        let output_type = parse_output_type(&output_type)?;
+        self.inner
+            .lock()
+            .unwrap()
+            .record_output(output_type, content);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn summarize(&self) -> String {
+        self.inner.lock().unwrap().summarize()
+    }
 }
 
 #[napi]
@@ -261,6 +332,86 @@ impl OpenSkillRuntimeWrapper {
         })
     }
 
+    /// Start an instruction-based skill session (for context: fork behavior).
+    #[napi]
+    pub fn start_skill_session(
+        &self,
+        skill_id: String,
+        input_json: Option<String>,
+        parent_context: Option<&ExecutionContextWrapper>,
+    ) -> Result<SkillExecutionSessionWrapper> {
+        let mut runtime = self.inner.lock().unwrap();
+        let input = input_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok());
+        let parent = parent_context
+            .map(|ctx| ctx.inner.lock().unwrap().clone());
+        let parent_ref = parent.as_ref();
+
+        let session = runtime
+            .start_skill_session(&skill_id, input, parent_ref)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
+        Ok(SkillExecutionSessionWrapper {
+            inner: Mutex::new(session),
+        })
+    }
+
+    /// Finish a skill session and return an ExecutionResult.
+    #[napi]
+    pub fn finish_skill_session(
+        &self,
+        session: &SkillExecutionSessionWrapper,
+        output_json: String,
+        stdout: String,
+        stderr: String,
+        exit_status: Option<String>,
+    ) -> Result<ExecutionResult> {
+        let mut runtime = self.inner.lock().unwrap();
+        let output: serde_json::Value = serde_json::from_str(&output_json)
+            .unwrap_or_else(|_| serde_json::json!({ "output": output_json }));
+        let status = parse_execution_status(exit_status);
+
+        let session = session.inner.lock().unwrap();
+        let result = runtime
+            .finish_skill_session(
+                session.clone(),
+                output,
+                stdout,
+                stderr,
+                status,
+            )
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
+        let output_json = serde_json::to_string(&result.output)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
+        let exit_status = match result.audit.exit_status {
+            RuntimeExecutionStatus::Success => "success".to_string(),
+            RuntimeExecutionStatus::Timeout => "timeout".to_string(),
+            RuntimeExecutionStatus::PermissionDenied => "permission_denied".to_string(),
+            RuntimeExecutionStatus::Failed(msg) => format!("failed:{}", msg),
+        };
+
+        Ok(ExecutionResult {
+            output_json,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            audit: AuditRecord {
+                skill_id: result.audit.skill_id,
+                version: result.audit.version,
+                input_hash: result.audit.input_hash,
+                output_hash: result.audit.output_hash,
+                start_time_ms: result.audit.start_time_ms.min(i64::MAX as u64) as i64,
+                duration_ms: result.audit.duration_ms.min(i64::MAX as u64) as i64,
+                permissions_used: result.audit.permissions_used,
+                exit_status,
+                stdout: result.audit.stdout,
+                stderr: result.audit.stderr,
+            },
+        })
+    }
+
     /// Check if a tool is allowed for a skill
     #[napi]
     pub fn is_tool_allowed(&self, skill_id: String, tool: String) -> Result<bool> {
@@ -268,5 +419,93 @@ impl OpenSkillRuntimeWrapper {
         runtime
             .is_tool_allowed(&skill_id, &tool)
             .map_err(|e| Error::from_reason(e.to_string()))
+    }
+
+    /// Check if a tool call is permitted for a skill (ask-before-act for risky tools).
+    #[napi]
+    pub fn check_tool_permission(
+        &self,
+        skill_id: String,
+        tool: String,
+        description: Option<String>,
+    ) -> Result<bool> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .check_tool_permission(&skill_id, &tool, description, std::collections::HashMap::new())
+            .map_err(|e| Error::from_reason(e.to_string()))
+    }
+}
+
+#[napi]
+impl SkillExecutionSessionWrapper {
+    #[napi]
+    pub fn is_forked(&self) -> bool {
+        self.inner.lock().unwrap().is_forked()
+    }
+
+    #[napi]
+    pub fn context_id(&self) -> Option<String> {
+        self.inner
+            .lock()
+            .unwrap()
+            .context_id()
+            .map(|id| id.to_string())
+    }
+
+    #[napi]
+    pub fn record_tool_call(&self, tool: String, output_json: String) -> Result<()> {
+        let output: serde_json::Value = serde_json::from_str(&output_json)
+            .unwrap_or_else(|_| serde_json::json!({ "output": output_json }));
+        self.inner.lock().unwrap().record_tool_call(&tool, &output);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn record_result(&self, output_json: String) -> Result<()> {
+        let output: serde_json::Value = serde_json::from_str(&output_json)
+            .unwrap_or_else(|_| serde_json::json!({ "output": output_json }));
+        self.inner.lock().unwrap().record_result(&output);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn record_stdout(&self, stdout: String) {
+        self.inner.lock().unwrap().record_stdout_if_present(&stdout);
+    }
+
+    #[napi]
+    pub fn record_stderr(&self, stderr: String) {
+        self.inner.lock().unwrap().record_stderr_if_present(&stderr);
+    }
+
+    #[napi]
+    pub fn summarize(&self) -> String {
+        self.inner.lock().unwrap().summarize_fork()
+    }
+}
+
+fn parse_output_type(value: &str) -> Result<OutputType> {
+    match value.to_ascii_lowercase().as_str() {
+        "stdout" => Ok(OutputType::Stdout),
+        "stderr" => Ok(OutputType::Stderr),
+        "toolcall" | "tool_call" | "tool" => Ok(OutputType::ToolCall),
+        "result" => Ok(OutputType::Result),
+        _ => Err(Error::from_reason(format!(
+            "Invalid output_type: {}",
+            value
+        ))),
+    }
+}
+
+fn parse_execution_status(status: Option<String>) -> openskills_runtime::RuntimeExecutionStatus {
+    match status.as_deref() {
+        Some("timeout") => openskills_runtime::RuntimeExecutionStatus::Timeout,
+        Some("permission_denied") => openskills_runtime::RuntimeExecutionStatus::PermissionDenied,
+        Some(s) if s.starts_with("failed:") => {
+            openskills_runtime::RuntimeExecutionStatus::Failed(
+                s.trim_start_matches("failed:").to_string(),
+            )
+        }
+        _ => openskills_runtime::RuntimeExecutionStatus::Success,
     }
 }

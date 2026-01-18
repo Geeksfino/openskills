@@ -59,7 +59,25 @@ mod macos {
         "/Library",
         "/etc",
         "/private/etc",
+        "/var/db",
+        "/private/var/db",
+        "/var",
+        "/private/var",
+        "/Users",
         "/dev",
+    ];
+
+    // Common Python interpreter locations on macOS.
+    // We allow these explicitly to avoid sandbox failures for popular installs.
+    const PYTHON_EXEC_PATHS: &[&str] = &[
+        "/usr/bin/python",
+        "/usr/bin/python3",
+        "/usr/local/bin/python",
+        "/usr/local/bin/python3",
+        "/opt/homebrew/bin/python",
+        "/opt/homebrew/bin/python3",
+        "/Library/Frameworks/Python.framework/Versions/Current/bin/python",
+        "/Library/Frameworks/Python.framework/Versions/Current/bin/python3",
     ];
 
     const TEMP_PATHS: &[&str] = &[
@@ -87,7 +105,7 @@ mod macos {
 
         let input_json = serde_json::to_string(&input)?;
         let allow_network = allowed_tools.iter().any(|t| t == "WebSearch" || t == "Fetch");
-        let allow_process = script_type == ScriptType::Shell
+        let allow_process = matches!(script_type, ScriptType::Shell | ScriptType::Python)
             || allowed_tools
                 .iter()
                 .any(|t| t == "Bash" || t == "Terminal");
@@ -252,10 +270,14 @@ mod macos {
     ) -> Result<(String, Vec<String>, Option<PathBuf>), OpenSkillError> {
         match script_type {
             ScriptType::Python => {
-                let program = "python3".to_string();
-                let resolved = resolve_executable(&program).ok_or_else(|| {
-                    OpenSkillError::NativeExecutionError("python3 not found".to_string())
-                })?;
+                let resolved = PYTHON_EXEC_PATHS
+                    .iter()
+                    .map(PathBuf::from)
+                    .find(|candidate| candidate.exists())
+                    .or_else(|| resolve_executable("python3"))
+                    .ok_or_else(|| {
+                        OpenSkillError::NativeExecutionError("python3 not found".to_string())
+                    })?;
                 Ok((
                     resolved.to_string_lossy().to_string(),
                     vec![script_path.to_string_lossy().to_string()],
@@ -318,63 +340,94 @@ mod macos {
         }
     }
 
+    // Sensitive paths that should never be readable even with broad file-read access.
+    // Following Claude Code's approach: allow broad reads, deny specific sensitive paths.
+    const SENSITIVE_DENY_PATHS: &[&str] = &[
+        "~/.ssh",
+        "~/.gnupg",
+        "~/.aws",
+        "~/.azure",
+        "~/.config/gcloud",
+        "~/.kube",
+        "~/.docker",
+        "~/.npmrc",
+        "~/.pypirc",
+        "~/.netrc",
+        "~/.gitconfig",
+        "~/.git-credentials",
+        "~/.bashrc",
+        "~/.zshrc",
+        "~/.profile",
+        "~/.bash_profile",
+        "~/.zprofile",
+    ];
+
     fn build_seatbelt_profile(
         skill_root: &Path,
         read_paths: &[PathBuf],
         write_paths: &[PathBuf],
         allow_network: bool,
         allow_process: bool,
-        exec_path: Option<&Path>,
-        exec_parent_path: Option<&Path>,
+        _exec_path: Option<&Path>,
+        _exec_parent_path: Option<&Path>,
     ) -> String {
         let mut profile = String::new();
+        
+        // Following Claude Code's model:
+        // 1. Start with deny default
+        // 2. Allow broad file reads (Python and other interpreters need this)
+        // 3. Deny specific sensitive paths
+        // 4. Allow writes only to specific paths
         profile.push_str("(version 1)\n(deny default)\n");
 
+        // Core permissions needed for any process
         profile.push_str("(allow sysctl-read)\n");
+        profile.push_str("(allow process-exec)\n");
+        profile.push_str("(allow process-fork)\n");
+        profile.push_str("(allow mach-lookup)\n");
+        profile.push_str("(allow signal)\n");
 
-        if allow_process {
-            profile.push_str("(allow process*)\n");
-        }
+        // Allow broad file reads - this is essential for Python and other interpreters
+        // to access their libraries, modules, and system resources.
+        // Claude Code uses this approach: allow reads broadly, deny writes specifically.
+        profile.push_str("(allow file-read*)\n");
 
-        for system_path in SYSTEM_READ_PATHS {
+        // Deny sensitive credential and config paths
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string());
+        for sensitive_path in SENSITIVE_DENY_PATHS {
+            let expanded = sensitive_path.replace('~', &home);
             profile.push_str(&format!(
-                "(allow file-read* file-map-executable (subpath \"{}\"))\n",
-                escape_path(system_path)
+                "(deny file-read* (subpath \"{}\"))\n",
+                escape_path(&expanded)
             ));
         }
 
-        // Grant file-map-executable to the parent directory for non-system executables
-        // This ensures the sandbox can traverse and access executables in custom paths
-        if let Some(exec_parent_path) = exec_parent_path {
-            profile.push_str(&format!(
-                "(allow file-read* file-map-executable (subpath \"{}\"))\n",
-                escape_path(exec_parent_path.to_string_lossy().as_ref())
-            ));
-        }
+        // Allow /dev/null writes (needed for output redirection)
+        profile.push_str("(allow file-write* (literal \"/dev/null\"))\n");
 
-        if let Some(exec_path) = exec_path {
-            profile.push_str(&format!(
-                "(allow file-read* file-map-executable (subpath \"{}\"))\n",
-                escape_path(exec_path.to_string_lossy().as_ref())
-            ));
-        }
-
+        // Allow writes to temp directories
         for temp_path in TEMP_PATHS {
-            profile.push_str(&format!(
-                "(allow file-read* (subpath \"{}\"))\n",
-                escape_path(temp_path)
-            ));
             profile.push_str(&format!(
                 "(allow file-write* (subpath \"{}\"))\n",
                 escape_path(temp_path)
             ));
         }
 
+        // Allow writes to skill root directory
         profile.push_str(&format!(
-            "(allow file-read* (subpath \"{}\"))\n",
+            "(allow file-write* (subpath \"{}\"))\n",
             escape_path(skill_root.to_string_lossy().as_ref())
         ));
 
+        // Allow writes to explicitly configured paths
+        for path in write_paths {
+            profile.push_str(&format!(
+                "(allow file-write* (subpath \"{}\"))\n",
+                escape_path(path.to_string_lossy().as_ref())
+            ));
+        }
+
+        // Additional read paths (already covered by allow file-read*, but explicit for clarity)
         for path in read_paths {
             profile.push_str(&format!(
                 "(allow file-read* (subpath \"{}\"))\n",
@@ -382,17 +435,12 @@ mod macos {
             ));
         }
 
-        for path in write_paths {
-            profile.push_str(&format!(
-                "(allow file-read* (subpath \"{}\"))\n",
-                escape_path(path.to_string_lossy().as_ref())
-            ));
-            profile.push_str(&format!(
-                "(allow file-write* (subpath \"{}\"))\n",
-                escape_path(path.to_string_lossy().as_ref())
-            ));
+        // Process permissions if shell/terminal tools are allowed
+        if allow_process {
+            profile.push_str("(allow process*)\n");
         }
 
+        // Network access only if explicitly allowed
         if allow_network {
             profile.push_str("(allow network*)\n");
         }

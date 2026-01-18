@@ -44,6 +44,25 @@ export interface ExecutionResult {
   stderr: string
   audit: AuditRecord
 }
+export declare class SkillExecutionSessionWrapper {
+  isForked(): boolean
+  contextId(): string | null
+  recordToolCall(tool: string, outputJson: string): void
+  recordResult(outputJson: string): void
+  recordStdout(stdout: string): void
+  recordStderr(stderr: string): void
+  summarize(): string
+}
+export declare class ExecutionContextWrapper {
+  constructor()
+  fork(): ExecutionContextWrapper
+  id(): string
+  isForked(): boolean
+  parentId(): string | null
+  summary(): string | null
+  recordOutput(outputType: string, content: string): void
+  summarize(): string
+}
 export declare class OpenSkillRuntimeWrapper {
   constructor()
   static withProjectRoot(projectRoot: string): OpenSkillRuntimeWrapper
@@ -60,6 +79,12 @@ export declare class OpenSkillRuntimeWrapper {
   activateSkill(skillId: string): LoadedSkillJs
   /** Execute a skill's WASM module */
   executeSkill(skillId: string, options?: ExecutionOptionsJs | undefined | null): ExecutionResult
+  /** Start an instruction-based skill session (for context: fork behavior). */
+  startSkillSession(skillId: string, inputJson?: string | undefined | null, parentContext?: ExecutionContextWrapper | undefined | null): SkillExecutionSessionWrapper
+  /** Finish a skill session and return an ExecutionResult. */
+  finishSkillSession(session: SkillExecutionSessionWrapper, outputJson: string, stdout: string, stderr: string, exitStatus?: string | undefined | null): ExecutionResult
   /** Check if a tool is allowed for a skill */
   isToolAllowed(skillId: string, tool: string): boolean
+  /** Check if a tool call is permitted for a skill (ask-before-act for risky tools). */
+  checkToolPermission(skillId: string, tool: string, description?: string | undefined | null): boolean
 }

@@ -11,7 +11,8 @@
     "openskills_ts.node"
   ],
   "scripts": {
-    "build": "napi build --platform --release"
+    "build": "napi build --platform --release",
+    "test": "node test/index.test.js"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",

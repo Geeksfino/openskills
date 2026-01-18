@@ -227,6 +227,49 @@ fork.record_output(OutputType::Stdout, "intermediate output".to_string());
 let summary = fork.summarize();
 ```
 
+#### Instruction-Only Skills with `context: fork`
+
+When a skill is primarily instructional (no WASM/native script), the agent must
+execute tool calls and record their outputs in a forked context. Use a skill
+session to capture tool calls and return summary-only results:
+
+```rust
+use openskills_runtime::{OpenSkillRuntime, ExecutionContext};
+
+let mut runtime = OpenSkillRuntime::new();
+let parent = ExecutionContext::new();
+
+// Start a skill session (forked if skill specifies context: fork)
+let mut session = runtime.start_skill_session(
+    "code-review",
+    Some(serde_json::json!({ "query": "Review this file" })),
+    Some(&parent),
+)?;
+
+// Agent executes tools and records outputs in the session
+runtime.check_tool_permission(
+    "code-review",
+    "Read",
+    None,
+    std::collections::HashMap::new(),
+)?;
+session.record_tool_call("Read", &serde_json::json!({ "path": "src/lib.rs" }));
+
+// Agent produces final result
+let final_output = serde_json::json!({ "review": "Looks good." });
+
+// Finish session (returns summary if forked)
+let result = runtime.finish_skill_session(
+    session,
+    final_output,
+    String::new(),
+    String::new(),
+    openskills_runtime::ExecutionStatus::Success,
+)?;
+
+println!("Summary: {}", result.output["summary"]);
+```
+
 ### Permissions
 
 Permissions are enforced based on the skill's `allowed-tools` configuration:

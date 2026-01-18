@@ -34,6 +34,7 @@ mod context;
 mod errors;
 mod executor;
 mod manifest;
+mod skill_session;
 mod native_runner;
 mod permission_callback;
 mod permissions;
@@ -60,6 +61,7 @@ pub use build::{build_skill, BuildConfig};
 pub use errors::OpenSkillError as RuntimeError;
 pub use manifest::{constraints, HooksConfig, SkillManifest, WasmConfig};
 pub use context::{ContextOutput, ExecutionContext, OutputType};
+pub use skill_session::SkillExecutionSession;
 pub use permission_callback::{
     CliPermissionCallback, DenyAllCallback, PermissionAuditEntry, PermissionCallback,
     PermissionRequest, PermissionResponse, RiskLevel, get_risk_level, is_risky_tool,
@@ -433,6 +435,141 @@ impl OpenSkillRuntime {
         validate_skill(skill)?;
 
         Ok(LoadedSkill::from(skill))
+    }
+
+    /// Start a skill execution session for instruction-based workflows.
+    ///
+    /// This is primarily used when the agent will handle tool calls directly
+    /// and needs to respect `context: fork` semantics. If the skill is forked,
+    /// the returned session includes an isolated context for recording tool
+    /// calls, intermediate outputs, and results.
+    pub fn start_skill_session(
+        &mut self,
+        skill_id: &str,
+        input: Option<Value>,
+        parent_context: Option<&ExecutionContext>,
+    ) -> Result<SkillExecutionSession, OpenSkillError> {
+        if self.registry.is_empty() {
+            self.discover_skills()?;
+        }
+
+        let skill = self
+            .registry
+            .get(skill_id)
+            .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
+
+        validate_skill(skill)?;
+
+        let is_forked = skill.manifest.is_forked();
+        let context = if is_forked {
+            let base_context = parent_context.cloned().unwrap_or_else(ExecutionContext::new);
+            Some(base_context.fork())
+        } else {
+            None
+        };
+
+        Ok(SkillExecutionSession::new(
+            LoadedSkill::from(skill),
+            is_forked,
+            input.unwrap_or(Value::Null),
+            context,
+        ))
+    }
+
+    /// Finish a skill execution session and return an ExecutionResult.
+    ///
+    /// If the session is forked, only the summary is returned to the caller and
+    /// intermediate outputs remain isolated in the forked context.
+    pub fn finish_skill_session(
+        &mut self,
+        mut session: SkillExecutionSession,
+        output: Value,
+        stdout: String,
+        stderr: String,
+        exit_status: audit::ExecutionStatus,
+    ) -> Result<ExecutionResult, OpenSkillError> {
+        let duration_ms = session.elapsed_ms();
+
+        // Capture outputs in forked context if applicable
+        if session.is_forked() {
+            session.record_stdout_if_present(&stdout);
+            session.record_stderr_if_present(&stderr);
+            session.record_result(&output);
+        }
+
+        let audit = AuditRecord {
+            skill_id: session.skill().id.clone(),
+            version: "1.0".to_string(),
+            input_hash: audit::hash_json(session.input()),
+            output_hash: audit::hash_json(&output),
+            start_time_ms: session.start_epoch_ms(),
+            duration_ms,
+            permissions_used: session.permissions_used().to_vec(),
+            exit_status,
+            stdout: stdout.clone(),
+            stderr: stderr.clone(),
+        };
+
+        self.audit_sink.record(&audit);
+
+        if session.is_forked() {
+            let summary = session.summarize_fork();
+            Ok(ExecutionResult {
+                output: serde_json::json!({
+                    "summary": summary,
+                    "context_id": session.context_id().unwrap_or(""),
+                    "is_forked": true
+                }),
+                stdout: summary.clone(),
+                stderr: String::new(),
+                audit,
+            })
+        } else {
+            Ok(ExecutionResult {
+                output,
+                stdout,
+                stderr,
+                audit,
+            })
+        }
+    }
+
+    /// Check permission for a tool call for a given skill.
+    ///
+    /// This is intended for agent-managed tool execution. It enforces allowed-tools
+    /// and triggers ask-before-act for risky tools.
+    pub fn check_tool_permission(
+        &self,
+        skill_id: &str,
+        tool: &str,
+        description: Option<String>,
+        context: std::collections::HashMap<String, String>,
+    ) -> Result<bool, OpenSkillError> {
+        let skill = self
+            .registry
+            .get(skill_id)
+            .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
+
+        let allowed = skill.manifest.get_allowed_tools();
+        if !allowed.is_empty() && !allowed.iter().any(|t| t == tool) {
+            return Err(OpenSkillError::PermissionDenied(format!(
+                "Tool {} is not allowed for skill {}",
+                tool, skill_id
+            )));
+        }
+
+        if is_risky_tool(tool) {
+            let description = description.unwrap_or_else(|| format!("Execute {} operations", tool));
+            return self.permission_manager.check_permission(
+                skill_id,
+                tool,
+                description,
+                get_risk_level(tool),
+                context,
+            );
+        }
+
+        Ok(true)
     }
 
     /// Execute a skill's WASM module in sandbox.
