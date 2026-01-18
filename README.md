@@ -1,4 +1,4 @@
-# OpenSkills
+# OpenSkills - Give Your Agents Skills
 
 [English](README.md) | [中文](README.zh.md)
 
@@ -239,7 +239,7 @@ This dual approach means you get:
 | **Build Required** | No | Yes (TS/JS → WASM) |
 | **Native Python** | ✅ Supported | ✅ macOS (seatbelt) |
 | **Shell Scripts** | ✅ Supported | ✅ macOS (seatbelt) |
-| **Agent Framework** | Claude Desktop only | **Any framework** ⭐ |
+| **Agent Framework** | Claude Desktop & Claude Agent SDK | **Any framework** ⭐ |
 | **Use Case** | Desktop users, arbitrary skills | Enterprise agents, any agent framework |
 
 ## Project Structure
