@@ -37,7 +37,7 @@ console.log(loaded.instructions);
 
 // Execute WASM module
 const result = runtime.executeSkill('my-skill', {
-  timeout_ms: 5000,
+  timeoutMs: 5000,
   input: JSON.stringify({ query: 'hello' })
 });
 

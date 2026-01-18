@@ -43,7 +43,7 @@ async function testExecuteSkillPlaceholderError() {
   try {
     runtime.executeSkill("example-skill", {
       input: JSON.stringify({ query: "hello" }),
-      timeout_ms: 5000
+      timeoutMs: 5000
     });
     assert.fail("Should have thrown an error");
   } catch (err) {
