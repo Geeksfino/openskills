@@ -49,12 +49,6 @@ Welcome to the OpenSkills documentation. This directory contains comprehensive d
   - Permission model comparison
   - Token optimization comparison
 
-- **[Enhancement Proposals](enhancement-proposals.md)**: Concrete implementation proposals
-  - System prompt metadata injection
-  - Ask-before-act permission system
-  - Context fork mechanism
-  - Validation CLI tooling
-
 ## Quick Links
 
 - **Getting Started**: See [Developer Guide - Quick Start](developers.md#quick-start)

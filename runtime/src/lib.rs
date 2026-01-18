@@ -28,9 +28,11 @@
 //! ```
 
 mod audit;
+mod context;
 mod errors;
 mod executor;
 mod manifest;
+mod permission_callback;
 mod permissions;
 mod registry;
 mod skill_parser;
@@ -43,14 +45,21 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use audit::{AuditRecord, AuditSink, NoopAuditSink};
 use errors::OpenSkillError;
 use executor::{execute_skill, ExecutionOptions as ExecOpts};
+use permission_callback::PermissionManager;
 use registry::{Skill, SkillRegistry};
 use serde_json::Value;
+use std::sync::Arc;
 use validator::validate_skill;
 
 // Re-exports for public API
 pub use audit::{AuditRecord as RuntimeAuditRecord, ExecutionStatus as RuntimeExecutionStatus};
 pub use errors::OpenSkillError as RuntimeError;
 pub use manifest::{constraints, HooksConfig, SkillManifest, WasmConfig};
+pub use context::{ContextOutput, ExecutionContext, OutputType};
+pub use permission_callback::{
+    CliPermissionCallback, DenyAllCallback, PermissionAuditEntry, PermissionCallback,
+    PermissionRequest, PermissionResponse, RiskLevel, get_risk_level, is_risky_tool,
+};
 pub use skill_parser::parse_skill_md;
 pub use registry::{SkillDescriptor, SkillLocation};
 pub use validator::{analyze_skill_tokens, validate_skill_path, TokenAnalysis, ValidationResult, ValidationStats};
@@ -118,6 +127,7 @@ impl From<&Skill> for LoadedSkill {
 pub struct OpenSkillRuntime {
     registry: SkillRegistry,
     audit_sink: Box<dyn AuditSink + Send + Sync>,
+    permission_manager: PermissionManager,
     custom_directories: Vec<PathBuf>,
     use_standard_locations: bool,
 }
@@ -133,6 +143,7 @@ impl OpenSkillRuntime {
         Self {
             registry: SkillRegistry::new(),
             audit_sink: Box::new(NoopAuditSink {}),
+            permission_manager: PermissionManager::new(),
             custom_directories: Vec::new(),
             use_standard_locations: true,
         }
@@ -147,6 +158,7 @@ impl OpenSkillRuntime {
         Self {
             registry,
             audit_sink: Box::new(NoopAuditSink {}),
+            permission_manager: PermissionManager::new(),
             custom_directories: config.custom_directories,
             use_standard_locations: config.use_standard_locations,
         }
@@ -157,6 +169,7 @@ impl OpenSkillRuntime {
         Self {
             registry: SkillRegistry::new().with_project_root(root),
             audit_sink: Box::new(NoopAuditSink {}),
+            permission_manager: PermissionManager::new(),
             custom_directories: Vec::new(),
             use_standard_locations: true,
         }
@@ -169,6 +182,7 @@ impl OpenSkillRuntime {
         Self {
             registry,
             audit_sink: Box::new(NoopAuditSink {}),
+            permission_manager: PermissionManager::new(),
             custom_directories: Vec::new(),
             use_standard_locations: false,
         }
@@ -208,6 +222,64 @@ impl OpenSkillRuntime {
     pub fn with_audit_sink(mut self, sink: Box<dyn AuditSink + Send + Sync>) -> Self {
         self.audit_sink = sink;
         self
+    }
+
+    /// Enable interactive permission system with a callback.
+    ///
+    /// The callback will be invoked when skills attempt to use risky tools
+    /// (Write, Bash, WebSearch, etc.) to request user approval.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use openskills_runtime::{OpenSkillRuntime, CliPermissionCallback};
+    /// use std::sync::Arc;
+    ///
+    /// let runtime = OpenSkillRuntime::new()
+    ///     .with_permission_callback(Arc::new(CliPermissionCallback));
+    /// ```
+    pub fn with_permission_callback(mut self, callback: Arc<dyn PermissionCallback>) -> Self {
+        self.permission_manager = PermissionManager::with_callback(callback);
+        self
+    }
+
+    /// Enable strict permissions mode (all risky operations denied by default).
+    ///
+    /// This is useful for testing or high-security environments.
+    pub fn with_strict_permissions(mut self) -> Self {
+        use permission_callback::DenyAllCallback;
+        self.permission_manager = PermissionManager::with_callback(Arc::new(DenyAllCallback));
+        self
+    }
+
+    /// Get permission audit log.
+    ///
+    /// Returns a list of all permission requests and their outcomes.
+    pub fn get_permission_audit(&self) -> Vec<PermissionAuditEntry> {
+        self.permission_manager.get_audit_log()
+    }
+
+    /// Reset all "allow always" permission grants.
+    ///
+    /// This clears all permanent permission grants that were previously
+    /// approved with "allow always". Useful for:
+    /// - Security: Revoke all permanent grants when security policy changes
+    /// - Testing: Reset grants between test cases
+    /// - Runtime: Clear grants when switching to a different security context
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// // User previously granted "allow always" for Write operations
+    /// runtime.execute_skill("my-skill", options)?;
+    ///
+    /// // Later, revoke all permanent grants
+    /// runtime.reset_permission_grants();
+    ///
+    /// // Next Write operation will require permission again
+    /// ```
+    pub fn reset_permission_grants(&self) {
+        self.permission_manager.reset_grants();
     }
 
     /// Discover and load skills from configured locations.
@@ -355,10 +427,51 @@ impl OpenSkillRuntime {
     ///
     /// Note: Most Claude Skills are instructional (Claude follows the instructions).
     /// WASM execution is for skills that include sandboxed script execution.
+    ///
+    /// If a permission callback is configured, risky operations (Write, Bash, etc.)
+    /// will require user approval before execution.
+    ///
+    /// If the skill has `context: fork`, execution happens in an isolated context
+    /// and only a summary is returned. Use `execute_skill_with_context` for explicit
+    /// context management.
     pub fn execute_skill(
         &mut self,
         skill_id: &str,
         options: ExecutionOptions,
+    ) -> Result<ExecutionResult, OpenSkillError> {
+        use context::ExecutionContext;
+        let main_context = ExecutionContext::new();
+        self.execute_skill_with_context(skill_id, options, &main_context)
+    }
+
+    /// Execute a skill with explicit context management.
+    ///
+    /// If the skill has `context: fork`, execution happens in an isolated
+    /// forked context where intermediate outputs are captured separately.
+    /// Only the summary is returned to the parent context, preventing context pollution.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use openskills_runtime::{OpenSkillRuntime, ExecutionContext, ExecutionOptions};
+    ///
+    /// let mut runtime = OpenSkillRuntime::new();
+    /// let main_context = ExecutionContext::new();
+    ///
+    /// // Execute skill that forks context
+    /// let result = runtime.execute_skill_with_context(
+    ///     "my-skill",
+    ///     ExecutionOptions::default(),
+    ///     &main_context
+    /// )?;
+    ///
+    /// // For forked skills, result.output contains only the summary
+    /// ```
+    pub fn execute_skill_with_context(
+        &mut self,
+        skill_id: &str,
+        options: ExecutionOptions,
+        parent_context: &ExecutionContext,
     ) -> Result<ExecutionResult, OpenSkillError> {
         // Ensure registry is loaded
         if self.registry.is_empty() {
@@ -372,6 +485,38 @@ impl OpenSkillRuntime {
             .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
 
         validate_skill(skill)?;
+
+        // Check if skill should run in forked context
+        let is_forked = skill.manifest.is_forked();
+        let mut fork_context = if is_forked {
+            Some(parent_context.fork())
+        } else {
+            None
+        };
+
+        // Check permissions for risky tools before execution
+        let allowed_tools = skill.manifest.get_allowed_tools();
+        use permission_callback::{get_risk_level, is_risky_tool};
+        use std::collections::HashMap;
+
+        for tool in &allowed_tools {
+            if is_risky_tool(tool) {
+                let granted = self.permission_manager.check_permission(
+                    skill_id,
+                    tool,
+                    format!("Execute {} operations", tool),
+                    get_risk_level(tool),
+                    HashMap::new(),
+                )?;
+
+                if !granted {
+                    return Err(OpenSkillError::PermissionDenied(format!(
+                        "User denied {} permission for skill {}",
+                        tool, skill_id
+                    )));
+                }
+            }
+        }
 
         let start = Instant::now();
         let start_epoch = SystemTime::now()
@@ -389,6 +534,27 @@ impl OpenSkillRuntime {
         let execution = execute_skill(skill, exec_options)?;
         let duration_ms = start.elapsed().as_millis() as u64;
 
+        // Capture outputs in forked context if applicable
+        if let Some(ref mut fork) = fork_context {
+            use context::OutputType;
+            // Record stdout, stderr, and result in the forked context
+            if !execution.stdout.is_empty() {
+                fork.record_output(OutputType::Stdout, execution.stdout.clone());
+            }
+            if !execution.stderr.is_empty() {
+                fork.record_output(OutputType::Stderr, execution.stderr.clone());
+            }
+            // Record the final result
+            if let Some(result_str) = execution.output.as_str() {
+                fork.record_output(OutputType::Result, result_str.to_string());
+            } else {
+                // Serialize JSON output to string
+                let result_str = serde_json::to_string(&execution.output)
+                    .unwrap_or_else(|_| "{}".to_string());
+                fork.record_output(OutputType::Result, result_str);
+            }
+        }
+
         let audit = AuditRecord {
             skill_id: skill.id.clone(),
             version: "1.0".to_string(), // Claude Skills don't have version in manifest
@@ -404,12 +570,29 @@ impl OpenSkillRuntime {
 
         self.audit_sink.record(&audit);
 
-        Ok(ExecutionResult {
-            output: execution.output,
-            stdout: execution.stdout,
-            stderr: execution.stderr,
-            audit,
-        })
+        // For forked contexts, return only the summary
+        if let Some(mut fork) = fork_context {
+            let summary = fork.summarize();
+            
+            Ok(ExecutionResult {
+                output: serde_json::json!({
+                    "summary": summary,
+                    "context_id": fork.id(),
+                    "is_forked": true
+                }),
+                stdout: summary.clone(),
+                stderr: String::new(), // Stderr is captured in fork, not returned
+                audit,
+            })
+        } else {
+            // Normal execution - return full outputs
+            Ok(ExecutionResult {
+                output: execution.output,
+                stdout: execution.stdout,
+                stderr: execution.stderr,
+                audit,
+            })
+        }
     }
 
     /// Check if a tool is allowed for a skill.
