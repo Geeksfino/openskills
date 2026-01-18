@@ -1,5 +1,7 @@
 # OpenSkills
 
+[English](README.md) | [中文](README.zh.md)
+
 A **Claude Skills compatible runtime** with **dual sandboxing**: WASM-based sandboxing for cross-platform security, plus **macOS seatbelt** for native Python and shell scripts. OpenSkills implements the [Claude Code Agent Skills specification](https://code.claude.com/docs/en/skills), providing a secure, flexible runtime for executing skills in **any agent framework**.
 
 ## Philosophy
