@@ -122,9 +122,24 @@ mod macos {
         let exec_path = program_path.as_ref().and_then(|p| {
             p.canonicalize().ok().or_else(|| Some(p.clone()))
         });
+        // Also ensure the parent directory is accessible for traversal
+        // This is needed even if the executable path itself is granted permission
+        let mut read_paths_with_parent = read_paths.clone();
+        if let Some(path) = exec_path.as_ref().and_then(|p| p.parent()) {
+            let canonicalized_parent = path
+                .canonicalize()
+                .unwrap_or_else(|_| path.to_path_buf());
+            // Only add if not already covered by SYSTEM_READ_PATHS
+            let is_system_path = SYSTEM_READ_PATHS.iter().any(|&sys_path| {
+                canonicalized_parent.starts_with(sys_path)
+            });
+            if !is_system_path {
+                read_paths_with_parent.push(canonicalized_parent);
+            }
+        }
         let profile = build_seatbelt_profile(
             &skill_root,
-            &read_paths,
+            &read_paths_with_parent,
             &write_paths,
             allow_network,
             allow_process,
