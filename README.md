@@ -33,13 +33,29 @@ pip install openskills
 use openskills_runtime::{OpenSkillRuntime, ExecutionOptions};
 use serde_json::json;
 
-let mut runtime = OpenSkillRuntime::new("./skills");
-runtime.load_skills()?;
+// Option 1: Standard locations (~/.claude/skills/, .claude/skills/, nested)
+let mut runtime = OpenSkillRuntime::new();
+runtime.discover_skills()?;
 
+// Option 2: Custom directories only
+let mut runtime = OpenSkillRuntime::new()
+    .with_custom_directories(vec!["/agent/skills", "/shared/skills"])
+    .with_standard_locations(false);
+runtime.discover_skills()?;
+
+// Option 3: Combine standard + custom directories
+let mut runtime = OpenSkillRuntime::new()
+    .with_custom_directory("/agent/skills");
+runtime.discover_skills()?;
+
+// Execute a skill
 let result = runtime.execute_skill(
     "my-skill",
-    json!({"input": "data"}),
-    ExecutionOptions { timeout_ms: Some(5000) }
+    ExecutionOptions {
+        timeout_ms: Some(5000),
+        input: Some(json!({"input": "data"})),
+        ..Default::default()
+    }
 )?;
 ```
 

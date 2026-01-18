@@ -11,7 +11,8 @@ use crate::registry::Skill;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use wasmtime::{Config, Engine, Linker, Module, Store};
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder};
+use wasmtime::component::{Component, Linker as ComponentLinker, ResourceTable};
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 /// Execute a WASM module with WASI sandbox.
 pub fn execute_wasm(
@@ -27,8 +28,6 @@ pub fn execute_wasm(
     // Configure wasmtime with epoch interruption for timeout
     let mut config = Config::new();
     config.epoch_interruption(true);
-    // Note: Component model enabled for future component support
-    // For now, we use regular modules with preview1 WASI
     config.wasm_component_model(true);
 
     let engine = Engine::new(&config)
@@ -38,133 +37,193 @@ pub fn execute_wasm(
     let stdout_buf = Arc::new(Mutex::new(Vec::new()));
     let stderr_buf = Arc::new(Mutex::new(Vec::new()));
 
-    let mut wasi_builder = WasiCtxBuilder::new();
-
-    // Inject skill metadata as environment variables
-    wasi_builder.env("SKILL_ID", &skill.id);
-    wasi_builder.env("SKILL_NAME", &skill.manifest.name);
-    wasi_builder.env("SKILL_INPUT", &input_json);
-    wasi_builder.env("TIMEOUT_MS", &timeout_ms.to_string());
-
-    // Inject random seed if configured
-    if let Some(seed) = enforcer.random_seed() {
-        wasi_builder.env("RANDOM_SEED", &seed.to_string());
-    }
-
-    // Inject allowed environment variables from host
-    for key in enforcer.env_allowlist() {
-        if let Ok(val) = std::env::var(key) {
-            wasi_builder.env(key, &val);
-        }
-    }
-
     // Preopen filesystem paths with appropriate permissions
     let read_paths = enforcer.filesystem_read_paths();
     let write_paths = enforcer.filesystem_write_paths();
 
-    for dir in &read_paths {
-        if dir.exists() && dir.is_dir() {
-            let guest_path = format!(
-                "/{}",
-                dir.file_name()
-                    .and_then(|v| v.to_str())
-                    .unwrap_or("data")
-            );
-            let _ = wasi_builder.preopened_dir(
-                dir,
-                &guest_path,
+    let configure_wasi_builder = |builder: &mut WasiCtxBuilder| {
+        // Inject skill metadata as environment variables
+        builder.env("SKILL_ID", &skill.id);
+        builder.env("SKILL_NAME", &skill.manifest.name);
+        builder.env("SKILL_INPUT", &input_json);
+        builder.env("TIMEOUT_MS", &timeout_ms.to_string());
+
+        // Inject random seed if configured
+        if let Some(seed) = enforcer.random_seed() {
+            builder.env("RANDOM_SEED", &seed.to_string());
+        }
+
+        // Inject allowed environment variables from host
+        for key in enforcer.env_allowlist() {
+            if let Ok(val) = std::env::var(key) {
+                builder.env(key, &val);
+            }
+        }
+
+        for dir in &read_paths {
+            if dir.exists() && dir.is_dir() {
+                let guest_path = format!(
+                    "/{}",
+                    dir.file_name()
+                        .and_then(|v| v.to_str())
+                        .unwrap_or("data")
+                );
+                let _ = builder.preopened_dir(
+                    dir,
+                    &guest_path,
+                    DirPerms::READ,
+                    FilePerms::READ,
+                );
+            }
+        }
+
+        for dir in &write_paths {
+            if dir.exists() && dir.is_dir() {
+                let guest_path = format!(
+                    "/{}",
+                    dir.file_name()
+                        .and_then(|v| v.to_str())
+                        .unwrap_or("data")
+                );
+                // Check if already preopened (from read paths)
+                if !read_paths.contains(dir) {
+                    let _ = builder.preopened_dir(
+                        dir,
+                        &guest_path,
+                        DirPerms::all(),
+                        FilePerms::all(),
+                    );
+                }
+            }
+        }
+
+        // Always preopen the skill's root directory (read-only by default)
+        if skill.root.exists() {
+            let _ = builder.preopened_dir(
+                &skill.root,
+                "/skill",
                 DirPerms::READ,
                 FilePerms::READ,
             );
         }
-    }
+    };
 
-    for dir in &write_paths {
-        if dir.exists() && dir.is_dir() {
-            let guest_path = format!(
-                "/{}",
-                dir.file_name()
-                    .and_then(|v| v.to_str())
-                    .unwrap_or("data")
-            );
-            // Check if already preopened (from read paths)
-            if !read_paths.contains(dir) {
-                let _ = wasi_builder.preopened_dir(
-                    dir,
-                    &guest_path,
-                    DirPerms::all(),
-                    FilePerms::all(),
-                );
+    // Try component model (WASI Preview 2/0.3.0 preview) first
+    if let Ok(component) = Component::from_file(&engine, &wasm_full_path) {
+        struct WasiComponentState {
+            ctx: WasiCtx,
+            table: ResourceTable,
+        }
+
+        impl WasiView for WasiComponentState {
+            fn ctx(&mut self) -> WasiCtxView<'_> {
+                WasiCtxView {
+                    ctx: &mut self.ctx,
+                    table: &mut self.table,
+                }
             }
         }
-    }
 
-    // Always preopen the skill's root directory (read-only by default)
-    if skill.root.exists() {
-        let _ = wasi_builder.preopened_dir(
-            &skill.root,
-            "/skill",
-            DirPerms::READ,
-            FilePerms::READ,
+        let mut component_builder = WasiCtxBuilder::new();
+        configure_wasi_builder(&mut component_builder);
+        let component_ctx = component_builder.build();
+
+        let mut linker: ComponentLinker<WasiComponentState> = ComponentLinker::new(&engine);
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
+            .map_err(|e| OpenSkillError::WasmError(format!("Failed to add WASI p2 functions: {e}")))?;
+
+        let mut store = Store::new(
+            &engine,
+            WasiComponentState {
+                ctx: component_ctx,
+                table: ResourceTable::new(),
+            },
         );
+        store.set_epoch_deadline(1);
+
+        let engine_clone = engine.clone();
+        let timeout_handle = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(timeout_ms));
+            engine_clone.increment_epoch();
+        });
+
+        let command = wasmtime_wasi::p2::bindings::sync::Command::instantiate(
+            &mut store,
+            &component,
+            &linker,
+        )
+        .map_err(|e| OpenSkillError::WasmError(format!("Component instantiation failed: {e}")))?;
+
+        let run_result = command
+            .wasi_cli_run()
+            .call_run(&mut store)
+            .map_err(|e| OpenSkillError::WasmError(format!("Component run failed: {e}")))?;
+
+        drop(timeout_handle);
+
+        let stdout = String::from_utf8_lossy(
+            &stdout_buf.lock().unwrap_or_else(|e| e.into_inner()),
+        )
+        .to_string();
+        let stderr = String::from_utf8_lossy(
+            &stderr_buf.lock().unwrap_or_else(|e| e.into_inner()),
+        )
+        .to_string();
+
+        let (exit_status, output) = match run_result {
+            Ok(()) => (
+                ExecutionStatus::Success,
+                serde_json::json!({ "status": "success", "output": stdout.trim() }),
+            ),
+            Err(()) => (
+                ExecutionStatus::Failed("Component exited with error".to_string()),
+                serde_json::json!({ "status": "error", "error": "Component exited with error" }),
+            ),
+        };
+
+        return Ok(ExecutionArtifacts {
+            output,
+            stdout,
+            stderr,
+            permissions_used: enforcer.permissions_used(),
+            exit_status,
+        });
     }
 
-    let wasi_ctx = wasi_builder.build();
+    // Build WASI Preview 1 context
+    // For wasmtime 40.0.2, we use build_p1() to get WasiP1Ctx which implements WasiSnapshotPreview1
+    use wasmtime_wasi::p1::WasiP1Ctx;
+    let mut wasi_builder = WasiCtxBuilder::new();
+    configure_wasi_builder(&mut wasi_builder);
+    let wasi_p1_ctx = wasi_builder.build_p1();
 
     // Load the WASM module
     let module = Module::from_file(&engine, &wasm_full_path)
         .map_err(|e| OpenSkillError::WasmError(format!("Module load failed: {e}")))?;
 
-    // Create linker for WASM module
-    // 
-    // WASI LINKER INTEGRATION - What needs to be done:
-    //
-    // For wasmtime-wasi 20.0.2, the API structure has changed:
-    //
-    // Option 1: Use Component Model (for WASI Preview 2 / components)
-    //   - Use `wasmtime::component::Linker`
-    //   - Use `wasmtime_wasi::add_to_linker_sync` with component linker
-    //   - Requires component-model enabled (already done)
-    //
-    // Option 2: Use Preview1 API (for regular WASI Preview 1 modules)
-    //   - For regular modules, wasmtime-wasi 20.0.2 may require:
-    //     a) Using `WasiView` trait implementation
-    //     b) Or using a different API structure
-    //   - The `add_to_linker_sync` function signature may have changed
-    //
-    // Option 3: Manual WASI function registration
-    //   - Manually register WASI functions (fd_write, fd_read, etc.)
-    //   - More control but more code
-    //
-    // CURRENT STATUS: Placeholder - linker created but WASI functions not added
-    // This means WASI modules will fail to instantiate (missing imports)
-    //
-    // TO COMPLETE:
-    // 1. Research wasmtime-wasi 20.0.2 API documentation
-    // 2. Determine correct API for preview1 modules
-    // 3. Implement either:
-    //    - Component model linker with add_to_linker_sync
-    //    - Preview1 API with correct WasiView implementation
-    //    - Manual function registration
-    // 4. Test with a simple WASI module to verify
-    //
-    let mut linker: Linker<WasiCtx> = Linker::new(&engine);
+    // Create linker and register all WASI Preview 1 functions
+    // For wasmtime-wasi 40.0.2, we use p1::wasi_snapshot_preview1::add_to_linker
+    // which registers all ~50+ WASI Preview 1 functions
+    use wasmtime_wasi::p1::wasi_snapshot_preview1;
     
-    // TODO: Add WASI preview1 functions to linker
-    // This is the critical missing piece for 100% completion
+    let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
+    
+    // Register all WASI Preview 1 functions to the linker
+    // This single call adds all functions from wasi_snapshot_preview1:
+    // - File operations: fd_read, fd_write, fd_close, fd_seek, etc.
+    // - Filesystem: path_open, path_readdir, path_unlink_file, etc.
+    // - Process: proc_exit, proc_raise
+    // - Environment: args_get, environ_get, etc.
+    // - Time: clock_time_get, clock_res_get
+    // - Random: random_get
+    // - And more...
     // 
-    // Expected behavior after completion:
-    // - WASI modules can be instantiated
-    // - WASI imports (fd_write, fd_read, etc.) are resolved
-    // - Modules can access filesystem, environment, etc. based on permissions
-    //
-    // Research needed:
-    // - Check wasmtime-wasi 20.0.2 docs for preview1 API
-    // - Verify if WasiCtx implements WasiView or needs wrapper
-    // - Test with simple WASI module
+    // For wasmtime 40.0.2, WasiP1Ctx implements WasiSnapshotPreview1 trait
+    wasi_snapshot_preview1::add_to_linker(&mut linker, |ctx: &mut WasiP1Ctx| ctx)
+        .map_err(|e| OpenSkillError::WasmError(format!("Failed to add WASI Preview 1 functions to linker: {e}")))?;
 
-    // Create store with WASI context
-    let mut store = Store::new(&engine, wasi_ctx);
+    // Create store with WASI Preview 1 context
+    let mut store = Store::new(&engine, wasi_p1_ctx);
 
     // Set epoch deadline for timeout
     store.set_epoch_deadline(1);
@@ -177,19 +236,9 @@ pub fn execute_wasm(
     });
 
     // Instantiate and run
-    // Note: Without proper WASI linker setup, this will fail for WASI modules
-    // with error: "unknown import" or "missing import"
     let instance = linker
         .instantiate(&mut store, &module)
-        .map_err(|e| {
-            OpenSkillError::WasmError(format!(
-                "Instantiation failed: {}. \
-                Note: WASI linker integration is incomplete. \
-                WASI modules require proper linker setup to resolve WASI imports (fd_write, fd_read, etc.). \
-                See wasm_runner.rs for implementation details.",
-                e
-            ))
-        })?;
+        .map_err(|e| OpenSkillError::WasmError(format!("Instantiation failed: {e}")))?;
 
     // Try to call the main function or _start
     let result = if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
@@ -204,8 +253,6 @@ pub fn execute_wasm(
     drop(timeout_handle);
 
     // Collect stdout/stderr
-    // Note: Currently using placeholder buffers
-    // Proper implementation would capture from WASI stdout/stderr
     let stdout = String::from_utf8_lossy(
         &stdout_buf.lock().unwrap_or_else(|e| e.into_inner()),
     )

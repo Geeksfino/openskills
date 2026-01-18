@@ -36,8 +36,10 @@ dirs = "5.0"
 url = "2.5"
 
 # WASM runtime
-wasmtime = { version = "20.0.2", features = ["component-model"] }
-wasmtime-wasi = "20.0.2"
+# Using latest wasmtime (40+) for WASI 0.3.0 preview support
+# WASI 0.3.0 final release expected February 2026
+wasmtime = { version = "40", features = ["component-model"] }
+wasmtime-wasi = "40"
 cap-std = "2.0"
 
 [dev-dependencies]

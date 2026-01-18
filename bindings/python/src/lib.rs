@@ -1,9 +1,11 @@
 use openskills_runtime::{
-    ExecutionOptions, LoadedSkill, OpenSkillRuntime, RuntimeExecutionStatus, SkillLocation,
+    ExecutionOptions, LoadedSkill, OpenSkillRuntime, RuntimeConfig, RuntimeExecutionStatus,
+    SkillLocation,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 #[pyclass]
@@ -34,11 +36,60 @@ impl OpenSkillRuntimeWrapper {
         }
     }
 
+    /// Create runtime with custom directories and configuration
+    #[staticmethod]
+    #[pyo3(signature = (custom_directories, *, use_standard_locations = true, project_root = None))]
+    fn with_custom_directories(
+        custom_directories: Vec<String>,
+        use_standard_locations: bool,
+        project_root: Option<String>,
+    ) -> Self {
+        let config = RuntimeConfig {
+            custom_directories: custom_directories
+                .into_iter()
+                .map(|s| PathBuf::from(s))
+                .collect(),
+            use_standard_locations,
+            project_root: project_root.map(|s| PathBuf::from(s)),
+        };
+        Self {
+            inner: Mutex::new(OpenSkillRuntime::from_config(config)),
+        }
+    }
+
     /// Discover skills from standard locations (~/.claude/skills/, .claude/skills/, nested)
     fn discover_skills(&self, py: Python) -> PyResult<PyObject> {
         let mut runtime = self.inner.lock().unwrap();
         let skills = runtime
             .discover_skills()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        let list = PyList::empty(py);
+        for s in skills {
+            let item = PyDict::new(py);
+            item.set_item("id", s.id)?;
+            item.set_item("description", s.description)?;
+            item.set_item(
+                "location",
+                match s.location {
+                    SkillLocation::Personal => "personal",
+                    SkillLocation::Project => "project",
+                    SkillLocation::Nested => "nested",
+                    SkillLocation::Custom => "custom",
+                },
+            )?;
+            item.set_item("user_invocable", s.user_invocable)?;
+            list.append(item)?;
+        }
+
+        Ok(list.into())
+    }
+
+    /// Load skills from a specific directory (additive - can be called multiple times)
+    fn load_from_directory(&self, py: Python, dir: String) -> PyResult<PyObject> {
+        let mut runtime = self.inner.lock().unwrap();
+        let skills = runtime
+            .load_from_directory(dir)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         let list = PyList::empty(py);

@@ -37,7 +37,7 @@ mod skill_parser;
 mod validator;
 mod wasm_runner;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use audit::{AuditRecord, AuditSink, NoopAuditSink};
@@ -52,6 +52,17 @@ pub use audit::{AuditRecord as RuntimeAuditRecord, ExecutionStatus as RuntimeExe
 pub use errors::OpenSkillError as RuntimeError;
 pub use manifest::{HooksConfig, SkillManifest, WasmConfig};
 pub use registry::{SkillDescriptor, SkillLocation};
+
+/// Runtime configuration for skill discovery.
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    /// Custom skill directories to scan (in addition to or instead of standard locations).
+    pub custom_directories: Vec<PathBuf>,
+    /// Whether to discover skills from standard locations (~/.claude/skills/, .claude/skills/, nested).
+    pub use_standard_locations: bool,
+    /// Project root for relative path resolution.
+    pub project_root: Option<PathBuf>,
+}
 
 /// Execution options for skill invocation.
 #[derive(Debug, Clone, Default)]
@@ -105,6 +116,8 @@ impl From<&Skill> for LoadedSkill {
 pub struct OpenSkillRuntime {
     registry: SkillRegistry,
     audit_sink: Box<dyn AuditSink + Send + Sync>,
+    custom_directories: Vec<PathBuf>,
+    use_standard_locations: bool,
 }
 
 impl OpenSkillRuntime {
@@ -118,6 +131,22 @@ impl OpenSkillRuntime {
         Self {
             registry: SkillRegistry::new(),
             audit_sink: Box::new(NoopAuditSink {}),
+            custom_directories: Vec::new(),
+            use_standard_locations: true,
+        }
+    }
+
+    /// Create a runtime from a configuration.
+    pub fn from_config(config: RuntimeConfig) -> Self {
+        let mut registry = SkillRegistry::new();
+        if let Some(root) = &config.project_root {
+            registry = registry.with_project_root(root);
+        }
+        Self {
+            registry,
+            audit_sink: Box::new(NoopAuditSink {}),
+            custom_directories: config.custom_directories,
+            use_standard_locations: config.use_standard_locations,
         }
     }
 
@@ -126,6 +155,8 @@ impl OpenSkillRuntime {
         Self {
             registry: SkillRegistry::new().with_project_root(root),
             audit_sink: Box::new(NoopAuditSink {}),
+            custom_directories: Vec::new(),
+            use_standard_locations: true,
         }
     }
 
@@ -136,7 +167,39 @@ impl OpenSkillRuntime {
         Self {
             registry,
             audit_sink: Box::new(NoopAuditSink {}),
+            custom_directories: Vec::new(),
+            use_standard_locations: false,
         }
+    }
+
+    /// Add a custom skill directory to scan.
+    ///
+    /// This method can be called multiple times to add multiple directories.
+    /// Skills from later directories override earlier ones if IDs conflict.
+    pub fn with_custom_directory<P: AsRef<Path>>(mut self, dir: P) -> Self {
+        self.custom_directories.push(dir.as_ref().to_path_buf());
+        self
+    }
+
+    /// Add multiple custom skill directories to scan.
+    ///
+    /// Skills from later directories override earlier ones if IDs conflict.
+    pub fn with_custom_directories<P: AsRef<Path>>(mut self, dirs: Vec<P>) -> Self {
+        self.custom_directories.extend(
+            dirs.into_iter().map(|d| d.as_ref().to_path_buf())
+        );
+        self
+    }
+
+    /// Enable or disable discovery from standard locations.
+    ///
+    /// Standard locations are:
+    /// - `~/.claude/skills/` (personal skills)
+    /// - `.claude/skills/` (project skills)
+    /// - Nested `.claude/skills/` directories (monorepo support)
+    pub fn with_standard_locations(mut self, enable: bool) -> Self {
+        self.use_standard_locations = enable;
+        self
     }
 
     /// Set a custom audit sink.
@@ -145,11 +208,28 @@ impl OpenSkillRuntime {
         self
     }
 
-    /// Discover and load skills from standard locations.
+    /// Discover and load skills from configured locations.
+    ///
+    /// This scans:
+    /// - Standard locations (if `use_standard_locations` is true):
+    ///   - `~/.claude/skills/` (personal skills)
+    ///   - `.claude/skills/` (project skills)
+    ///   - Nested `.claude/skills/` directories (monorepo support)
+    /// - Custom directories (if any were configured via `with_custom_directory` or `with_custom_directories`)
     ///
     /// Returns skill descriptors (name + description only) for progressive disclosure.
+    /// Skills from later directories override earlier ones if IDs conflict.
     pub fn discover_skills(&mut self) -> Result<Vec<SkillDescriptor>, OpenSkillError> {
-        self.registry.discover()?;
+        // Scan standard locations if enabled
+        if self.use_standard_locations {
+            self.registry.discover()?;
+        }
+
+        // Scan custom directories
+        for dir in &self.custom_directories {
+            self.registry.scan_explicit(dir)?;
+        }
+
         Ok(self.registry.list())
     }
 
@@ -193,7 +273,8 @@ impl OpenSkillRuntime {
     ) -> Result<ExecutionResult, OpenSkillError> {
         // Ensure registry is loaded
         if self.registry.is_empty() {
-            self.registry.discover()?;
+            // Use discover_skills to load from all configured locations
+            self.discover_skills()?;
         }
 
         let skill = self

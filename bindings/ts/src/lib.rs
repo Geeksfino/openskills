@@ -1,7 +1,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use openskills_runtime::{
-    ExecutionOptions, LoadedSkill, OpenSkillRuntime, RuntimeExecutionStatus, SkillDescriptor,
+    ExecutionOptions,OpenSkillRuntime, RuntimeConfig, RuntimeExecutionStatus,
     SkillLocation,
 };
 use std::sync::Mutex;
@@ -89,12 +89,57 @@ impl OpenSkillRuntimeWrapper {
         }
     }
 
+    /// Create runtime with custom directories and configuration
+    #[napi(factory)]
+    pub fn with_custom_directories(
+        custom_directories: Vec<String>,
+        use_standard_locations: Option<bool>,
+        project_root: Option<String>,
+    ) -> Self {
+        let config = RuntimeConfig {
+            custom_directories: custom_directories
+                .into_iter()
+                .map(|s| s.into())
+                .collect(),
+            use_standard_locations: use_standard_locations.unwrap_or(true),
+            project_root: project_root.map(|s| s.into()),
+        };
+        Self {
+            inner: Mutex::new(OpenSkillRuntime::from_config(config)),
+        }
+    }
+
+
     /// Discover skills from standard locations (~/.claude/skills/, .claude/skills/, nested)
     #[napi]
     pub fn discover_skills(&self) -> Result<Vec<SkillDescriptorJs>> {
         let mut runtime = self.inner.lock().unwrap();
         let skills = runtime
             .discover_skills()
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
+        Ok(skills
+            .into_iter()
+            .map(|s| SkillDescriptorJs {
+                id: s.id,
+                description: s.description,
+                location: match s.location {
+                    SkillLocation::Personal => "personal".to_string(),
+                    SkillLocation::Project => "project".to_string(),
+                    SkillLocation::Nested => "nested".to_string(),
+                    SkillLocation::Custom => "custom".to_string(),
+                },
+                user_invocable: s.user_invocable,
+            })
+            .collect())
+    }
+
+    /// Load skills from a specific directory (additive - can be called multiple times)
+    #[napi]
+    pub fn load_from_directory(&self, dir: String) -> Result<Vec<SkillDescriptorJs>> {
+        let mut runtime = self.inner.lock().unwrap();
+        let skills = runtime
+            .load_from_directory(dir)
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
         Ok(skills

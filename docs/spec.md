@@ -65,6 +65,20 @@ Skills are discovered from (in order, later overrides earlier):
 1. **Personal**: `~/.claude/skills/`
 2. **Project**: `.claude/skills/` (relative to project root)
 3. **Nested**: Any `.claude/skills/` in subdirectories (monorepo support)
+4. **Custom**: Agent-configured directories (via `with_custom_directory` or `RuntimeConfig`)
+
+### Agent-Configured Directories
+
+Agents can configure custom skill directories in addition to or instead of standard locations:
+
+- **Multiple directories**: Agents can specify multiple custom directories
+- **Override standard locations**: Agents can disable standard location discovery
+- **Flexible configuration**: Support for builder pattern or configuration struct
+
+This allows agents to:
+- Load skills from agent-specific directories
+- Share skills across multiple agents
+- Override standard Claude Skills locations when needed
 
 ## Progressive Disclosure
 

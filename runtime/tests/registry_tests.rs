@@ -7,8 +7,8 @@ fn loads_example_skill_metadata() {
         "{}/../examples/skills",
         env!("CARGO_MANIFEST_DIR")
     );
-    let mut runtime = OpenSkillRuntime::new(skills_dir);
-    let skills = runtime.load_skills().expect("load skills");
+    let mut runtime = OpenSkillRuntime::from_directory(&skills_dir);
+    let skills = runtime.load_from_directory(&skills_dir).expect("load skills");
     assert!(skills.iter().any(|s| s.id == "example-skill"));
 }
 
@@ -18,11 +18,16 @@ fn validates_input_schema() {
         "{}/../examples/skills",
         env!("CARGO_MANIFEST_DIR")
     );
-    let mut runtime = OpenSkillRuntime::new(skills_dir);
+    let mut runtime = OpenSkillRuntime::from_directory(&skills_dir);
+    let _ = runtime.load_from_directory(&skills_dir);
+    
     let result = runtime.execute_skill(
         "example-skill",
-        json!({"conversation": "hello"}),
-        openskills_runtime::ExecutionOptions { timeout_ms: Some(1000) },
+        openskills_runtime::ExecutionOptions {
+            timeout_ms: Some(1000),
+            input: Some(json!({"conversation": "hello"})),
+            ..Default::default()
+        },
     );
 
     // This will fail due to placeholder wasm, but should fail after validation
