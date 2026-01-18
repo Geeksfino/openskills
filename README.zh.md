@@ -1,4 +1,4 @@
-# OpenSkills
+# OpenSkills - 让你的Agent获得Skills
 
 [English](README.md) | [中文](README.zh.md)
 
