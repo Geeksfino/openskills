@@ -48,7 +48,7 @@ jobs:
       - name: Build for all platforms
         working-directory: bindings/ts
         run: |
-          npm run build
+          npm run build && npm run postbuild
 
       - name: Update version if workflow_dispatch
         if: github.event_name == 'workflow_dispatch'
