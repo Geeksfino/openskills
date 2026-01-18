@@ -1,0 +1,16 @@
+{
+  "name": "openskills-mastra-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@mastra/core": "^0.1.0",
+    "@openskills/runtime": "^0.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.1"
+  }
+}

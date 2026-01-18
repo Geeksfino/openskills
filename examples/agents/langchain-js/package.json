@@ -1,0 +1,20 @@
+{
+  "name": "openskills-langchain-js-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "advanced": "tsx src/advanced-agent.ts"
+  },
+  "dependencies": {
+    "@langchain/anthropic": "^0.2.0",
+    "@langchain/openai": "^0.2.5",
+    "@openskills/runtime": "^0.1.0",
+    "dotenv": "^16.4.5",
+    "langchain": "^0.2.14",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.1"
+  }
+}
