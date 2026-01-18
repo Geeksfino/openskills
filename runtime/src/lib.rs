@@ -269,14 +269,22 @@ impl OpenSkillRuntime {
     ///
     /// # Example
     ///
-    /// ```rust
-    /// // User previously granted "allow always" for Write operations
-    /// runtime.execute_skill("my-skill", options)?;
+    /// ```rust,no_run
+    /// use openskills_runtime::{ExecutionOptions, OpenSkillRuntime};
     ///
-    /// // Later, revoke all permanent grants
-    /// runtime.reset_permission_grants();
+    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let mut runtime = OpenSkillRuntime::new();
+    ///     let options = ExecutionOptions::default();
     ///
-    /// // Next Write operation will require permission again
+    ///     // User previously granted "allow always" for Write operations
+    ///     let _ = runtime.execute_skill("my-skill", options)?;
+    ///
+    ///     // Later, revoke all permanent grants
+    ///     runtime.reset_permission_grants();
+    ///
+    ///     // Next Write operation will require permission again
+    ///     Ok(())
+    /// }
     /// ```
     pub fn reset_permission_grants(&self) {
         self.permission_manager.reset_grants();
@@ -452,20 +460,23 @@ impl OpenSkillRuntime {
     ///
     /// # Example
     ///
-    /// ```rust
-    /// use openskills_runtime::{OpenSkillRuntime, ExecutionContext, ExecutionOptions};
+    /// ```rust,no_run
+    /// use openskills_runtime::{ExecutionContext, ExecutionOptions, OpenSkillRuntime};
     ///
-    /// let mut runtime = OpenSkillRuntime::new();
-    /// let main_context = ExecutionContext::new();
+    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let mut runtime = OpenSkillRuntime::new();
+    ///     let main_context = ExecutionContext::new();
     ///
-    /// // Execute skill that forks context
-    /// let result = runtime.execute_skill_with_context(
-    ///     "my-skill",
-    ///     ExecutionOptions::default(),
-    ///     &main_context
-    /// )?;
+    ///     // Execute skill that forks context
+    ///     let _result = runtime.execute_skill_with_context(
+    ///         "my-skill",
+    ///         ExecutionOptions::default(),
+    ///         &main_context,
+    ///     )?;
     ///
-    /// // For forked skills, result.output contains only the summary
+    ///     // For forked skills, result.output contains only the summary
+    ///     Ok(())
+    /// }
     /// ```
     pub fn execute_skill_with_context(
         &mut self,

@@ -9,8 +9,12 @@ use crate::executor::ExecutionArtifacts;
 use crate::permissions::PermissionEnforcer;
 use crate::registry::Skill;
 use serde_json::Value;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use wasmtime::{Config, Engine, Linker, Module, Store};
+use std::task::{Context, Poll};
+use tokio::io::AsyncWrite;
+use wasmtime::{Config, Engine, Store};
 use wasmtime::component::{Component, Linker as ComponentLinker, ResourceTable};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
@@ -28,12 +32,16 @@ pub fn execute_wasm(
     // Configure wasmtime with epoch interruption for timeout
     let mut config = Config::new();
     config.epoch_interruption(true);
-    config.wasm_component_model(true);
+    config.async_support(true);
+    config.wasm_component_model_async(true);
 
     let engine = Engine::new(&config)
         .map_err(|e| OpenSkillError::WasmError(format!("Engine init failed: {e}")))?;
 
-    // Build WASI context with capability-based permissions
+    // Build WASI context with capability-based permissions.
+    //
+    // NOTE: OpenSkills runtime is WASI 0.3 (WASIp3) / component-model-only.
+    // Legacy "core module" artifacts are not supported and must be treated as invalid.
     let stdout_buf = Arc::new(Mutex::new(Vec::new()));
     let stderr_buf = Arc::new(Mutex::new(Vec::new()));
 
@@ -41,7 +49,60 @@ pub fn execute_wasm(
     let read_paths = enforcer.filesystem_read_paths();
     let write_paths = enforcer.filesystem_write_paths();
 
+    // Minimal in-memory stdout/stderr capture stream implementation.
+    #[derive(Clone)]
+    struct SharedVecStdout(Arc<Mutex<Vec<u8>>>);
+
+    impl wasmtime_wasi::cli::IsTerminal for SharedVecStdout {
+        fn is_terminal(&self) -> bool {
+            false
+        }
+    }
+
+    struct SharedVecWriter {
+        buf: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl AsyncWrite for SharedVecWriter {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            data: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            match self.buf.lock() {
+                Ok(mut guard) => {
+                    guard.extend_from_slice(data);
+                    Poll::Ready(Ok(data.len()))
+                }
+                Err(_) => Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "stdout lock poisoned",
+                ))),
+            }
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl wasmtime_wasi::cli::StdoutStream for SharedVecStdout {
+        fn async_stream(&self) -> Box<dyn tokio::io::AsyncWrite + Send + Sync> {
+            Box::new(SharedVecWriter {
+                buf: self.0.clone(),
+            })
+        }
+    }
+
     let configure_wasi_builder = |builder: &mut WasiCtxBuilder| {
+        // Capture stdout/stderr for audit (default is "empty" sinks in wasmtime-wasi).
+        builder.stdout(SharedVecStdout(stdout_buf.clone()));
+        builder.stderr(SharedVecStdout(stderr_buf.clone()));
+
         // Inject skill metadata as environment variables
         builder.env("SKILL_ID", &skill.id);
         builder.env("SKILL_NAME", &skill.manifest.name);
@@ -108,149 +169,81 @@ pub fn execute_wasm(
         }
     };
 
-    // Try component model (WASI Preview 2/0.3.0 preview) first
-    if let Ok(component) = Component::from_file(&engine, &wasm_full_path) {
-        struct WasiComponentState {
-            ctx: WasiCtx,
-            table: ResourceTable,
-        }
+    // WASI 0.3 / WASIp3 component execution only.
+    let component = Component::from_file(&engine, &wasm_full_path).map_err(|e| {
+        OpenSkillError::WasmError(format!(
+            "Invalid WASM artifact (expected a WASI 0.3 component): {e}. \
+OpenSkills runtime does not support legacy core-module WASM artifacts."
+        ))
+    })?;
 
-        impl WasiView for WasiComponentState {
-            fn ctx(&mut self) -> WasiCtxView<'_> {
-                WasiCtxView {
-                    ctx: &mut self.ctx,
-                    table: &mut self.table,
-                }
+    struct WasiComponentState {
+        ctx: WasiCtx,
+        table: ResourceTable,
+    }
+
+    impl WasiView for WasiComponentState {
+        fn ctx(&mut self) -> WasiCtxView<'_> {
+            WasiCtxView {
+                ctx: &mut self.ctx,
+                table: &mut self.table,
             }
         }
+    }
 
-        let mut component_builder = WasiCtxBuilder::new();
-        configure_wasi_builder(&mut component_builder);
-        let component_ctx = component_builder.build();
+    let mut component_builder = WasiCtxBuilder::new();
+    configure_wasi_builder(&mut component_builder);
+    let component_ctx = component_builder.build();
 
-        let mut linker: ComponentLinker<WasiComponentState> = ComponentLinker::new(&engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| OpenSkillError::WasmError(format!("Failed to add WASI p2 functions: {e}")))?;
+    let mut linker: ComponentLinker<WasiComponentState> = ComponentLinker::new(&engine);
+    wasmtime_wasi::p3::add_to_linker(&mut linker).map_err(|e| {
+        OpenSkillError::WasmError(format!("Failed to add WASI 0.3 (p3) interfaces to linker: {e}"))
+    })?;
 
-        let mut store = Store::new(
-            &engine,
-            WasiComponentState {
-                ctx: component_ctx,
-                table: ResourceTable::new(),
-            },
-        );
-        store.set_epoch_deadline(1);
+    let mut store = Store::new(
+        &engine,
+        WasiComponentState {
+            ctx: component_ctx,
+            table: ResourceTable::new(),
+        },
+    );
+    store.set_epoch_deadline(1);
 
-        let engine_clone = engine.clone();
-        let timeout_handle = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(timeout_ms));
+    let done = Arc::new(AtomicBool::new(false));
+    let done_for_thread = done.clone();
+    let engine_clone = engine.clone();
+    let timeout_handle = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(timeout_ms));
+        if !done_for_thread.load(Ordering::Relaxed) {
             engine_clone.increment_epoch();
-        });
+        }
+    });
 
-        let command = wasmtime_wasi::p2::bindings::sync::Command::instantiate(
+    let run_result: Result<Result<(), ()>, OpenSkillError> = wasmtime_wasi::runtime::in_tokio(async {
+        let command = wasmtime_wasi::p3::bindings::Command::instantiate_async(
             &mut store,
             &component,
             &linker,
         )
+        .await
         .map_err(|e| OpenSkillError::WasmError(format!("Component instantiation failed: {e}")))?;
 
-        let run_result = command
-            .wasi_cli_run()
-            .call_run(&mut store)
+        // `run_concurrent(...).await` can fail for two reasons:
+        // - The async runtime/trap machinery itself failed (outer error).
+        // - The guest returned a trap/error (inner error from call_run).
+        let program_result = store
+            .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
+            .await
             .map_err(|e| OpenSkillError::WasmError(format!("Component run failed: {e}")))?;
 
-        drop(timeout_handle);
+        let program_result = program_result
+            .map_err(|e| OpenSkillError::WasmError(format!("Component run trapped: {e}")))?;
 
-        let stdout = String::from_utf8_lossy(
-            &stdout_buf.lock().unwrap_or_else(|e| e.into_inner()),
-        )
-        .to_string();
-        let stderr = String::from_utf8_lossy(
-            &stderr_buf.lock().unwrap_or_else(|e| e.into_inner()),
-        )
-        .to_string();
-
-        let (exit_status, output) = match run_result {
-            Ok(()) => (
-                ExecutionStatus::Success,
-                serde_json::json!({ "status": "success", "output": stdout.trim() }),
-            ),
-            Err(()) => (
-                ExecutionStatus::Failed("Component exited with error".to_string()),
-                serde_json::json!({ "status": "error", "error": "Component exited with error" }),
-            ),
-        };
-
-        return Ok(ExecutionArtifacts {
-            output,
-            stdout,
-            stderr,
-            permissions_used: enforcer.permissions_used(),
-            exit_status,
-        });
-    }
-
-    // Build WASI Preview 1 context
-    // For wasmtime 40.0.2, we use build_p1() to get WasiP1Ctx which implements WasiSnapshotPreview1
-    use wasmtime_wasi::p1::WasiP1Ctx;
-    let mut wasi_builder = WasiCtxBuilder::new();
-    configure_wasi_builder(&mut wasi_builder);
-    let wasi_p1_ctx = wasi_builder.build_p1();
-
-    // Load the WASM module
-    let module = Module::from_file(&engine, &wasm_full_path)
-        .map_err(|e| OpenSkillError::WasmError(format!("Module load failed: {e}")))?;
-
-    // Create linker and register all WASI Preview 1 functions
-    // For wasmtime-wasi 40.0.2, we use p1::wasi_snapshot_preview1::add_to_linker
-    // which registers all ~50+ WASI Preview 1 functions
-    use wasmtime_wasi::p1::wasi_snapshot_preview1;
-    
-    let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
-    
-    // Register all WASI Preview 1 functions to the linker
-    // This single call adds all functions from wasi_snapshot_preview1:
-    // - File operations: fd_read, fd_write, fd_close, fd_seek, etc.
-    // - Filesystem: path_open, path_readdir, path_unlink_file, etc.
-    // - Process: proc_exit, proc_raise
-    // - Environment: args_get, environ_get, etc.
-    // - Time: clock_time_get, clock_res_get
-    // - Random: random_get
-    // - And more...
-    // 
-    // For wasmtime 40.0.2, WasiP1Ctx implements WasiSnapshotPreview1 trait
-    wasi_snapshot_preview1::add_to_linker(&mut linker, |ctx: &mut WasiP1Ctx| ctx)
-        .map_err(|e| OpenSkillError::WasmError(format!("Failed to add WASI Preview 1 functions to linker: {e}")))?;
-
-    // Create store with WASI Preview 1 context
-    let mut store = Store::new(&engine, wasi_p1_ctx);
-
-    // Set epoch deadline for timeout
-    store.set_epoch_deadline(1);
-
-    // Spawn a thread to increment epoch after timeout
-    let engine_clone = engine.clone();
-    let timeout_handle = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(timeout_ms));
-        engine_clone.increment_epoch();
+        Ok(program_result)
     });
 
-    // Instantiate and run
-    let instance = linker
-        .instantiate(&mut store, &module)
-        .map_err(|e| OpenSkillError::WasmError(format!("Instantiation failed: {e}")))?;
-
-    // Try to call the main function or _start
-    let result = if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
-        func.call(&mut store, ())
-    } else if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "main") {
-        func.call(&mut store, ())
-    } else {
-        Err(wasmtime::Error::msg("No _start or main function found"))
-    };
-
-    // Clean up timeout thread
-    drop(timeout_handle);
+    done.store(true, Ordering::Relaxed);
+    let _ = timeout_handle.join();
 
     // Collect stdout/stderr
     let stdout = String::from_utf8_lossy(
@@ -263,19 +256,19 @@ pub fn execute_wasm(
     .to_string();
 
     // Determine exit status and output
-    let (exit_status, output) = match result {
-        Ok(()) => {
-            // Try to parse stdout as JSON, otherwise wrap it
+    let (exit_status, output) = match run_result {
+        Ok(Ok(())) => {
             let output = if let Ok(json) = serde_json::from_str::<Value>(&stdout) {
                 json
             } else {
-                serde_json::json!({
-                    "status": "success",
-                    "output": stdout.trim()
-                })
+                serde_json::json!({ "status": "success", "output": stdout.trim() })
             };
             (ExecutionStatus::Success, output)
         }
+        Ok(Err(())) => (
+            ExecutionStatus::Failed("Component exited with error".to_string()),
+            serde_json::json!({ "status": "error", "error": "Component exited with error" }),
+        ),
         Err(e) => {
             let error_msg = e.to_string();
             let status = if error_msg.contains("epoch") {
@@ -283,11 +276,10 @@ pub fn execute_wasm(
             } else {
                 ExecutionStatus::Failed(error_msg.clone())
             };
-            let output = serde_json::json!({
-                "status": "error",
-                "error": error_msg
-            });
-            (status, output)
+            (
+                status,
+                serde_json::json!({ "status": "error", "error": error_msg }),
+            )
         }
     };
 

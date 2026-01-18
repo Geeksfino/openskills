@@ -49,7 +49,7 @@ Responsible for:
 - Timeout enforcement
 
 **Key Features:**
-- WASI preview1 compatibility
+- WASI 0.3 (WASIp3) component-model-only execution
 - Capability-based filesystem access
 - Network allowlist enforcement
 - Deterministic execution support
@@ -237,22 +237,11 @@ Bindings follow a common pattern:
 3. Handle errors appropriately
 4. Provide idiomatic API for target language
 
-## WASI Linker Integration (Current Status)
+## WASI Execution Model
 
-The WASM runner currently has a placeholder for WASI linker integration. To complete WASM execution:
+OpenSkills executes **only WASI 0.3 (WASIp3) components** via Wasmtime's component model.
 
-**Current State**: Linker is created but WASI functions are not registered, preventing WASI modules from instantiating.
-
-**Required**: Add WASI preview1 functions to the linker using wasmtime-wasi 20.0.2 API.
-
-**Options**:
-1. **Component Model**: Use `wasmtime::component::Linker` with `wasmtime_wasi::add_to_linker_sync`
-2. **Preview1 API**: Use `wasmtime_wasi::preview1::add_to_linker` with regular modules
-3. **Manual Registration**: Manually register WASI functions (more control, more code)
-
-**Location**: `runtime/src/wasm_runner.rs` lines ~118-160
-
-See wasmtime-wasi 20.0.2 documentation for the correct API pattern.
+- Legacy "core module" WASM artifacts are **rejected**.
 
 ## Future Improvements
 

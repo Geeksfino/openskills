@@ -38,9 +38,12 @@ url = "2.5"
 # WASM runtime
 # Using latest wasmtime (40+) for WASI 0.3.0 preview support
 # WASI 0.3.0 final release expected February 2026
-wasmtime = { version = "40", features = ["component-model"] }
-wasmtime-wasi = "40"
+wasmtime = { version = "40", features = ["component-model-async", "component-model-async-bytes"] }
+# IMPORTANT: OpenSkills runtime is WASI 0.3 (WASIp3) / component-model-only.
+# We explicitly disable wasmtime-wasi default features to avoid relying on legacy WASI "preview" APIs.
+wasmtime-wasi = { version = "40", default-features = false, features = ["p3"] }
 cap-std = "2.0"
+tokio = { version = "1", features = ["io-util"] }
 
 [dev-dependencies]
 tempfile = "3.10"

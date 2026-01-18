@@ -1046,12 +1046,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "leb128"
-version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "884e2677b40cc8c339eaefcb701c32ef1fd2493d71118dc0ca4b6a736c93bd67"
-
-[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1245,6 +1239,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
  "url",
  "walkdir",
  "wasmtime",
@@ -2212,6 +2207,7 @@ dependencies = [
  "async-trait",
  "bitflags",
  "bumpalo",
+ "bytes",
  "cc",
  "cfg-if",
  "encoding_rs",
@@ -2490,7 +2486,6 @@ dependencies = [
  "url",
  "wasmtime",
  "wasmtime-wasi-io",
- "wiggle",
  "windows-sys 0.61.2",
 ]
 
@@ -2505,15 +2500,6 @@ dependencies = [
  "bytes",
  "futures",
  "wasmtime",
-]
-
-[[package]]
-name = "wast"
-version = "35.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ef140f1b49946586078353a453a1d28ba90adfc54dde75710bc1931de204d68"
-dependencies = [
- "leb128",
 ]
 
 [[package]]
@@ -2535,47 +2521,7 @@ version = "1.244.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbf35b87ed352f9ab6cd0732abde5a67dd6153dfd02c493e61459218b19456fa"
 dependencies = [
- "wast 244.0.0",
-]
-
-[[package]]
-name = "wiggle"
-version = "40.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f03ecfaa6baa55a56514ff16e290760cb6fbd8ba7231847452f83fbbd0d8bc10"
-dependencies = [
- "anyhow",
- "bitflags",
- "thiserror 2.0.17",
- "tracing",
- "wasmtime",
- "wiggle-macro",
-]
-
-[[package]]
-name = "wiggle-generate"
-version = "40.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "257b14b8c69ce0c0a2910fbc01576dcb649b104428dee3d154f4dd23aec7a03c"
-dependencies = [
- "anyhow",
- "heck",
- "proc-macro2",
- "quote",
- "syn",
- "witx",
-]
-
-[[package]]
-name = "wiggle-macro"
-version = "40.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5000f9f48551ff10b5f8bab91e4c25e4a405358d12d8d5836e37ccde31488346"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
- "wiggle-generate",
+ "wast",
 ]
 
 [[package]]
@@ -2957,18 +2903,6 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser 0.243.0",
-]
-
-[[package]]
-name = "witx"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e366f27a5cabcddb2706a78296a40b8fcc451e1a6aba2fc1d94b4a01bdaaef4b"
-dependencies = [
- "anyhow",
- "log",
- "thiserror 1.0.69",
- "wast 35.0.2",
 ]
 
 [[package]]
