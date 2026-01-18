@@ -99,7 +99,7 @@ mod macos {
             .unwrap_or_else(|_| skill.root.clone());
 
         // Get paths from enforcer and canonicalize them to match canonicalized skill_root
-        let mut read_paths: Vec<PathBuf> = enforcer
+        let read_paths: Vec<PathBuf> = enforcer
             .filesystem_read_paths()
             .iter()
             .map(|p| {
@@ -117,19 +117,18 @@ mod macos {
             .collect();
 
         let (program, args, program_path) = command_for_script(script_type, script_path)?;
-        if let Some(path) = program_path.as_ref().and_then(|p| p.parent()) {
-            let canonicalized_path = path
-                .canonicalize()
-                .unwrap_or_else(|_| path.to_path_buf());
-            read_paths.push(canonicalized_path);
-        }
+        // Canonicalize the executable path for the seatbelt profile
+        // We need to pass the actual executable path (not its parent) to grant file-map-executable permission
+        let exec_path = program_path.as_ref().and_then(|p| {
+            p.canonicalize().ok().or_else(|| Some(p.clone()))
+        });
         let profile = build_seatbelt_profile(
             &skill_root,
             &read_paths,
             &write_paths,
             allow_network,
             allow_process,
-            program_path.as_ref().and_then(|p| p.parent()),
+            exec_path.as_deref(),
         );
 
         let profile_path = write_profile(&profile)?;
@@ -321,6 +320,12 @@ mod macos {
             ));
         }
 
+        if let Some(exec_path) = exec_path {
+            profile.push_str(&format!(
+                "(allow file-read* file-map-executable (subpath \"{}\"))\n",
+                escape_path(exec_path.to_string_lossy().as_ref())
+            ));
+        }
 
         for temp_path in TEMP_PATHS {
             profile.push_str(&format!(
