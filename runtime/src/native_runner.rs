@@ -125,18 +125,24 @@ mod macos {
         // Also ensure the parent directory is accessible for traversal
         // This is needed even if the executable path itself is granted permission
         let mut read_paths_with_parent = read_paths.clone();
-        if let Some(path) = exec_path.as_ref().and_then(|p| p.parent()) {
+        // Track the parent directory separately if it needs file-map-executable permission
+        let exec_parent_path = if let Some(path) = exec_path.as_ref().and_then(|p| p.parent()) {
             let canonicalized_parent = path
                 .canonicalize()
                 .unwrap_or_else(|_| path.to_path_buf());
-            // Only add if not already covered by SYSTEM_READ_PATHS
+            // Only add to read_paths if not already covered by SYSTEM_READ_PATHS
             let is_system_path = SYSTEM_READ_PATHS.iter().any(|&sys_path| {
                 canonicalized_parent.starts_with(sys_path)
             });
             if !is_system_path {
-                read_paths_with_parent.push(canonicalized_parent);
+                read_paths_with_parent.push(canonicalized_parent.clone());
+                Some(canonicalized_parent)
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
         let profile = build_seatbelt_profile(
             &skill_root,
             &read_paths_with_parent,
@@ -144,6 +150,7 @@ mod macos {
             allow_network,
             allow_process,
             exec_path.as_deref(),
+            exec_parent_path.as_deref(),
         );
 
         let profile_path = write_profile(&profile)?;
@@ -318,6 +325,7 @@ mod macos {
         allow_network: bool,
         allow_process: bool,
         exec_path: Option<&Path>,
+        exec_parent_path: Option<&Path>,
     ) -> String {
         let mut profile = String::new();
         profile.push_str("(version 1)\n(deny default)\n");
@@ -332,6 +340,15 @@ mod macos {
             profile.push_str(&format!(
                 "(allow file-read* file-map-executable (subpath \"{}\"))\n",
                 escape_path(system_path)
+            ));
+        }
+
+        // Grant file-map-executable to the parent directory for non-system executables
+        // This ensures the sandbox can traverse and access executables in custom paths
+        if let Some(exec_parent_path) = exec_parent_path {
+            profile.push_str(&format!(
+                "(allow file-read* file-map-executable (subpath \"{}\"))\n",
+                escape_path(exec_parent_path.to_string_lossy().as_ref())
             ));
         }
 
