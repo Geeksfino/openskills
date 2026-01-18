@@ -66,7 +66,7 @@ const runSkill = tool({
         timeout_ms: 30000, // Increased timeout for docx operations
         input: JSON.stringify({ query: input }),
       });
-      return result.output_json ?? result.output ?? "";
+      return result.outputJson ?? "";
     } catch (error) {
       return `Error executing skill ${skill_id}: ${error instanceof Error ? error.message : String(error)}`;
     }

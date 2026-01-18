@@ -23,12 +23,17 @@ runtime, catalog = load_runtime()
 @tool("run_skill")
 def run_skill(skill_id: str, input: str) -> str:
     """Execute an OpenSkills skill by id with a text input."""
+    import json
     result = runtime.execute_skill(
         skill_id,
         input={"query": input},
         timeout_ms=5000,
     )
-    return result.get("output", "")
+    output = result.get("output", "")
+    # Convert output to string if it's a dict/list
+    if isinstance(output, (dict, list)):
+        return json.dumps(output, ensure_ascii=False)
+    return str(output) if output else ""
 
 
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)

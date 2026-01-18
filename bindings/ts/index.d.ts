@@ -88,3 +88,5 @@ export declare class OpenSkillRuntimeWrapper {
   /** Check if a tool call is permitted for a skill (ask-before-act for risky tools). */
   checkToolPermission(skillId: string, tool: string, description?: string | undefined | null): boolean
 }
+export type OpenSkillRuntime = OpenSkillRuntimeWrapper
+export const OpenSkillRuntime: typeof OpenSkillRuntimeWrapper

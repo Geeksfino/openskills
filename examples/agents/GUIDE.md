@@ -72,7 +72,7 @@ const result = runtime.executeSkill("example-skill", {
   input: JSON.stringify({ query: "hello" }),
   timeout_ms: 5000,
 });
-console.log(result.output_json ?? result.output);
+console.log(result.outputJson);
 ```
 
 **Python**

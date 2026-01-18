@@ -7,6 +7,7 @@
     "advanced": "tsx src/advanced-agent.ts"
   },
   "dependencies": {
+    "@langchain/core": "^0.2.0",
     "@langchain/anthropic": "^0.2.0",
     "@langchain/openai": "^0.2.5",
     "@finogeek/openskills": "^0.2.0",

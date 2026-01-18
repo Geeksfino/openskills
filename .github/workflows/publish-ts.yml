@@ -14,7 +14,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -76,5 +76,5 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "v${{ github.event.inputs.version }}" || true
-          git push origin "v${{ github.event.inputs.version }}" || true
+          git tag "v${{ github.event.inputs.version }}"
+          git push origin "v${{ github.event.inputs.version }}"

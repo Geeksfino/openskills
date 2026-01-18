@@ -29,7 +29,7 @@ const runSkillTool = new DynamicStructuredTool({
       timeout_ms: 5000,
       input: JSON.stringify({ query: input }),
     });
-    return result.output_json ?? result.output ?? "";
+    return result.outputJson ?? "";
   },
 });
 
