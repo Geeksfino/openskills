@@ -40,4 +40,8 @@ pub enum OpenSkillError {
     /// JSON parsing error.
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// Build/compilation error.
+    #[error("build error: {0}")]
+    BuildError(String),
 }

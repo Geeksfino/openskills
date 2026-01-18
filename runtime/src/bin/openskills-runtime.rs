@@ -3,11 +3,13 @@
 //! Claude Skills compatible runtime with WASM sandbox.
 
 use openskills_runtime::{
-    analyze_skill_tokens, validate_skill_path, ExecutionOptions, OpenSkillRuntime,
+    analyze_skill_tokens, build_skill, BuildConfig, validate_skill_path, ExecutionOptions,
+    OpenSkillRuntime,
 };
 use serde_json::Value;
 use std::env;
 use std::fs;
+use std::path::PathBuf;
 use std::process;
 
 fn print_usage() {
@@ -18,6 +20,7 @@ fn print_usage() {
     eprintln!("  openskills list [--dir <path>]");
     eprintln!("  openskills activate <skill-id> [--dir <path>]");
     eprintln!("  openskills execute <skill-id> [options]");
+    eprintln!("  openskills build [<skill-path>] [options]");
     eprintln!("  openskills validate <skill-path> [options]");
     eprintln!("  openskills analyze <skill-path> [options]");
     eprintln!();
@@ -26,6 +29,7 @@ fn print_usage() {
     eprintln!("  list          List skills from a specific directory");
     eprintln!("  activate      Load full skill content (SKILL.md instructions)");
     eprintln!("  execute       Execute a skill's WASM module in sandbox");
+    eprintln!("  build         Compile TypeScript/JavaScript skill to WASM component");
     eprintln!("  validate      Validate a skill's format and structure");
     eprintln!("  analyze       Analyze token usage for a skill");
     eprintln!();
@@ -35,6 +39,8 @@ fn print_usage() {
     eprintln!("  --input, -i          Input JSON string (for execute)");
     eprintln!("  --input-file, -f     Input JSON file path (for execute)");
     eprintln!("  --timeout-ms, -t     Timeout in ms (for execute)");
+    eprintln!("  --force, -f          Force rebuild even if WASM is up to date (for build)");
+    eprintln!("  --verbose, -v        Verbose output (for build)");
     eprintln!("  --warnings           Show validation warnings");
     eprintln!("  --json               Output as JSON");
     eprintln!("  --help, -h           Show help");
@@ -55,6 +61,7 @@ fn main() {
         "list" => cmd_list(&args[2..]),
         "activate" => cmd_activate(&args[2..]),
         "execute" => cmd_execute(&args[2..]),
+        "build" => cmd_build(&args[2..]),
         "validate" => cmd_validate(&args[2..]),
         "analyze" => cmd_analyze(&args[2..]),
         "--help" | "-h" => {
@@ -342,6 +349,97 @@ fn cmd_execute(args: &[String]) {
         }
         Err(err) => {
             eprintln!("Execution failed: {}", err);
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_build(args: &[String]) {
+    let mut skill_path: Option<String> = None;
+    let mut force = false;
+    let mut verbose = false;
+    let mut output_file: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--help" | "-h" => {
+                eprintln!("Build a skill from TypeScript/JavaScript source to WASM component");
+                eprintln!();
+                eprintln!("Usage: openskills build [<skill-path>] [options]");
+                eprintln!();
+                eprintln!("Arguments:");
+                eprintln!("  <skill-path>    Skill directory (default: current directory)");
+                eprintln!();
+                eprintln!("Options:");
+                eprintln!("  --force, -f     Force rebuild even if WASM is up to date");
+                eprintln!("  --verbose, -v   Show verbose output");
+                eprintln!("  --output, -o    Output WASM file path (default: wasm/skill.wasm)");
+                eprintln!("  --help, -h      Show this help message");
+                eprintln!();
+                eprintln!("Examples:");
+                eprintln!("  openskills build                    # Build current directory");
+                eprintln!("  openskills build my-skill           # Build my-skill directory");
+                eprintln!("  openskills build --verbose           # Build with verbose output");
+                eprintln!();
+                eprintln!("Requirements:");
+                eprintln!("  - javy: Install with 'cargo install javy-cli'");
+                eprintln!("  - For TypeScript: tsc or esbuild (via npx)");
+                return;
+            }
+            "--force" | "-f" => {
+                force = true;
+            }
+            "--verbose" | "-v" => {
+                verbose = true;
+            }
+            "--output" | "-o" => {
+                i += 1;
+                output_file = args.get(i).cloned();
+            }
+            arg if !arg.starts_with('-') && skill_path.is_none() => {
+                skill_path = Some(arg.to_string());
+            }
+            _ => {
+                eprintln!("Unknown option: {}", args[i]);
+                eprintln!("Use --help for usage information");
+                process::exit(1);
+            }
+        }
+        i += 1;
+    }
+
+    let skill_path = skill_path.unwrap_or_else(|| {
+        // Default to current directory
+        ".".to_string()
+    });
+
+    let skill_dir = std::path::PathBuf::from(&skill_path);
+    if !skill_dir.exists() {
+        eprintln!("Error: Skill directory not found: {}", skill_path);
+        process::exit(1);
+    }
+
+    let config = BuildConfig {
+        skill_dir: skill_dir.clone(),
+        source_file: None,
+        output_file: output_file.map(PathBuf::from),
+        force,
+        verbose,
+    };
+
+    match build_skill(config) {
+        Ok(wasm_path) => {
+            println!("Build successful: {}", wasm_path.display());
+            if verbose {
+                let wasm_size = std::fs::metadata(&wasm_path)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                println!("WASM size: {} bytes ({:.2} KB)", wasm_size, wasm_size as f64 / 1024.0);
+            }
+        }
+        Err(err) => {
+            eprintln!("Build failed: {}", err);
             process::exit(1);
         }
     }

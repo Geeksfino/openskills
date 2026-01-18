@@ -2,13 +2,86 @@
 
 A **Claude Skills compatible runtime** with WASM-based sandboxing. OpenSkills implements the [Claude Code Agent Skills specification](https://code.claude.com/docs/en/skills), providing a secure, cross-platform runtime for executing skills.
 
+## Philosophy
+
+OpenSkills is **syntactically 100% compatible** with Claude Skills, meaning any skill that follows the Claude Skills format (SKILL.md with YAML frontmatter) will work with OpenSkills. However, OpenSkills takes a **WASM-first approach** to sandboxing, which provides both advantages and limitations.
+
+### Core Design Principles
+
+1. **100% Syntactic Compatibility**: OpenSkills reads and executes skills using the exact same SKILL.md format as Claude Skills. Skills can be shared between Claude Code and OpenSkills without modification.
+
+2. **WASM as Sandbox**: Instead of OS-level sandboxing (seatbelt on macOS, seccomp on Linux), OpenSkills uses **WASM/WASI 0.3** (component model) for secure execution. This provides:
+   - **Cross-platform consistency**: Same security model on macOS, Linux, Windows
+   - **Capability-based security**: Fine-grained permissions via WASI
+   - **Memory safety**: WASM's linear memory model prevents buffer overflows
+   - **Deterministic execution**: Reproducible behavior across platforms
+
+3. **JavaScript/TypeScript First**: OpenSkills is optimized for JavaScript/TypeScript-based skills, which can be compiled to WASM components using tools like `javy` (QuickJS-based). This allows skill writers to use familiar languages and ecosystems.
+
+### Target Use Case
+
+OpenSkills is designed primarily for **enterprise agents** where:
+- The same developers build and maintain their own skills
+- Skills are trusted (developed internally, not arbitrary internet code)
+- Cross-platform consistency is important
+- Security and auditability are priorities
+
+This use case aligns well with WASM-first sandboxing, as developers can build skills using TypeScript/JavaScript and compile them to WASM components.
+
+## Limitations
+
+OpenSkills' WASM-first approach has some limitations compared to native execution:
+
+### Not Supported (Currently)
+
+1. **Native Python Scripts**: 
+   - ML-oriented Python scripts (NumPy, Pandas, SciPy) cannot run natively
+   - Python must be compiled to WASM (limited ecosystem compatibility)
+   - Heavy numerical computation is better suited for native execution
+
+2. **OS-Level Shell Scripts**:
+   - Direct shell script execution (`.sh`, `.bash`) is not supported
+   - Shell scripts must be rewritten in JavaScript/TypeScript or compiled to WASM
+
+3. **Build Workflow Required**:
+   - JavaScript/TypeScript skills must be compiled to WASM components before execution
+   - Developers need to run `openskills build` to compile source to `wasm/skill.wasm`
+   - This adds a build step compared to "drop-in" native scripts
+
+### Why These Limitations Exist
+
+WASM provides strong security and cross-platform consistency, but it requires:
+- **Compilation step**: Source code must be compiled to WASM
+- **WASI compatibility**: Code must use WASI APIs, not native OS APIs
+- **Limited native libraries**: Native Python packages, shell tools, etc. don't work directly
+
+These limitations are acceptable for enterprise use cases where:
+- Developers control the skill development process
+- Build workflows are standard practice
+- Security and cross-platform consistency outweigh convenience
+
+## Roadmap
+
+OpenSkills will evolve to address limitations while maintaining its WASM-first philosophy:
+
+1. **More WASM-Ready Scripts**: We'll provide an expanding library of pre-built WASM components and templates for common tasks, reducing the need for custom compilation.
+
+2. **Native Scripting Support**: We plan to add **seatbelt/seccomp** sandboxing support for native scripts (Python, shell) as a complementary execution path. This will allow:
+   - Native Python scripts with OS-level sandboxing (seatbelt on macOS, seccomp on Linux)
+   - Shell script execution with restricted permissions
+   - Hybrid approach: WASM for most tasks, native sandboxing for heavy compute
+
+3. **Improved Tooling**: Better build tools and templates to make WASM compilation more transparent for developers.
+
 ## Features
 
 - ✅ **100% Claude Skills Compatible**: Full SKILL.md format support
-- 🔒 **WASM Sandbox**: Secure execution via WASI instead of OS-level sandboxing
+- 🔒 **WASM/WASI 0.3 Sandbox**: Secure execution via component model
 - 📊 **Progressive Disclosure**: Efficient tiered loading (metadata → instructions → resources)
 - 🔌 **Multi-Language**: Rust core with TypeScript and Python bindings
 - 🛡️ **Capability-Based Security**: Fine-grained permissions via WASI
+- 🏗️ **Build Tool**: `openskills build` for compiling TS/JS to WASM components
+- 🌐 **Cross-Platform**: Identical behavior on macOS, Linux, Windows
 
 ## Quick Start
 
@@ -27,25 +100,27 @@ npm install @openskills/runtime
 pip install openskills
 ```
 
-### Usage
+### Building a Skill
+
+```bash
+# Install build dependencies
+cargo install javy-cli  # For JavaScript → WASM compilation
+
+# Build a skill from TypeScript/JavaScript
+cd my-skill
+openskills build
+
+# This compiles src/index.ts → wasm/skill.wasm
+```
+
+### Using Skills
 
 ```rust
 use openskills_runtime::{OpenSkillRuntime, ExecutionOptions};
 use serde_json::json;
 
-// Option 1: Standard locations (~/.claude/skills/, .claude/skills/, nested)
+// Discover skills from standard locations
 let mut runtime = OpenSkillRuntime::new();
-runtime.discover_skills()?;
-
-// Option 2: Custom directories only
-let mut runtime = OpenSkillRuntime::new()
-    .with_custom_directories(vec!["/agent/skills", "/shared/skills"])
-    .with_standard_locations(false);
-runtime.discover_skills()?;
-
-// Option 3: Combine standard + custom directories
-let mut runtime = OpenSkillRuntime::new()
-    .with_custom_directory("/agent/skills");
 runtime.discover_skills()?;
 
 // Execute a skill
@@ -76,30 +151,45 @@ OpenSkills uses a Rust core runtime with language bindings:
     └──────┬──────┘
            │
     ┌──────▼──────┐
-│ Rust Core   │  (openskills)
+    │ Rust Core   │  (openskills-runtime)
     └──────┬──────┘
            │
     ┌──────▼──────┐
-    │  Wasmtime   │  (WASM execution)
+    │  Wasmtime   │  (WASM/WASI 0.3 execution)
     └─────────────┘
 ```
 
-## Why WASM Sandbox?
+### Execution Model
 
-Unlike Claude Code's OS-level sandboxing (seatbelt/seccomp), OpenSkills uses WASM/WASI:
+1. **Skill Discovery**: Scans directories for SKILL.md files
+2. **Progressive Loading**: Loads metadata → instructions → resources on demand
+3. **WASM Execution**: Executes `wasm/skill.wasm` in Wasmtime with WASI 0.3 capabilities
+4. **Permission Enforcement**: WASI capabilities mapped from `allowed-tools` in manifest
+5. **Audit Logging**: All executions logged with input/output hashes
+
+## Comparison: OpenSkills vs Claude Code
 
 | Aspect | Claude Code | OpenSkills |
 |--------|-------------|------------|
-| Sandbox | seatbelt/seccomp | WASM/WASI |
-| Cross-platform | OS-specific | Identical everywhere |
-| Security model | OS capabilities | WASI capabilities |
-| Script execution | Native with sandbox | WASM modules |
+| **SKILL.md Format** | ✅ Full support | ✅ 100% compatible |
+| **Sandbox** | seatbelt/seccomp | WASM/WASI 0.3 |
+| **Cross-platform** | OS-specific | Identical everywhere |
+| **Script Execution** | Native (Python, shell) | WASM components |
+| **Build Required** | No | Yes (TS/JS → WASM) |
+| **Native Python** | ✅ Supported | ❌ Not supported |
+| **Shell Scripts** | ✅ Supported | ❌ Not supported |
+| **Use Case** | Desktop users, arbitrary skills | Enterprise agents, trusted developers |
 
 ## Project Structure
 
 ```
 openskills/
 ├── runtime/              # Rust core runtime
+│   ├── src/
+│   │   ├── build.rs      # Build tool for TS/JS → WASM
+│   │   ├── wasm_runner.rs # WASI 0.3 execution
+│   │   └── ...
+│   └── BUILD.md          # Build tool documentation
 ├── bindings/             # Language bindings
 │   ├── ts/              # TypeScript (napi-rs)
 │   └── python/           # Python (PyO3)
@@ -115,11 +205,10 @@ openskills/
 ## Documentation
 
 - **[Developer Guide](docs/developers.md)**: Using OpenSkills in your applications
+- **[Build Tool Guide](runtime/BUILD.md)**: Compiling TypeScript/JavaScript skills
 - **[Contributing Guide](docs/contributing.md)**: How to contribute to OpenSkills
 - **[Architecture](docs/architecture.md)**: Internal architecture and design
 - **[Specification](docs/spec.md)**: Complete runtime specification
-
-See [docs/README.md](docs/README.md) for documentation index.
 
 ## Building
 
@@ -128,7 +217,8 @@ See [docs/README.md](docs/README.md) for documentation index.
 ./scripts/build_all.sh
 
 # Build runtime only
-./scripts/build_runtime.sh
+cd runtime
+cargo build --release
 
 # Build bindings
 ./scripts/build_bindings.sh
@@ -136,10 +226,12 @@ See [docs/README.md](docs/README.md) for documentation index.
 
 ## Status
 
-- ✅ **Rust Runtime**: Fully functional
-- 🚧 **TypeScript Bindings**: Build issues (napi linking)
-- ✅ **Python Bindings**: Ready (requires Python ≤3.12 or compatibility flag)
-- 🚧 **WASM Execution**: WASI linker integration pending
+- ✅ **Rust Runtime**: Fully functional with WASI 0.3
+- ✅ **TypeScript Bindings**: Working
+- ✅ **Python Bindings**: Working (requires Python ≤3.13)
+- ✅ **WASM Execution**: WASI 0.3 component model fully supported
+- ✅ **Build Tool**: `openskills build` for TS/JS compilation
+- 🚧 **Native Scripting**: Seatbelt/seccomp support planned
 
 ## License
 
