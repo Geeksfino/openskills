@@ -395,7 +395,14 @@ fn cmd_build(args: &[String]) {
             }
             "--output" | "-o" => {
                 i += 1;
-                output_file = args.get(i).cloned();
+                output_file = match args.get(i) {
+                    Some(value) => Some(value.clone()),
+                    None => {
+                        eprintln!("Error: --output requires a value");
+                        eprintln!("Usage: openskills build --output <path>");
+                        process::exit(1);
+                    }
+                };
             }
             arg if !arg.starts_with('-') && skill_path.is_none() => {
                 skill_path = Some(arg.to_string());
