@@ -195,7 +195,7 @@ fn find_native_script(skill_root: &PathBuf) -> Option<PathBuf> {
         }
     }
 
-    for dir in [skill_root.to_path_buf(), skill_root.join("src")] {
+    for dir in [skill_root.to_path_buf(), skill_root.join("src"), skill_root.join("scripts")] {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
