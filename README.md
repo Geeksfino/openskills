@@ -255,7 +255,7 @@ This dual approach means you get:
 | **Sandbox** | seatbelt/seccomp | **WASM/WASI 0.3 + seatbelt (macOS)** ⭐ |
 | **Cross-platform** | OS-specific | WASM identical, native macOS only |
 | **Script Execution** | Native (Python, shell) | WASM components + native (macOS) |
-| **Build Required** | No | Yes (TS/JS → WASM) |
+| **Build Required** | No | No if Python/Shell scripts. Yes if WASM (TS/JS → WASM) |
 | **Native Python** | ✅ Supported | ✅ macOS (seatbelt) |
 | **Shell Scripts** | ✅ Supported | ✅ macOS (seatbelt) |
 | **Agent Framework** | Claude Desktop & Claude Agent SDK | **Any framework** ⭐ |

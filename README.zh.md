@@ -255,10 +255,10 @@ OpenSkills 是**唯一**结合以下特性的运行时：
 | **沙箱** | seatbelt/seccomp | **WASM/WASI 0.3 + seatbelt (macOS)** ⭐ |
 | **跨平台** | 操作系统特定 | WASM 相同，原生仅 macOS |
 | **脚本执行** | 原生（Python、shell） | WASM 组件 + 原生（macOS） |
-| **需要构建** | 否 | 是（TS/JS → WASM） |
+| **需要构建** | 否 | 否（Python/Shell脚本），是（TS/JS → WASM） |
 | **原生 Python** | ✅ 支持 | ✅ macOS (seatbelt) |
 | **Shell 脚本** | ✅ 支持 | ✅ macOS (seatbelt) |
-| **智能体框架** | 仅 Claude Desktop | **任何框架** ⭐ |
+| **智能体框架** | Claude Desktop/Claude Agent SDK | **任何框架** ⭐ |
 | **用例** | 桌面用户，任意技能 | 企业智能体，任何智能体框架 |
 
 ## 项目结构
