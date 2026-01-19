@@ -4,13 +4,48 @@ build-backend = "maturin"
 
 [project]
 name = "openskills"
-version = "0.1.0"
-description = "OpenSkill Runtime Python bindings"
+version = "0.2.0"
+description = "OpenSkill Runtime Python bindings - Claude Skills compatible runtime with WASM sandbox"
+readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
+authors = [
+    { name = "Finogeeks", email = "liangqh@finogeeks.com" }
+]
+keywords = [
+    "openskills",
+    "claude",
+    "skills",
+    "wasm",
+    "runtime",
+    "pyo3",
+    "agent",
+    "ai"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/Geeksfino/openskills"
+Documentation = "https://github.com/Geeksfino/openskills"
+Repository = "https://github.com/Geeksfino/openskills"
+Issues = "https://github.com/Geeksfino/openskills/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0.0"]
 
 [tool.maturin]
 bindings = "pyo3"
+module-name = "openskills"
+compatibility = "linux"

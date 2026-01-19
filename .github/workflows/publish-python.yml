@@ -1,0 +1,176 @@
+name: Publish Python Bindings
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.2.0)'
+        required: true
+        type: string
+
+jobs:
+  build-sdist:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install maturin
+        run: |
+          pip install maturin
+
+      - name: Update version if workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: bindings/python
+        run: |
+          python3 << EOF
+          import re
+          with open('pyproject.toml', 'r') as f:
+              content = f.read()
+          content = re.sub(
+              r'^version = ".*"',
+              f'version = "${{ github.event.inputs.version }}"',
+              content,
+              flags=re.MULTILINE
+          )
+          with open('pyproject.toml', 'w') as f:
+              f.write(content)
+          EOF
+
+      - name: Build source distribution
+        working-directory: bindings/python
+        run: |
+          maturin sdist --out dist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: bindings/python/dist/*.tar.gz
+
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          target: ${{ matrix.target }}
+
+      - name: Install maturin
+        run: |
+          pip install maturin
+
+      - name: Update version if workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: bindings/python
+        run: |
+          # Update version in pyproject.toml
+          python3 << EOF
+          import re
+          with open('pyproject.toml', 'r') as f:
+              content = f.read()
+          content = re.sub(
+              r'^version = ".*"',
+              f'version = "${{ github.event.inputs.version }}"',
+              content,
+              flags=re.MULTILINE
+          )
+          with open('pyproject.toml', 'w') as f:
+              f.write(content)
+          EOF
+
+      - name: Build Python package
+        working-directory: bindings/python
+        run: |
+          maturin build --release --target ${{ matrix.target }} --out dist
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: bindings/python/dist/*.whl
+
+  publish:
+    needs: [build-sdist, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+
+      - name: Verify package contents
+        run: |
+          echo "Built wheels:"
+          ls -lh dist/*.whl || echo "No wheels found"
+          echo ""
+          echo "Package info:"
+          pip install twine
+          twine check dist/*
+
+      - name: Publish to PyPI
+        run: |
+          pip install twine
+          twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Create git tag (if workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch' && success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "python-v${{ github.event.inputs.version }}"
+          git push origin "python-v${{ github.event.inputs.version }}"
