@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,23 +36,25 @@ jobs:
         run: |
           pip install maturin
 
-      - name: Update version if workflow_dispatch
-        if: github.event_name == 'workflow_dispatch'
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            # Update runtime/Cargo.toml first (single source of truth)
+            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" runtime/Cargo.toml
+          else
+            # Extract version from runtime/Cargo.toml (release trigger)
+            VERSION=$(grep '^version = ' runtime/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using version: $VERSION"
+
+      - name: Sync version to Python binding
         working-directory: bindings/python
         run: |
-          python3 << EOF
-          import re
-          with open('pyproject.toml', 'r') as f:
-              content = f.read()
-          content = re.sub(
-              r'^version = ".*"',
-              f'version = "${{ github.event.inputs.version }}"',
-              content,
-              flags=re.MULTILINE
-          )
-          with open('pyproject.toml', 'w') as f:
-              f.write(content)
-          EOF
+          python -c "import re; content = open('pyproject.toml').read(); content = re.sub(r'^version = \".*\"', 'version = \"${{ steps.version.outputs.version }}\"', content, flags=re.MULTILINE); open('pyproject.toml', 'w').write(content)"
 
       - name: Build source distribution
         working-directory: bindings/python
@@ -78,6 +82,8 @@ jobs:
             target: aarch64-apple-darwin
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -98,24 +104,25 @@ jobs:
         run: |
           pip install maturin
 
-      - name: Update version if workflow_dispatch
-        if: github.event_name == 'workflow_dispatch'
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            # Update runtime/Cargo.toml first (single source of truth)
+            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" runtime/Cargo.toml
+          else
+            # Extract version from runtime/Cargo.toml (release trigger)
+            VERSION=$(grep '^version = ' runtime/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using version: $VERSION"
+
+      - name: Sync version to Python binding
         working-directory: bindings/python
         run: |
-          # Update version in pyproject.toml
-          python3 << EOF
-          import re
-          with open('pyproject.toml', 'r') as f:
-              content = f.read()
-          content = re.sub(
-              r'^version = ".*"',
-              f'version = "${{ github.event.inputs.version }}"',
-              content,
-              flags=re.MULTILINE
-          )
-          with open('pyproject.toml', 'w') as f:
-              f.write(content)
-          EOF
+          python -c "import re; content = open('pyproject.toml').read(); content = re.sub(r'^version = \".*\"', 'version = \"${{ steps.version.outputs.version }}\"', content, flags=re.MULTILINE); open('pyproject.toml', 'w').write(content)"
 
       - name: Build Python package
         working-directory: bindings/python
@@ -167,10 +174,22 @@ jobs:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
 
+      - name: Determine version for tag
+        if: github.event_name == 'workflow_dispatch'
+        id: tag-version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=$(grep '^version = ' runtime/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Create git tag (if workflow_dispatch)
         if: github.event_name == 'workflow_dispatch' && success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "python-v${{ github.event.inputs.version }}"
-          git push origin "python-v${{ github.event.inputs.version }}"
+          git tag "python-v${{ steps.tag-version.outputs.version }}"
+          git push origin "python-v${{ steps.tag-version.outputs.version }}"

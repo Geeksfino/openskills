@@ -41,6 +41,26 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
           rustup target add aarch64-unknown-linux-musl
 
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            # Update runtime/Cargo.toml first (single source of truth)
+            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" runtime/Cargo.toml
+          else
+            # Extract version from runtime/Cargo.toml (release trigger)
+            VERSION=$(grep '^version = ' runtime/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using version: $VERSION"
+
+      - name: Sync version to TypeScript binding
+        working-directory: bindings/ts
+        run: |
+          npm version ${{ steps.version.outputs.version }} --no-git-tag-version
+
       - name: Install dependencies
         working-directory: bindings/ts
         run: npm ci
@@ -49,12 +69,6 @@ jobs:
         working-directory: bindings/ts
         run: |
           npm run build && npm run postbuild
-
-      - name: Update version if workflow_dispatch
-        if: github.event_name == 'workflow_dispatch'
-        working-directory: bindings/ts
-        run: |
-          npm version ${{ github.event.inputs.version }} --no-git-tag-version
 
       - name: Verify package contents
         working-directory: bindings/ts
@@ -76,5 +90,5 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "v${{ github.event.inputs.version }}"
-          git push origin "v${{ github.event.inputs.version }}"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
