@@ -334,3 +334,5 @@ The `examples/claude-official-skills` directory is a git submodule pointing to [
 ## License
 
 MIT
+
+[English](LICENSE) | [中文](LICENSE.zh.md)

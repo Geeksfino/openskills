@@ -332,3 +332,5 @@ cargo build --release
 ## 许可证
 
 MIT
+
+[English](LICENSE) | [中文](LICENSE.zh.md)
