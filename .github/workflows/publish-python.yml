@@ -55,6 +55,7 @@ jobs:
 
       - name: Sync version to Python binding
         working-directory: bindings/python
+        shell: bash
         run: |
           python -c "import re; content = open('pyproject.toml').read(); content = re.sub(r'^version = \".*\"', 'version = \"${{ steps.version.outputs.version }}\"', content, flags=re.MULTILINE); open('pyproject.toml', 'w').write(content)"
 
@@ -125,6 +126,7 @@ jobs:
 
       - name: Sync version to Python binding
         working-directory: bindings/python
+        shell: bash
         run: |
           python -c "import re; content = open('pyproject.toml').read(); content = re.sub(r'^version = \".*\"', 'version = \"${{ steps.version.outputs.version }}\"', content, flags=re.MULTILINE); open('pyproject.toml', 'w').write(content)"
 
