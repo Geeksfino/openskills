@@ -23,7 +23,7 @@ OpenSkills 与 Claude Skills **100% 语法兼容**，这意味着任何遵循 Cl
    - **自动检测**：运行时根据技能类型自动选择合适的沙箱
    - **两全其美**：WASM 提供可移植性和安全性，seatbelt 提供原生灵活性
 
-3. **JavaScript/TypeScript 优先**：OpenSkills 针对基于 JavaScript/TypeScript 的技能进行了优化，可以使用 `javy`（基于 QuickJS）等工具编译为 WASM 组件。这使得技能编写者可以使用熟悉的语言和生态系统。
+3. **JavaScript/TypeScript 优先**：OpenSkills 针对基于 JavaScript/TypeScript 的技能进行了优化，可以使用 `javy-codegen`（一个使用 QuickJS 的 Rust 库）编译为 WASM 组件。这使得技能编写者可以使用熟悉的语言和生态系统，编译通过库以编程方式完成，而不需要外部 CLI 工具。
 
 ### 目标用例
 
@@ -110,16 +110,35 @@ pip install openskills
 
 ### 构建技能
 
-```bash
-# 安装构建依赖
-cargo install javy-cli  # 用于 JavaScript → WASM 编译
+OpenSkills 使用 **`javy-codegen`**（一个 Rust 库）将 JavaScript/TypeScript 编译为 WASM。这种方法不需要安装 `javy` CLI 工具——编译通过库以编程方式完成。
 
+**先决条件**：您需要一个 `plugin.wasm` 文件（javy 插件）。使用我们的辅助脚本构建一次：
+
+```bash
+# 构建 javy 插件（一次性设置）
+./scripts/build_javy_plugin.sh
+
+# 导出插件路径（或添加到您的 shell 配置文件中）
+export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+```
+
+**构建技能**：
+
+```bash
 # 从 TypeScript/JavaScript 构建技能
 cd my-skill
 openskills build
 
-# 这将编译 src/index.ts → wasm/skill.wasm
+# 这将使用 javy-codegen 编译 src/index.ts → wasm/skill.wasm
 ```
+
+**工作原理**：
+- OpenSkills 使用 `javy-codegen`（一个 Rust crate）作为库依赖
+- 该库需要一个 `plugin.wasm` 文件来执行 JavaScript → WASM 编译
+- 插件从 javy 仓库构建并"wizened"（初始化）以供使用
+- 一旦您有了插件，就可以在没有任何 CLI 工具的情况下构建技能
+
+查看 [构建工具指南](runtime/BUILD.md) 了解有关构建过程和插件机制的详细信息。
 
 ### 使用技能
 

@@ -76,15 +76,16 @@ This compiles `src/index.ts` → `wasm/skill.wasm` using javy.
 
 ## Requirements
 
-- **javy**: JavaScript to WASM compiler
+- **javy plugin**: OpenSkills uses `javy-codegen` as a library (no CLI needed), but requires a `plugin.wasm` file.
   
-  **Note**: Must be built from source (cargo install --git doesn't work):
+  **Quick setup**:
   ```bash
-  git clone https://github.com/bytecodealliance/javy.git
-  cd javy
-  brew install binaryen && rustup target add wasm32-wasip1  # macOS
-  cargo install --path crates/cli
+  # From repository root
+  ./scripts/build_javy_plugin.sh
+  export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
   ```
+  
+  See [Build Tool Guide](../../../../runtime/BUILD.md) for detailed plugin setup instructions.
 
 - **esbuild** (optional, for TypeScript): Automatically installed via `npx` if not present
 

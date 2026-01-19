@@ -23,7 +23,7 @@ This combination provides the best of both worlds: the portability and security 
    - **Automatic Detection**: Runtime automatically chooses the appropriate sandbox based on skill type
    - **Best of Both Worlds**: WASM for portability and security, seatbelt for native flexibility
 
-3. **JavaScript/TypeScript First**: OpenSkills is optimized for JavaScript/TypeScript-based skills, which can be compiled to WASM components using tools like `javy` (QuickJS-based). This allows skill writers to use familiar languages and ecosystems.
+3. **JavaScript/TypeScript First**: OpenSkills is optimized for JavaScript/TypeScript-based skills, which can be compiled to WASM components using `javy-codegen` (a Rust library that uses QuickJS). This allows skill writers to use familiar languages and ecosystems, with compilation happening programmatically via the library rather than requiring external CLI tools.
 
 ### Target Use Case
 
@@ -110,16 +110,35 @@ pip install openskills
 
 ### Building a Skill
 
-```bash
-# Install build dependencies
-cargo install --git https://github.com/bytecodealliance/javy javy-cli  # For JavaScript → WASM compilation
+OpenSkills uses **`javy-codegen`** (a Rust library) to compile JavaScript/TypeScript to WASM. This approach doesn't require installing the `javy` CLI tool—the compilation happens programmatically using the library.
 
+**Prerequisites**: You need a `plugin.wasm` file (the javy plugin). Build it once using our helper script:
+
+```bash
+# Build the javy plugin (one-time setup)
+./scripts/build_javy_plugin.sh
+
+# Export the plugin path (or add to your shell profile)
+export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+```
+
+**Build a skill**:
+
+```bash
 # Build a skill from TypeScript/JavaScript
 cd my-skill
 openskills build
 
-# This compiles src/index.ts → wasm/skill.wasm
+# This compiles src/index.ts → wasm/skill.wasm using javy-codegen
 ```
+
+**How it works**:
+- OpenSkills uses `javy-codegen` (a Rust crate) as a library dependency
+- The library requires a `plugin.wasm` file to perform JavaScript → WASM compilation
+- The plugin is built from the javy repository and "wizened" (initialized) for use
+- Once you have the plugin, you can build skills without any CLI tools
+
+See [Build Tool Guide](runtime/BUILD.md) for detailed information about the build process and plugin mechanism.
 
 ### Using Skills
 
@@ -248,11 +267,13 @@ This dual approach means you get:
 openskills/
 ├── runtime/              # Rust core runtime
 │   ├── src/
-│   │   ├── build.rs      # Build tool for TS/JS → WASM
+│   │   ├── build.rs      # Build tool for TS/JS → WASM (uses javy-codegen)
 │   │   ├── wasm_runner.rs # WASI 0.3 execution
 │   │   ├── native_runner.rs # Seatbelt execution (macOS)
 │   │   └── ...
 │   └── BUILD.md          # Build tool documentation
+├── scripts/
+│   └── build_javy_plugin.sh  # Helper script to build javy plugin
 ├── bindings/             # Language bindings
 │   ├── ts/              # TypeScript (napi-rs)
 │   └── python/           # Python (PyO3)
