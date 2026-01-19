@@ -92,7 +92,7 @@ OpenSkills 将在保持其 WASM 优先理念的同时不断发展以解决限制
 
 ```bash
 # Rust（从源码）
-git clone [<repository-url>](https://github.com/Geeksfino/openskills.git)
+git clone https://github.com/Geeksfino/openskills.git
 cd openskills
 
 # 初始化子模块（测试和示例需要）
@@ -296,7 +296,7 @@ openskills/
 
 ```bash
 # 克隆并初始化子模块（用于测试和示例）
-git clone [<repository-url>](https://github.com/Geeksfino/openskills.git)
+git clone https://github.com/Geeksfino/openskills.git
 cd openskills
 git submodule update --init --recursive
 
