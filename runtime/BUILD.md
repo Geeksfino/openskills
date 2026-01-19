@@ -21,10 +21,25 @@ openskills build --force
 ## Requirements
 
 ### Required
-- **javy**: JavaScript to WASM compiler
-  ```bash
-  cargo install javy-cli
-  ```
+- **javy plugin**: OpenSkills uses `javy-codegen` as a library dependency (no CLI installation needed), but requires a `plugin.wasm` file.
+
+  The plugin can be provided via:
+  1. **Environment variable**: Set `JAVY_PLUGIN_PATH` to point to `plugin_wizened.wasm`
+  2. **Current directory**: Place `plugin_wizened.wasm` in the current directory
+  3. **Build from source** (helper script):
+     ```bash
+     scripts/build_javy_plugin.sh
+     ```
+  4. **Build from source** (manual):
+     ```bash
+     git clone https://github.com/bytecodealliance/javy.git
+     cd javy
+     cargo build --release --target wasm32-wasip1 -p javy-plugin
+     cargo run -p javy-cli -- init-plugin \
+       target/wasm32-wasip1/release/plugin.wasm \
+       --out target/wasm32-wasip1/release/plugin_wizened.wasm
+     export JAVY_PLUGIN_PATH=$(pwd)/target/wasm32-wasip1/release/plugin_wizened.wasm
+     ```
 
 ### Optional (for TypeScript)
 - **esbuild** (recommended, faster): Automatically installed via `npx` if not present
@@ -84,7 +99,7 @@ openskills build --output custom/path/skill.wasm
 
 The build tool provides clear error messages:
 - Missing source files
-- Missing javy installation
+- Missing javy plugin (with instructions on how to obtain it)
 - TypeScript compilation errors
 - JavaScript to WASM compilation errors
 
@@ -107,7 +122,8 @@ Example GitHub Actions workflow:
 ```yaml
 - name: Build skill
   run: |
-    cargo install javy-cli
+    # Build javy plugin first
+    scripts/build_javy_plugin.sh
     openskills build --verbose
     
 - name: Verify WASM matches source

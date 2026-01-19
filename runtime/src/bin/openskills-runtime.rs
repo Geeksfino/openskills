@@ -383,7 +383,9 @@ fn cmd_build(args: &[String]) {
                 eprintln!("  openskills build --verbose           # Build with verbose output");
                 eprintln!();
                 eprintln!("Requirements:");
-                eprintln!("  - javy: Install with 'cargo install javy-cli'");
+                eprintln!("  - javy plugin: Set JAVY_PLUGIN_PATH or place plugin_wizened.wasm in current directory");
+                eprintln!("    Build plugin: scripts/build_javy_plugin.sh");
+                eprintln!("    Manual build: git clone https://github.com/bytecodealliance/javy.git && cd javy && cargo build --release --target wasm32-wasip1 -p javy-plugin && cargo run -p javy-cli -- init-plugin target/wasm32-wasip1/release/plugin.wasm --out target/wasm32-wasip1/release/plugin_wizened.wasm");
                 eprintln!("  - For TypeScript: tsc or esbuild (via npx)");
                 return;
             }

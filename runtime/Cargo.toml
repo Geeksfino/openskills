@@ -43,7 +43,10 @@ wasmtime = { version = "40", features = ["component-model-async", "component-mod
 # We explicitly disable wasmtime-wasi default features to avoid relying on legacy WASI "preview" APIs.
 wasmtime-wasi = { version = "40", default-features = false, features = ["p3"] }
 cap-std = "2.0"
-tokio = { version = "1", features = ["io-util"] }
+tokio = { version = "1", features = ["io-util", "rt-multi-thread"] }
+
+# JavaScript to WASM compilation
+javy-codegen = "3.0"
 
 [dev-dependencies]
 tempfile = "3.10"

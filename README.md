@@ -112,7 +112,7 @@ pip install openskills
 
 ```bash
 # Install build dependencies
-cargo install javy-cli  # For JavaScript → WASM compilation
+cargo install --git https://github.com/bytecodealliance/javy javy-cli  # For JavaScript → WASM compilation
 
 # Build a skill from TypeScript/JavaScript
 cd my-skill

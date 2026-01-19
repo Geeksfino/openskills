@@ -4,11 +4,12 @@
 //! - TypeScript (.ts) → transpile to JS → compile to WASM
 //! - JavaScript (.js) → compile to WASM
 //!
-//! Uses javy (QuickJS-based) for JS→WASM compilation.
+//! Uses javy-codegen library for JS→WASM compilation.
 
 use crate::errors::OpenSkillError;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use javy_codegen::{Generator, JS, LinkingKind, Plugin, SourceEmbedding};
 
 /// Build configuration for skill compilation.
 #[derive(Debug, Clone)]
@@ -60,26 +61,7 @@ pub fn detect_source_file(skill_dir: &Path) -> Result<PathBuf, OpenSkillError> {
     )))
 }
 
-/// Check if javy is installed and available.
-pub fn check_javy_installed() -> Result<(), OpenSkillError> {
-    let output = Command::new("javy")
-        .arg("--version")
-        .output()
-        .map_err(|e| {
-            OpenSkillError::BuildError(format!(
-                "javy not found. Install with: cargo install javy-cli\nError: {}",
-                e
-            ))
-        })?;
-
-    if !output.status.success() {
-        return Err(OpenSkillError::BuildError(
-            "javy command failed. Install with: cargo install javy-cli".to_string(),
-        ));
-    }
-
-    Ok(())
-}
+// Note: javy-codegen is now a library dependency, so no need to check for CLI installation
 
 /// Transpile TypeScript to JavaScript.
 pub fn transpile_typescript(
@@ -182,7 +164,7 @@ pub fn transpile_typescript(
     ))
 }
 
-/// Compile JavaScript to WASM component using javy.
+/// Compile JavaScript to WASM component using javy-codegen library.
 pub fn compile_js_to_wasm(
     js_file: &Path,
     output_wasm: &Path,
@@ -202,24 +184,78 @@ pub fn compile_js_to_wasm(
         eprintln!("Compiling {} to {}", js_file.display(), output_wasm.display());
     }
 
-    let status = Command::new("javy")
-        .arg("compile")
-        .arg(js_file.to_string_lossy().to_string())
-        .arg("-o")
-        .arg(output_wasm.to_string_lossy().to_string())
-        .status()
-        .map_err(|e| {
-            OpenSkillError::BuildError(format!(
-                "Failed to run javy compile: {}\nMake sure javy is installed: cargo install javy-cli",
-                e
-            ))
-        })?;
+    // Read JavaScript source
+    let js = JS::from_file(js_file).map_err(|e| {
+        OpenSkillError::BuildError(format!(
+            "Failed to read JavaScript file {}: {}",
+            js_file.display(),
+            e
+        ))
+    })?;
 
-    if !status.success() {
-        return Err(OpenSkillError::BuildError(
-            "JavaScript to WASM compilation failed".to_string(),
-        ));
-    }
+    // Load the javy plugin
+    // The plugin can be provided via JAVY_PLUGIN_PATH environment variable,
+    // or we'll try to find it in common locations
+    let plugin = {
+        let plugin_path = std::env::var("JAVY_PLUGIN_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| {
+                // Try common locations
+                let candidates = [
+                    PathBuf::from("plugin_wizened.wasm"),
+                    PathBuf::from("plugin.wasm"),
+                    PathBuf::from("../javy/target/wasm32-wasip1/release/plugin_wizened.wasm"),
+                    PathBuf::from("../javy/target/wasm32-wasip1/release/plugin.wasm"),
+                    PathBuf::from("~/.cargo/bin/plugin_wizened.wasm"),
+                    PathBuf::from("~/.cargo/bin/plugin.wasm"),
+                ];
+                candidates.iter().find(|p| p.exists()).cloned()
+            });
+
+        match plugin_path {
+            Some(path) => Plugin::new_from_path(&path).map_err(|e| {
+                OpenSkillError::BuildError(format!(
+                    "Failed to load javy plugin from {}: {}",
+                    path.display(), e
+                ))
+            })?,
+            None => {
+                return Err(OpenSkillError::BuildError(
+                    "javy plugin not found. javy-codegen requires a plugin.wasm file.\n\
+                    Options:\n  \
+                    1. Set JAVY_PLUGIN_PATH environment variable to point to plugin.wasm\n  \
+                    2. Place plugin_wizened.wasm in the current directory\n  \
+                    3. Run scripts/build_javy_plugin.sh (recommended)\n  \
+                    4. Build the plugin: git clone https://github.com/bytecodealliance/javy.git && \
+                       cd javy && cargo build --release --target wasm32-wasip1 -p javy-plugin".to_string(),
+                ));
+            }
+        }
+    };
+
+    // Create generator with default configuration
+    let mut generator = Generator::new(plugin);
+    generator
+        .source_embedding(SourceEmbedding::Compressed)
+        .linking(LinkingKind::Static);
+
+    // Generate WASM (synchronous operation)
+    let wasm = generator.generate(&js).map_err(|e| {
+        OpenSkillError::BuildError(format!(
+            "Failed to generate WASM from JavaScript: {}",
+            e
+        ))
+    })?;
+
+    // Write WASM to output file
+    std::fs::write(output_wasm, wasm).map_err(|e| {
+        OpenSkillError::BuildError(format!(
+            "Failed to write WASM output to {}: {}",
+            output_wasm.display(),
+            e
+        ))
+    })?;
 
     Ok(())
 }
@@ -272,9 +308,6 @@ pub fn build_skill(config: BuildConfig) -> Result<PathBuf, OpenSkillError> {
             }
         }
     }
-
-    // Check javy is installed
-    check_javy_installed()?;
 
     // Determine if we need TypeScript transpilation
     let js_file = if source_file.extension().and_then(|s| s.to_str()) == Some("ts") {
