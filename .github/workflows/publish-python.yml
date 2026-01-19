@@ -43,7 +43,9 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
             # Update runtime/Cargo.toml first (single source of truth)
-            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" runtime/Cargo.toml
+            # Use .bak extension for cross-platform compatibility (macOS requires extension)
+            sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" runtime/Cargo.toml
+            rm -f runtime/Cargo.toml.bak
           else
             # Extract version from runtime/Cargo.toml (release trigger)
             VERSION=$(grep '^version = ' runtime/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
@@ -111,7 +113,9 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
             # Update runtime/Cargo.toml first (single source of truth)
-            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" runtime/Cargo.toml
+            # Use .bak extension for cross-platform compatibility (macOS requires extension)
+            sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" runtime/Cargo.toml
+            rm -f runtime/Cargo.toml.bak
           else
             # Extract version from runtime/Cargo.toml (release trigger)
             VERSION=$(grep '^version = ' runtime/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
@@ -179,11 +183,8 @@ jobs:
         id: tag-version
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION=$(grep '^version = ' runtime/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          fi
+          # This step only runs on workflow_dispatch, so we can directly use the input
+          VERSION="${{ github.event.inputs.version }}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create git tag (if workflow_dispatch)
