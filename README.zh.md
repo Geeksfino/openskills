@@ -329,6 +329,10 @@ cargo build --release
 - ✅ **原生脚本**：Seatbelt 沙箱（macOS）
 - 🚧 **原生脚本（Linux）**：规划中的 Seccomp 支持
 
+## 相关项目
+
+- **[FinClip ChatKit](https://github.com/Geeksfino/finclip-chatkit)**: 用于构建 AI 驱动的聊天体验的移动端 SDK。为 iOS 和 Android 提供生产就绪的聊天 UI 组件，支持AG-uI、 MCP-UI 和 OpenAI Apps SDK 集成。非常适合需要 OpenSkills 运行时能力和精美聊天界面的移动智能体应用开发者。
+
 ## 许可证
 
 MIT

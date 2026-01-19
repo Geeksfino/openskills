@@ -331,6 +331,10 @@ The `examples/claude-official-skills` directory is a git submodule pointing to [
 - ✅ **Native Scripting**: Seatbelt sandbox (macOS)
 - 🚧 **Native Scripting (Linux)**: Seccomp support planned
 
+## Related Projects
+
+- **[FinClip ChatKit](https://github.com/Geeksfino/finclip-chatkit)**: A mobile-friendly SDK for building AI-powered chat experiences. Provides production-ready chat UI components for iOS and Android, with support for AG-UI, MCP-UI and OpenAI Apps SDK integration. Perfect for developers building mobile agent applications that need both the runtime capabilities of OpenSkills and polished chat interfaces.
+
 ## License
 
 MIT
