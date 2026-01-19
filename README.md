@@ -92,7 +92,7 @@ OpenSkills will evolve to address limitations while maintaining its WASM-first p
 
 ```bash
 # Rust (from source)
-git clone <repository-url>
+git clone [<repository-url>](https://github.com/Geeksfino/openskills.git)
 cd openskills
 
 # Initialize submodules (required for tests and examples)
@@ -298,7 +298,7 @@ openskills/
 
 ```bash
 # Clone with submodules (for tests and examples)
-git clone <repository-url>
+git clone [<repository-url>](https://github.com/Geeksfino/openskills.git)
 cd openskills
 git submodule update --init --recursive
 
