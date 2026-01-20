@@ -76,13 +76,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
+            targets: x86_64-unknown-linux-gnu
           - os: macos-latest
-            target: x86_64-apple-darwin
-          - os: macos-latest
-            target: aarch64-apple-darwin
+            targets: x86_64-apple-darwin aarch64-apple-darwin
     permissions:
       contents: write
     outputs:
@@ -101,7 +97,13 @@ jobs:
         with:
           toolchain: stable
           override: true
-          target: ${{ matrix.target }}
+
+      - name: Install Rust targets
+        run: |
+          # Install all targets needed for this OS
+          for target in ${{ matrix.targets }}; do
+            rustup target add $target
+          done
 
       - name: Install maturin
         run: |
@@ -130,15 +132,19 @@ jobs:
         run: |
           python -c "import re; content = open('pyproject.toml').read(); content = re.sub(r'^version = \".*\"', 'version = \"${{ steps.version.outputs.version }}\"', content, flags=re.MULTILINE); open('pyproject.toml', 'w').write(content)"
 
-      - name: Build Python package
+      - name: Build Python packages for all targets
         working-directory: bindings/python
         run: |
-          maturin build --release --target ${{ matrix.target }} --out dist
+          # Build for all targets specified for this OS
+          for target in ${{ matrix.targets }}; do
+            echo "Building for target: $target"
+            maturin build --release --target $target --out dist
+          done
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.target }}
+          name: wheels-${{ matrix.os }}
           path: bindings/python/dist/*.whl
 
   publish:
