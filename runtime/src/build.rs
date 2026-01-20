@@ -9,6 +9,8 @@
 use crate::errors::OpenSkillError;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[cfg(feature = "build-tool")]
 use javy_codegen::{Generator, JS, LinkingKind, Plugin, SourceEmbedding};
 
 /// Build configuration for skill compilation.
@@ -165,6 +167,7 @@ pub fn transpile_typescript(
 }
 
 /// Compile JavaScript to WASM component using javy-codegen library.
+#[cfg(feature = "build-tool")]
 pub fn compile_js_to_wasm(
     js_file: &Path,
     output_wasm: &Path,
@@ -328,7 +331,12 @@ pub fn build_skill(config: BuildConfig) -> Result<PathBuf, OpenSkillError> {
     if config.verbose {
         eprintln!("Compiling to WASM: {}", output_wasm.display());
     }
+    #[cfg(feature = "build-tool")]
     compile_js_to_wasm(&js_file, &output_wasm, config.verbose)?;
+    #[cfg(not(feature = "build-tool"))]
+    return Err(OpenSkillError::BuildError(
+        "Build tool functionality is not available. Enable the 'build-tool' feature.".to_string(),
+    ));
 
     // Clean up temporary JS file if it was created from TS
     if source_file.extension().and_then(|s| s.to_str()) == Some("ts") {

@@ -5,3 +5,8 @@ members = [
   "bindings/python",
 ]
 resolver = "2"
+
+# Define wasmtime dependencies at workspace level for consistency
+[workspace.dependencies]
+wasmtime = { version = "40", features = ["component-model-async", "component-model-async-bytes"] }
+wasmtime-wasi = { version = "40", default-features = false, features = ["p3"] }

@@ -38,15 +38,24 @@ url = "2.5"
 # WASM runtime
 # Using latest wasmtime (40+) for WASI 0.3.0 preview support
 # WASI 0.3.0 final release expected February 2026
-wasmtime = { version = "40", features = ["component-model-async", "component-model-async-bytes"] }
+# Using workspace dependency to ensure version consistency
+wasmtime = { workspace = true }
 # IMPORTANT: OpenSkills runtime is WASI 0.3 (WASIp3) / component-model-only.
 # We explicitly disable wasmtime-wasi default features to avoid relying on legacy WASI "preview" APIs.
-wasmtime-wasi = { version = "40", default-features = false, features = ["p3"] }
+wasmtime-wasi = { workspace = true }
 cap-std = "2.0"
 tokio = { version = "1", features = ["io-util", "rt-multi-thread"] }
 
 # JavaScript to WASM compilation
-javy-codegen = "3.0"
+# Only include when building the binary (build tool), not when building as a library
+# This prevents wasmtime version conflicts when building Python/TS bindings
+javy-codegen = { version = "3.0", optional = true }
+
+[features]
+default = ["build-tool"]
+# Enable javy-codegen for the build tool binary
+# Python/TS bindings disable this via default-features = false to avoid wasmtime conflicts
+build-tool = ["javy-codegen"]
 
 [dev-dependencies]
 tempfile = "3.10"

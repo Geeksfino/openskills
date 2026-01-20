@@ -11,4 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.27", features = ["extension-module"] }
 serde_json = "1.0"
-openskills-runtime = { path = "../../runtime" }
+# Disable build-tool feature to avoid wasmtime version conflicts
+# The build-tool feature includes javy-codegen which depends on wasmtime v36
+# We only need the runtime functionality, not the build tool
+openskills-runtime = { path = "../../runtime", default-features = false }
