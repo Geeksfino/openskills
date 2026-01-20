@@ -14,18 +14,41 @@ impl JavyBuildPlugin {
         let custom_path = config
             .custom
             .get("plugin_path")
-            .map(|value| PathBuf::from(value));
+            .map(|value| {
+                // Expand ~ in custom paths
+                if value.starts_with("~/") {
+                    dirs::home_dir()
+                        .map(|home| home.join(&value[2..]))
+                        .unwrap_or_else(|| PathBuf::from(value))
+                } else {
+                    PathBuf::from(value)
+                }
+            });
         custom_path
-            .or_else(|| std::env::var("JAVY_PLUGIN_PATH").ok().map(PathBuf::from))
             .or_else(|| {
-                let candidates = [
+                std::env::var("JAVY_PLUGIN_PATH").ok().map(|path| {
+                    // Expand ~ in environment variable paths
+                    if path.starts_with("~/") {
+                        dirs::home_dir()
+                            .map(|home| home.join(&path[2..]))
+                            .unwrap_or_else(|| PathBuf::from(&path))
+                    } else {
+                        PathBuf::from(path)
+                    }
+                })
+            })
+            .or_else(|| {
+                let mut candidates = vec![
                     PathBuf::from("plugin_wizened.wasm"),
                     PathBuf::from("plugin.wasm"),
                     PathBuf::from("../javy/target/wasm32-wasip1/release/plugin_wizened.wasm"),
                     PathBuf::from("../javy/target/wasm32-wasip1/release/plugin.wasm"),
-                    PathBuf::from("~/.cargo/bin/plugin_wizened.wasm"),
-                    PathBuf::from("~/.cargo/bin/plugin.wasm"),
                 ];
+                // Add home directory paths with proper expansion
+                if let Some(home) = dirs::home_dir() {
+                    candidates.push(home.join(".cargo/bin/plugin_wizened.wasm"));
+                    candidates.push(home.join(".cargo/bin/plugin.wasm"));
+                }
                 candidates.iter().find(|p| p.exists()).cloned()
             })
     }
