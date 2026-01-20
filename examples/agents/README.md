@@ -7,7 +7,7 @@ frameworks so both TypeScript and Python developers can reuse the same skills.
 - Build or place skills under `examples/skills` (see `runtime/BUILD.md`)
 - Install the runtime bindings for your language:
   - TypeScript: `npm install @finogeek/openskills`
-  - Python: `pip install openskills`
+  - Python: `pip install finclip-openskills`
 
 ### Examples
 - `langchain-js`: LangChainJS agent that calls OpenSkills skills as tools

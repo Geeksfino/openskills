@@ -5,7 +5,7 @@ Python bindings for OpenSkills Runtime - Claude Skills compatible runtime with W
 ## Installation
 
 ```bash
-pip install openskills
+pip install finclip-openskills
 ```
 
 ## Usage

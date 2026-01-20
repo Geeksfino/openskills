@@ -105,7 +105,7 @@ cargo build --release
 npm install @finogeek/openskills
 
 # Python
-pip install openskills
+pip install finclip-openskills
 ```
 
 ### 构建技能

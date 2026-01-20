@@ -3,7 +3,7 @@ requires = ["maturin>=1.4"]
 build-backend = "maturin"
 
 [project]
-name = "openskills"
+name = "finclip-openskills"
 version = "0.2.0"
 description = "OpenSkill Runtime Python bindings - Claude Skills compatible runtime with WASM sandbox"
 readme = "README.md"
@@ -48,4 +48,3 @@ dev = ["pytest>=7.0.0"]
 [tool.maturin]
 bindings = "pyo3"
 module-name = "openskills"
-compatibility = "linux"
