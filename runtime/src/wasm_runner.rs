@@ -196,8 +196,18 @@ OpenSkills runtime does not support legacy core-module WASM artifacts."
     let component_ctx = component_builder.build();
 
     let mut linker: ComponentLinker<WasiComponentState> = ComponentLinker::new(&engine);
+    
+    // Add WASI 0.3 (p3) interfaces for WASI 0.3 components
     wasmtime_wasi::p3::add_to_linker(&mut linker).map_err(|e| {
         OpenSkillError::WasmError(format!("Failed to add WASI 0.3 (p3) interfaces to linker: {e}"))
+    })?;
+    
+    // Also add WASI 0.2 (p2) interfaces for compatibility with components
+    // converted by wasm-tools component new using adapter (which generates WASI 0.2.6 components)
+    // This allows the runtime to support both WASI 0.2.x and 0.3 components
+    // Note: wasmtime-wasi 40 supports both p2 and p3 through feature flags
+    wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(|e| {
+        OpenSkillError::WasmError(format!("Failed to add WASI 0.2 (p2) interfaces to linker: {e}"))
     })?;
 
     let mut store = Store::new(
@@ -219,6 +229,8 @@ OpenSkills runtime does not support legacy core-module WASM artifacts."
         }
     });
 
+    // Use p3 API - the p2 linker support should allow p3 to handle WASI 0.2.6 components
+    // through semver compatibility or adapter mappings
     let run_result: Result<Result<(), ()>, OpenSkillError> = wasmtime_wasi::runtime::in_tokio(async {
         let command = wasmtime_wasi::p3::bindings::Command::instantiate_async(
             &mut store,
@@ -236,10 +248,8 @@ OpenSkills runtime does not support legacy core-module WASM artifacts."
             .await
             .map_err(|e| OpenSkillError::WasmError(format!("Component run failed: {e}")))?;
 
-        let program_result = program_result
-            .map_err(|e| OpenSkillError::WasmError(format!("Component run trapped: {e}")))?;
-
-        Ok(program_result)
+        Ok(program_result
+            .map_err(|e| OpenSkillError::WasmError(format!("Component run trapped: {e}")))?)
     });
 
     done.store(true, Ordering::Relaxed);

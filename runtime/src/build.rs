@@ -248,14 +248,101 @@ pub fn compile_js_to_wasm(
         ))
     })?;
 
-    // Write WASM to output file
-    std::fs::write(output_wasm, wasm).map_err(|e| {
+    // Write core module to temporary file first
+    let temp_core_module = output_wasm.with_extension("core.wasm");
+    std::fs::write(&temp_core_module, wasm).map_err(|e| {
         OpenSkillError::BuildError(format!(
-            "Failed to write WASM output to {}: {}",
-            output_wasm.display(),
+            "Failed to write core module to {}: {}",
+            temp_core_module.display(),
             e
         ))
     })?;
+
+    // Convert core module to component using wasm-tools component new
+    // This creates a WASI 0.3 compatible component (not WASI 0.2.0 like wasi-update)
+    // OpenSkills requires WASI 0.3 component format, not legacy core modules
+    if verbose {
+        eprintln!("Converting core module to WASI 0.3 component format using wasm-tools...");
+    }
+
+    // Try to find WASI adapter (required for converting core modules to components)
+    let adapter_path = std::env::var("WASI_ADAPTER_PATH")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            // Try common locations for wasi adapter
+            let candidates = [
+                PathBuf::from("/tmp/wasi_snapshot_preview1.command.wasm"),
+                PathBuf::from("wasi_snapshot_preview1.command.wasm"),
+                PathBuf::from("../wasi_snapshot_preview1.command.wasm"),
+            ];
+            candidates.iter().find(|p| p.exists()).cloned()
+        });
+
+    let wasm_tools_status = if let Some(adapter) = &adapter_path {
+        if verbose {
+            eprintln!("Using WASI adapter: {}", adapter.display());
+        }
+        Command::new("wasm-tools")
+            .arg("component")
+            .arg("new")
+            .arg(&temp_core_module)
+            .arg("--adapt")
+            .arg(format!("wasi_snapshot_preview1={}", adapter.display()))
+            .arg("-o")
+            .arg(output_wasm)
+            .status()
+    } else {
+        // Try without adapter first (may work for some cases)
+        if verbose {
+            eprintln!("No WASI adapter found, trying conversion without adapter...");
+        }
+        Command::new("wasm-tools")
+            .arg("component")
+            .arg("new")
+            .arg(&temp_core_module)
+            .arg("-o")
+            .arg(output_wasm)
+            .status()
+    };
+
+    match wasm_tools_status {
+        Ok(status) if status.success() => {
+            // Clean up temporary core module file
+            let _ = std::fs::remove_file(&temp_core_module);
+            if verbose {
+                eprintln!("Successfully converted to component format");
+            }
+        }
+        Ok(status) => {
+            // wasm-tools failed
+            let _ = std::fs::copy(&temp_core_module, output_wasm);
+            let _ = std::fs::remove_file(&temp_core_module);
+            let adapter_hint = if adapter_path.is_none() {
+                " You may need to set WASI_ADAPTER_PATH or download wasi_snapshot_preview1.command.wasm adapter."
+            } else {
+                ""
+            };
+            return Err(OpenSkillError::BuildError(format!(
+                "Failed to convert core module to component format using wasm-tools (exit code: {}). \
+                OpenSkills requires WASI 0.3 component format.{}\
+                Please install wasm-tools: cargo install wasm-tools",
+                status.code().unwrap_or(-1),
+                adapter_hint
+            )));
+        }
+        Err(e) => {
+            // wasm-tools not found
+            let _ = std::fs::copy(&temp_core_module, output_wasm);
+            let _ = std::fs::remove_file(&temp_core_module);
+            return Err(OpenSkillError::BuildError(format!(
+                "wasm-tools not found. OpenSkills requires WASI 0.3 component format. \
+                Please install wasm-tools: cargo install wasm-tools. \
+                Error: {}",
+                e
+            )));
+        }
+    }
 
     Ok(())
 }

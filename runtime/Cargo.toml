@@ -41,7 +41,7 @@ url = "2.5"
 wasmtime = { version = "40", features = ["component-model-async", "component-model-async-bytes"] }
 # IMPORTANT: OpenSkills runtime is WASI 0.3 (WASIp3) / component-model-only.
 # We explicitly disable wasmtime-wasi default features to avoid relying on legacy WASI "preview" APIs.
-wasmtime-wasi = { version = "40", default-features = false, features = ["p3"] }
+wasmtime-wasi = { version = "40", default-features = false, features = ["p3", "p2"] }
 cap-std = "2.0"
 tokio = { version = "1", features = ["io-util", "rt-multi-thread"] }
 

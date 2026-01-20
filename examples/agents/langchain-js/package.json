@@ -4,14 +4,22 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "advanced": "tsx src/advanced-agent.ts"
+    "advanced": "tsx src/advanced-agent.ts",
+    "start:alibaba": "tsx src/index-alibaba.ts",
+    "advanced:alibaba": "tsx src/advanced-agent-alibaba.ts",
+    "web": "tsx web/server.ts"
   },
   "dependencies": {
-    "@langchain/core": "^0.2.0",
-    "@langchain/anthropic": "^0.2.0",
-    "@langchain/openai": "^0.2.5",
     "@finogeek/openskills": "^0.2.0",
+    "@langchain/anthropic": "^0.2.0",
+    "@langchain/community": "^0.3.0",
+    "@langchain/core": "^0.2.0",
+    "@langchain/openai": "^0.2.5",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "express": "^5.2.1",
     "langchain": "^0.2.14",
     "zod": "^3.23.8"
   },
