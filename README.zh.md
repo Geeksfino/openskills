@@ -112,16 +112,19 @@ pip install finclip-openskills
 
 ### 构建技能
 
-OpenSkills 使用 **`javy-codegen`**（一个 Rust 库）将 JavaScript/TypeScript 编译为 WASM。这种方法不需要安装 `javy` CLI 工具——编译通过库以编程方式完成。
+OpenSkills 使用**插件化构建工具**将 JavaScript/TypeScript 编译为 WASM。默认插件是 **`javy`**（通过 `javy-codegen`），也可以根据需要选择其他插件。
 
-**先决条件**：您需要一个 `plugin.wasm` 文件（javy 插件）。使用我们的辅助脚本构建一次：
+**首次设置**（构建技能前必需）：
+
+运行设置脚本以安装构建工具并下载依赖：
 
 ```bash
-# 构建 javy 插件（一次性设置）
-./scripts/build_javy_plugin.sh
-
-# 导出插件路径（或添加到您的 shell 配置文件中）
-export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+# 这将：
+# - 下载 WASI 适配器
+# - 安装 javy CLI（如果可用则下载预构建二进制文件）
+# - 安装 wasm-tools
+# - 检查可选工具（AssemblyScript）
+./scripts/setup_build_tools.sh
 ```
 
 **构建技能**：
@@ -131,14 +134,44 @@ export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wa
 cd my-skill
 openskills build
 
-# 这将使用 javy-codegen 编译 src/index.ts → wasm/skill.wasm
+# 这将使用默认插件（javy）编译 src/index.ts → wasm/skill.wasm
+```
+
+**选择插件**：
+```bash
+openskills build --plugin javy          # 默认（需要 javy plugin.wasm）
+openskills build --plugin quickjs       # 使用 javy CLI + 自动下载适配器
+openskills build --plugin assemblyscript # 使用 asc + 自动下载适配器
+openskills build --list-plugins         # 显示可用插件
+```
+
+**替代方案：javy 插件设置**（如果您更喜欢默认的 javy 插件）：
+
+如果您想使用 `javy` 插件而不是 `quickjs`，您需要构建 javy 插件：
+
+```bash
+# 构建 javy 插件（一次性设置）
+./scripts/build_javy_plugin.sh
+
+# 导出插件路径（或添加到您的 shell 配置文件中）
+export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+```
+
+**配置文件（可选）**：在技能目录放置 `.openskills.toml` 或 `openskills.toml`。
+
+```toml
+[build]
+plugin = "quickjs"  # 或 "assemblyscript"
+
+# 插件选项通常自动检测
+# [build.plugin_options]
+# adapter_path = "~/.cache/openskills/wasi_preview1_adapter.wasm"
 ```
 
 **工作原理**：
-- OpenSkills 使用 `javy-codegen`（一个 Rust crate）作为库依赖
-- 该库需要一个 `plugin.wasm` 文件来执行 JavaScript → WASM 编译
-- 插件从 javy 仓库构建并"wizened"（初始化）以供使用
-- 一旦您有了插件，就可以在没有任何 CLI 工具的情况下构建技能
+- 构建系统根据选择的插件进行编译（或自动检测）
+- QuickJS/AssemblyScript 插件在需要时自动下载 WASI 适配器
+- 工具安装后，无需手动配置即可构建
 
 查看 [构建工具指南](runtime/BUILD.md) 了解有关构建过程和插件机制的详细信息。
 

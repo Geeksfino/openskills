@@ -112,16 +112,19 @@ pip install finclip-openskills
 
 ### Building a Skill
 
-OpenSkills uses **`javy-codegen`** (a Rust library) to compile JavaScript/TypeScript to WASM. This approach doesn't require installing the `javy` CLI tool—the compilation happens programmatically using the library.
+OpenSkills uses a **plugin-based build tool** for JavaScript/TypeScript → WASM. The default plugin is **`javy`** (via `javy-codegen`), but you can choose other plugins as they become available.
 
-**Prerequisites**: You need a `plugin.wasm` file (the javy plugin). Build it once using our helper script:
+**First-time setup** (required before building skills):
+
+Run the setup script to install build tools and download dependencies:
 
 ```bash
-# Build the javy plugin (one-time setup)
-./scripts/build_javy_plugin.sh
-
-# Export the plugin path (or add to your shell profile)
-export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+# This will:
+# - Download the WASI adapter
+# - Install javy CLI (downloads pre-built binary when available)
+# - Install wasm-tools
+# - Check for optional tools (AssemblyScript)
+./scripts/setup_build_tools.sh
 ```
 
 **Build a skill**:
@@ -131,14 +134,44 @@ export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wa
 cd my-skill
 openskills build
 
-# This compiles src/index.ts → wasm/skill.wasm using javy-codegen
+# This compiles src/index.ts → wasm/skill.wasm using the default plugin (javy)
+```
+
+**Choose a plugin**:
+```bash
+openskills build --plugin javy          # Default (requires javy plugin.wasm)
+openskills build --plugin quickjs       # Uses javy CLI + auto-downloads adapter
+openskills build --plugin assemblyscript # Uses asc + auto-downloads adapter
+openskills build --list-plugins         # Show available plugins
+```
+
+**Alternative: javy plugin setup** (if you prefer the default javy plugin):
+
+If you want to use the `javy` plugin instead of `quickjs`, you need to build the javy plugin:
+
+```bash
+# Build the javy plugin (one-time setup)
+./scripts/build_javy_plugin.sh
+
+# Export the plugin path (or add to your shell profile)
+export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+```
+
+**Config file (optional)**: place `.openskills.toml` or `openskills.toml` in the skill directory.
+
+```toml
+[build]
+plugin = "quickjs"  # or "assemblyscript"
+
+# Plugin options are usually auto-detected
+# [build.plugin_options]
+# adapter_path = "~/.cache/openskills/wasi_preview1_adapter.wasm"
 ```
 
 **How it works**:
-- OpenSkills uses `javy-codegen` (a Rust crate) as a library dependency
-- The library requires a `plugin.wasm` file to perform JavaScript → WASM compilation
-- The plugin is built from the javy repository and "wizened" (initialized) for use
-- Once you have the plugin, you can build skills without any CLI tools
+- The build system selects a plugin based on your choice (or auto-detects)
+- QuickJS/AssemblyScript plugins auto-download the WASI adapter if needed
+- Once tools are installed, builds run without manual configuration
 
 See [Build Tool Guide](runtime/BUILD.md) for detailed information about the build process and plugin mechanism.
 

@@ -1928,6 +1928,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "toml 0.8.23",
  "url",
  "walkdir",
  "wasmtime 40.0.2",

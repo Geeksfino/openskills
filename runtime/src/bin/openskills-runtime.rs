@@ -359,6 +359,9 @@ fn cmd_build(args: &[String]) {
     let mut force = false;
     let mut verbose = false;
     let mut output_file: Option<String> = None;
+    let mut plugin: Option<String> = None;
+    let mut list_plugins = false;
+    let mut plugin_config: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -375,18 +378,23 @@ fn cmd_build(args: &[String]) {
                 eprintln!("  --force, -f     Force rebuild even if WASM is up to date");
                 eprintln!("  --verbose, -v   Show verbose output");
                 eprintln!("  --output, -o    Output WASM file path (default: wasm/skill.wasm)");
+                eprintln!("  --plugin        Build plugin to use (default: auto-detect)");
+                eprintln!("  --list-plugins  List available build plugins and exit");
+                eprintln!("  --plugin-option Plugin option (key=value), can be repeated");
                 eprintln!("  --help, -h      Show this help message");
                 eprintln!();
                 eprintln!("Examples:");
                 eprintln!("  openskills build                    # Build current directory");
                 eprintln!("  openskills build my-skill           # Build my-skill directory");
+                eprintln!("  openskills build --plugin javy      # Build with explicit plugin");
+                eprintln!("  openskills build --list-plugins     # List available plugins");
                 eprintln!("  openskills build --verbose           # Build with verbose output");
                 eprintln!();
                 eprintln!("Requirements:");
-                eprintln!("  - javy plugin: Set JAVY_PLUGIN_PATH or place plugin_wizened.wasm in current directory");
-                eprintln!("    Build plugin: scripts/build_javy_plugin.sh");
-                eprintln!("    Manual build: git clone https://github.com/bytecodealliance/javy.git && cd javy && cargo build --release --target wasm32-wasip1 -p javy-plugin && cargo run -p javy-cli -- init-plugin target/wasm32-wasip1/release/plugin.wasm --out target/wasm32-wasip1/release/plugin_wizened.wasm");
+                eprintln!("  - Build plugins may have additional dependencies");
+                eprintln!("    Use --list-plugins to see available plugins and requirements");
                 eprintln!("  - For TypeScript: tsc or esbuild (via npx)");
+                eprintln!("  - Config file: .openskills.toml or openskills.toml in skill dir");
                 return;
             }
             "--force" | "-f" => {
@@ -406,6 +414,39 @@ fn cmd_build(args: &[String]) {
                     }
                 };
             }
+            "--plugin" => {
+                i += 1;
+                plugin = match args.get(i) {
+                    Some(value) => Some(value.clone()),
+                    None => {
+                        eprintln!("Error: --plugin requires a value");
+                        eprintln!("Usage: openskills build --plugin <name>");
+                        process::exit(1);
+                    }
+                };
+            }
+            "--list-plugins" => {
+                list_plugins = true;
+            }
+            "--plugin-option" => {
+                i += 1;
+                let raw = match args.get(i) {
+                    Some(value) => value,
+                    None => {
+                        eprintln!("Error: --plugin-option requires a value");
+                        eprintln!("Usage: openskills build --plugin-option key=value");
+                        process::exit(1);
+                    }
+                };
+                let mut parts = raw.splitn(2, '=');
+                let key = parts.next().unwrap_or("").trim();
+                let value = parts.next().unwrap_or("").trim();
+                if key.is_empty() || value.is_empty() {
+                    eprintln!("Error: --plugin-option must be in key=value format");
+                    process::exit(1);
+                }
+                plugin_config.insert(key.to_string(), value.to_string());
+            }
             arg if !arg.starts_with('-') && skill_path.is_none() => {
                 skill_path = Some(arg.to_string());
             }
@@ -416,6 +457,26 @@ fn cmd_build(args: &[String]) {
             }
         }
         i += 1;
+    }
+
+    if list_plugins {
+        let plugins = openskills_runtime::list_build_plugins();
+        if plugins.is_empty() {
+            eprintln!("No build plugins available.");
+        } else {
+            eprintln!("Available build plugins:");
+            for plugin in plugins {
+                let status = if plugin.available { "available" } else { "missing deps" };
+                eprintln!(
+                    "  - {} ({}) [{}] extensions: {}",
+                    plugin.name,
+                    plugin.description,
+                    status,
+                    plugin.extensions.join(", ")
+                );
+            }
+        }
+        return;
     }
 
     let skill_path = skill_path.unwrap_or_else(|| {
@@ -435,6 +496,8 @@ fn cmd_build(args: &[String]) {
         output_file: output_file.map(PathBuf::from),
         force,
         verbose,
+        plugin,
+        plugin_config,
     };
 
     match build_skill(config) {

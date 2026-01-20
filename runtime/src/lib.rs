@@ -57,7 +57,7 @@ use validator::validate_skill;
 
 // Re-exports for public API
 pub use audit::{AuditRecord as RuntimeAuditRecord, ExecutionStatus as RuntimeExecutionStatus};
-pub use build::{build_skill, BuildConfig};
+pub use build::{build_skill, BuildConfig, list_build_plugins};
 pub use errors::OpenSkillError as RuntimeError;
 pub use manifest::{constraints, HooksConfig, SkillManifest, WasmConfig};
 pub use context::{ContextOutput, ExecutionContext, OutputType};
