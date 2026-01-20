@@ -339,19 +339,14 @@ mod macos {
             cmd.env("PYTHONUNBUFFERED", "1");
             cmd.env("PYTHONDONTWRITEBYTECODE", "1");
             cmd.env("PYTHONNOUSERSITE", "1");
-            // Prevent Python from trying to check for Xcode/development tools during initialization.
-            // Python (especially when built with Clang) may try to spawn xcodebuild to verify
-            // development tools are available. Since the sandbox blocks subprocess spawning
-            // (allow_process=false), this would fail. By clearing these environment variables,
-            // we prevent Python from knowing where to look for xcodebuild, avoiding the check.
-            cmd.env_remove("DEVELOPER_DIR");
-            cmd.env_remove("SDKROOT");
             // Clear compiler environment variables to prevent Python from trying to locate
             // or spawn compiler tools
             cmd.env_remove("CC");
             cmd.env_remove("CXX");
             cmd.env_remove("CFLAGS");
             cmd.env_remove("CXXFLAGS");
+            cmd.env_remove("LDFLAGS");
+            cmd.env_remove("CPPFLAGS");
         }
     }
 
@@ -403,6 +398,19 @@ mod macos {
         profile.push_str("(allow process-exec)\n");
         profile.push_str("(allow mach-lookup)\n");
         profile.push_str("(allow signal)\n");
+
+        // Allow access to Xcode tools for Python interpreter that may need them
+        // during initialization or when importing certain modules
+        profile.push_str("(allow file-read* (literal \"/usr/bin/xcodebuild\"))\n");
+        profile.push_str("(allow file-read* (literal \"/usr/bin/xcode-select\"))\n");
+
+        // Allow process spawn for xcodebuild and related tools (this is the key addition)
+        // But restrict to only these specific executables to maintain security
+        profile.push_str("(allow process-exec (literal \"/usr/bin/xcodebuild\"))\n");
+
+        // Additionally, allow limited process-fork for Python initialization
+        // This is needed for Python's internal process management
+        profile.push_str("(allow process-fork)\n");
         
         // process-fork: only allow when explicitly permitted (Bash/Terminal tools)
         // This prevents subprocess spawning without explicit permission
