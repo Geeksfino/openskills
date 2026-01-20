@@ -106,6 +106,8 @@ npm install @finogeek/openskills
 
 # Python
 pip install finclip-openskills
+# 注意：预构建的 wheel 包仅适用于 macOS 和 Linux。
+# Windows 用户需要从源码构建：git clone https://github.com/Geeksfino/openskills.git && cd openskills/bindings/python && pip install maturin && maturin develop
 ```
 
 ### 构建技能
