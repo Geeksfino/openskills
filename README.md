@@ -112,7 +112,14 @@ pip install finclip-openskills
 
 ### Building a Skill
 
-OpenSkills uses a **plugin-based build tool** for JavaScript/TypeScript → WASM. The default plugin is **`javy`** (via `javy-codegen`), but you can choose other plugins as they become available.
+OpenSkills uses a **plugin-based build system** for compiling JavaScript/TypeScript → WASM. The system supports multiple build backends (plugins), allowing you to choose the compiler that best fits your needs.
+
+**Plugin System Architecture:**
+- **Plugins**: Modular build backends that handle compilation (e.g., `javy`, `quickjs`, `assemblyscript`)
+- **Auto-detection**: When no plugin is specified, the system tries available plugins in order until one works
+- **Plugin selection**: Choose explicitly via `--plugin` flag or `.openskills.toml` config file
+
+**Recommended for new users**: The `quickjs` plugin (easiest setup - just run the setup script below)
 
 **First-time setup** (required before building skills):
 
@@ -134,16 +141,22 @@ Run the setup script to install build tools and download dependencies:
 cd my-skill
 openskills build
 
-# This compiles src/index.ts → wasm/skill.wasm using the default plugin (javy)
+# Auto-detection: tries plugins in order (javy → quickjs → assemblyscript)
+# until it finds one that's available and has all dependencies
 ```
 
-**Choose a plugin**:
+**Choose a plugin explicitly**:
 ```bash
-openskills build --plugin javy          # Default (requires javy plugin.wasm)
-openskills build --plugin quickjs       # Uses javy CLI + auto-downloads adapter
-openskills build --plugin assemblyscript # Uses asc + auto-downloads adapter
-openskills build --list-plugins         # Show available plugins
+openskills build --plugin quickjs       # Recommended: easiest setup
+openskills build --plugin javy          # Requires javy plugin.wasm file
+openskills build --plugin assemblyscript # Requires asc compiler
+openskills build --list-plugins         # Show all available plugins and their status
 ```
+
+**Plugin comparison:**
+- **`quickjs`** (recommended): Easiest setup - just run setup script. Uses javy CLI + wasm-tools. Supports WASI 0.3.
+- **`javy`**: Requires building javy plugin.wasm file. Uses javy-codegen library. Legacy support.
+- **`assemblyscript`**: High-performance TypeScript-like language. Requires asc compiler.
 
 **Alternative: javy plugin setup** (if you prefer the default javy plugin):
 
@@ -168,10 +181,17 @@ plugin = "quickjs"  # or "assemblyscript"
 # adapter_path = "~/.cache/openskills/wasi_preview1_adapter.wasm"
 ```
 
-**How it works**:
-- The build system selects a plugin based on your choice (or auto-detects)
-- QuickJS/AssemblyScript plugins auto-download the WASI adapter if needed
-- Once tools are installed, builds run without manual configuration
+**How the plugin system works**:
+1. **Plugin selection**: You can specify a plugin via `--plugin` flag, config file, or let the system auto-detect
+2. **Auto-detection**: When no plugin is specified, the system tries registered plugins in order until it finds one that:
+   - Is available (has all required dependencies)
+   - Supports the source file extension (.ts, .js, etc.)
+3. **Plugin execution**: Each plugin handles the full compilation pipeline:
+   - TypeScript transpilation (if needed)
+   - JavaScript/TypeScript → WASM core module
+   - WASM core → WASI 0.3 component (for quickjs/assemblyscript)
+4. **Automatic setup**: QuickJS/AssemblyScript plugins auto-download the WASI adapter if needed
+5. **Configuration**: Plugins can be configured via `.openskills.toml` or `--plugin-option` flags
 
 See [Build Tool Guide](runtime/BUILD.md) for detailed information about the build process and plugin mechanism.
 
