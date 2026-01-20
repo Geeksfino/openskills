@@ -339,6 +339,19 @@ mod macos {
             cmd.env("PYTHONUNBUFFERED", "1");
             cmd.env("PYTHONDONTWRITEBYTECODE", "1");
             cmd.env("PYTHONNOUSERSITE", "1");
+            // Prevent Python from trying to check for Xcode/development tools during initialization.
+            // Python (especially when built with Clang) may try to spawn xcodebuild to verify
+            // development tools are available. Since the sandbox blocks subprocess spawning
+            // (allow_process=false), this would fail. By clearing these environment variables,
+            // we prevent Python from knowing where to look for xcodebuild, avoiding the check.
+            cmd.env_remove("DEVELOPER_DIR");
+            cmd.env_remove("SDKROOT");
+            // Clear compiler environment variables to prevent Python from trying to locate
+            // or spawn compiler tools
+            cmd.env_remove("CC");
+            cmd.env_remove("CXX");
+            cmd.env_remove("CFLAGS");
+            cmd.env_remove("CXXFLAGS");
         }
     }
 
