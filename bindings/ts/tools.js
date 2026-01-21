@@ -91,9 +91,18 @@ function createSkillTools(runtime, options = {}) {
   function isPathWithinWorkspace(relativePath) {
     const resolvedWorkspace = path.resolve(workspaceDir);
     const resolvedPath = path.resolve(workspaceDir, relativePath);
-    // Path must either equal the workspace or start with workspace + separator
-    return resolvedPath === resolvedWorkspace || 
-           resolvedPath.startsWith(resolvedWorkspace + path.sep);
+    
+    // If paths are equal, it's valid
+    if (resolvedPath === resolvedWorkspace) {
+      return true;
+    }
+    
+    // Use path.relative() to check if path is within workspace
+    // If relative path doesn't start with '..', it's within the workspace
+    const relative = path.relative(resolvedWorkspace, resolvedPath);
+    // Empty string means paths are equal (already handled above)
+    // If relative path starts with '..' or is absolute, it's outside the workspace
+    return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
   }
 
   // Create/update package.json in workspace to support CommonJS (used by Claude Skills)

@@ -1,5 +1,5 @@
 use openskills_runtime::{
-    CommandPermissions, ExecutionContext, ExecutionOptions, OpenSkillRuntime, OutputType,
+    CommandPermissions, ExecutionContext, ExecutionOptions, ExecutionTarget, OpenSkillRuntime, OutputType,
     RuntimeConfig, RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
     run_sandboxed_command,
 };
@@ -379,6 +379,131 @@ impl OpenSkillRuntimeWrapper {
         runtime
             .check_tool_permission(&skill_id, &tool, description, std::collections::HashMap::new())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Read a file from a skill directory.
+    ///
+    /// This allows agents to read helper files (like `docx-js.md`) that skills
+    /// reference in their SKILL.md instructions.
+    fn read_skill_file(&self, skill_id: String, relative_path: String) -> PyResult<String> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .read_skill_file(&skill_id, &relative_path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// List files in a skill directory (or subdirectory).
+    ///
+    /// Returns relative paths from the skill root.
+    #[pyo3(signature = (skill_id, subdir=None, recursive=false))]
+    fn list_skill_files(
+        &self,
+        skill_id: String,
+        subdir: Option<String>,
+        recursive: bool,
+    ) -> PyResult<Vec<String>> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .list_skill_files(&skill_id, subdir.as_deref(), recursive)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Run a specific target (script/WASM) within a skill.
+    ///
+    /// This is designed for Claude Skills where SKILL.md instructions tell
+    /// the agent which script to run (e.g., "run python ooxml/scripts/unpack.py").
+    #[pyo3(signature = (skill_id, options=None))]
+    fn run_skill_target(
+        &self,
+        py: Python<'_>,
+        skill_id: String,
+        options: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        let mut runtime = self.inner.lock().unwrap();
+
+        // Parse options from Python dict
+        let (target, timeout_ms, input_val) = if let Some(opts) = options {
+            let target_type: Option<String> = opts.get_item("target_type")?
+                .and_then(|v| v.extract().ok());
+            
+            let target = match target_type.as_deref() {
+                Some("script") => {
+                    let path: String = opts.get_item("path")?
+                        .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                            "path is required for script target"
+                        ))?
+                        .extract()?;
+                    let args: Vec<String> = opts.get_item("args")?
+                        .and_then(|v| v.extract::<Vec<String>>().ok())
+                        .unwrap_or_default();
+                    ExecutionTarget::Script { path, args }
+                }
+                Some("wasm") => {
+                    let path: String = opts.get_item("path")?
+                        .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                            "path is required for wasm target"
+                        ))?
+                        .extract()?;
+                    ExecutionTarget::Wasm { path }
+                }
+                _ => ExecutionTarget::Auto,
+            };
+
+            let timeout: Option<u64> = opts.get_item("timeout_ms")?
+                .and_then(|v| v.extract::<u64>().ok());
+
+            let input_val: Option<Value> = opts.get_item("input")?
+                .and_then(|input_obj| {
+                    let json_module = py.import("json").ok()?;
+                    let json_dumps = json_module.getattr("dumps").ok()?;
+                    let json_str: String = json_dumps.call1((input_obj,)).ok()?.extract().ok()?;
+                    serde_json::from_str(&json_str).ok()
+                });
+
+            (target, timeout, input_val)
+        } else {
+            (ExecutionTarget::Auto, None, None)
+        };
+
+        let result = runtime
+            .run_skill_target(&skill_id, target, timeout_ms, input_val)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        // Convert Value to JSON string, then parse to Python object
+        let json_str = serde_json::to_string(&result.output)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Serialization error: {e}"
+            )))?;
+        let json_module = py.import("json")?;
+        let json_loads = json_module.getattr("loads")?;
+        let output: Py<PyAny> = json_loads.call1((json_str,))?.into();
+
+        let exit_status = match result.audit.exit_status {
+            RuntimeExecutionStatus::Success => "success".to_string(),
+            RuntimeExecutionStatus::Timeout => "timeout".to_string(),
+            RuntimeExecutionStatus::PermissionDenied => "permission_denied".to_string(),
+            RuntimeExecutionStatus::Failed(msg) => format!("failed:{}", msg),
+        };
+
+        let audit = PyDict::new(py);
+        audit.set_item("skill_id", result.audit.skill_id)?;
+        audit.set_item("version", result.audit.version)?;
+        audit.set_item("input_hash", result.audit.input_hash)?;
+        audit.set_item("output_hash", result.audit.output_hash)?;
+        audit.set_item("start_time_ms", result.audit.start_time_ms)?;
+        audit.set_item("duration_ms", result.audit.duration_ms)?;
+        audit.set_item("permissions_used", result.audit.permissions_used)?;
+        audit.set_item("exit_status", exit_status)?;
+        audit.set_item("stdout", result.audit.stdout)?;
+        audit.set_item("stderr", result.audit.stderr)?;
+
+        let response = PyDict::new(py);
+        response.set_item("output", output)?;
+        response.set_item("stdout", result.stdout)?;
+        response.set_item("stderr", result.stderr)?;
+        response.set_item("audit", audit)?;
+
+        Ok(response.into())
     }
 }
 

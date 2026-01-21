@@ -16,9 +16,189 @@ Usage:
 
 import os
 import json
+import mimetypes
+import fnmatch
 from pathlib import Path
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Callable
 
+
+# ============================================================================
+# Shared Helper Functions
+# ============================================================================
+
+def is_path_within_workspace(workspace: Path, relative_path: str) -> bool:
+    """
+    Validate that a path is within the workspace directory.
+    
+    This prevents directory traversal attacks by ensuring the resolved path
+    is actually within the workspace, not just a string prefix match.
+    
+    Args:
+        workspace: The workspace directory Path
+        relative_path: The relative path to validate
+        
+    Returns:
+        True if the path is within the workspace, False otherwise
+    """
+    resolved_workspace = workspace.resolve()
+    resolved_path = (workspace / relative_path).resolve()
+    
+    # If paths are equal, it's valid
+    if resolved_path == resolved_workspace:
+        return True
+    
+    # Use Path.relative_to() or is_relative_to() to check if path is within workspace
+    # This is more robust than string prefix matching
+    try:
+        # Python 3.9+ has is_relative_to() which is cleaner and more efficient
+        if hasattr(resolved_path, 'is_relative_to'):
+            return resolved_path.is_relative_to(resolved_workspace)
+        else:
+            # Fallback for older Python: use relative_to()
+            # If it succeeds, the path is within the workspace
+            # If it raises ValueError, the path is outside the workspace
+            try:
+                resolved_path.relative_to(resolved_workspace)
+                return True
+            except ValueError:
+                # Path is not relative to workspace (outside or different root)
+                return False
+    except Exception:
+        # Safety fallback: use normalized string comparison with separator
+        # Ensure workspace path ends with separator for proper prefix check
+        workspace_str = str(resolved_workspace) + os.sep
+        path_str = str(resolved_path)
+        return path_str.startswith(workspace_str)
+
+
+def walk_directory(
+    dir_path: Path,
+    base_path: Path,
+    recursive: bool,
+    pattern: Optional[str],
+    files: List[Dict[str, Any]]
+) -> None:
+    """
+    Recursively walk a directory and collect file information.
+    
+    Args:
+        dir_path: The directory to walk
+        base_path: Base path for relative path calculation
+        recursive: Whether to walk recursively
+        pattern: Optional glob pattern to filter files
+        files: List to append file information to
+    """
+    try:
+        for entry in dir_path.iterdir():
+            rel_path = base_path / entry.name if base_path else Path(entry.name)
+            if entry.is_dir():
+                if recursive:
+                    walk_directory(entry, rel_path, recursive, pattern, files)
+            else:
+                # Apply pattern filter if provided
+                if pattern and not fnmatch.fnmatch(entry.name, pattern):
+                    continue
+                
+                stat = entry.stat()
+                files.append({
+                    "path": str(rel_path),
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                })
+    except PermissionError:
+        pass  # Skip directories we can't access
+
+
+def get_mime_types() -> Dict[str, str]:
+    """
+    Get the MIME types dictionary for common file extensions.
+    
+    Returns:
+        Dictionary mapping file extensions to MIME types
+    """
+    return {
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.pdf': 'application/pdf',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.txt': 'text/plain',
+        '.md': 'text/markdown',
+        '.json': 'application/json',
+        '.html': 'text/html',
+        '.css': 'text/css',
+        '.js': 'application/javascript',
+        '.ts': 'application/typescript',
+    }
+
+
+def format_bytes(bytes_size: int) -> str:
+    """
+    Format bytes into human-readable string (Bytes, KB, MB, GB).
+    
+    Args:
+        bytes_size: Size in bytes
+        
+    Returns:
+        Human-readable size string
+    """
+    if bytes_size == 0:
+        return "0 Bytes"
+    
+    k = 1024
+    sizes = ["Bytes", "KB", "MB", "GB"]
+    i = 0
+    while bytes_size >= k and i < len(sizes) - 1:
+        bytes_size /= k
+        i += 1
+    return f"{round(bytes_size * 100) / 100} {sizes[i]}"
+
+
+def get_file_info_impl(workspace: Path, path: str) -> Dict[str, Any]:
+    """
+    Get file information (shared implementation).
+    
+    Args:
+        workspace: The workspace directory Path
+        path: Relative path within the workspace
+        
+    Returns:
+        Dictionary with file information
+        
+    Raises:
+        ValueError: If path escapes workspace directory
+        FileNotFoundError: If file doesn't exist
+    """
+    # Security: ensure path is within workspace (prevents directory traversal)
+    if not is_path_within_workspace(workspace, path):
+        raise ValueError(f"Path {path} escapes workspace directory")
+    
+    full_path = workspace / path
+    if not full_path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    
+    stat = full_path.stat()
+    ext = full_path.suffix.lower()
+    mime_types = get_mime_types()
+    
+    return {
+        "path": path,
+        "fullPath": str(full_path),
+        "size": stat.st_size,
+        "sizeHuman": format_bytes(stat.st_size),
+        "type": mime_types.get(ext, mimetypes.guess_type(str(full_path))[0] or 'application/octet-stream'),
+        "extension": ext,
+        "modified": stat.st_mtime,
+    }
+
+
+# ============================================================================
+# Public API Functions
+# ============================================================================
 
 def get_agent_system_prompt(runtime) -> str:
     """
@@ -95,8 +275,8 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
         ImportError: If langchain is not installed
     """
     try:
-        from langchain.tools import Tool, StructuredTool
-        from langchain.pydantic_v1 import BaseModel, Field
+        from langchain.tools import Tool, StructuredTool  # type: ignore[import-untyped]
+        from langchain.pydantic_v1 import BaseModel, Field  # type: ignore[import-untyped]
     except ImportError:
         raise ImportError(
             "create_langchain_tools requires 'langchain' package. "
@@ -105,16 +285,6 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
     
     workspace = Path(workspace_dir) if workspace_dir else Path.cwd()
     workspace.mkdir(parents=True, exist_ok=True)
-    
-    # Helper function to validate that a path is within the workspace directory
-    # This prevents directory traversal attacks by ensuring the resolved path
-    # is actually within the workspace, not just a string prefix match
-    def is_path_within_workspace(relative_path: str) -> bool:
-        resolved_workspace = workspace.resolve()
-        resolved_path = (workspace / relative_path).resolve()
-        # Path must either equal the workspace or start with workspace + separator
-        return resolved_path == resolved_workspace or \
-               str(resolved_path).startswith(str(resolved_workspace) + os.sep)
     
     # Schema definitions
     class ListSkillsInput(BaseModel):
@@ -204,7 +374,7 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
     def write_file(path: str, content: str) -> str:
         try:
             # Security: ensure path is within workspace (prevents directory traversal)
-            if not is_path_within_workspace(path):
+            if not is_path_within_workspace(workspace, path):
                 return f"Error: Path {path} escapes workspace directory"
             full_path = workspace / path
             full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -216,7 +386,7 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
     def read_file(path: str) -> str:
         try:
             # Security: ensure path is within workspace (prevents directory traversal)
-            if not is_path_within_workspace(path):
+            if not is_path_within_workspace(workspace, path):
                 return f"Error: Path {path} escapes workspace directory"
             full_path = workspace / path
             if not full_path.exists():
@@ -227,93 +397,28 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
     
     def list_workspace_files(subdir: Optional[str] = None, recursive: bool = False, pattern: Optional[str] = None) -> str:
         try:
-            import fnmatch
             target_dir = workspace / subdir if subdir else workspace
             if not target_dir.exists():
                 return json.dumps({"files": [], "error": "Directory not found"})
             
             files = []
-            
-            def walk_dir(dir_path: Path, base_path: Path = Path("")):
-                try:
-                    for entry in dir_path.iterdir():
-                        rel_path = base_path / entry.name if base_path else Path(entry.name)
-                        if entry.is_dir():
-                            if recursive:
-                                walk_dir(entry, rel_path)
-                        else:
-                            # Apply pattern filter if provided
-                            if pattern and not fnmatch.fnmatch(entry.name, pattern):
-                                continue
-                            
-                            stat = entry.stat()
-                            files.append({
-                                "path": str(rel_path),
-                                "size": stat.st_size,
-                                "modified": stat.st_mtime,
-                            })
-                except PermissionError:
-                    pass  # Skip directories we can't access
-            
-            walk_dir(target_dir, Path(subdir) if subdir else Path(""))
+            walk_directory(
+                target_dir,
+                Path(subdir) if subdir else Path(""),
+                recursive,
+                pattern,
+                files
+            )
             return json.dumps({"files": files}, indent=2)
         except Exception as e:
             return f"Error listing workspace files: {e}"
     
     def get_file_info(path: str) -> str:
         try:
-            import mimetypes
-            # Security: ensure path is within workspace (prevents directory traversal)
-            if not is_path_within_workspace(path):
-                return f"Error: Path {path} escapes workspace directory"
-            full_path = workspace / path
-            if not full_path.exists():
-                return f"Error: File not found: {path}"
-            
-            stat = full_path.stat()
-            ext = full_path.suffix.lower()
-            
-            mime_types = {
-                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                '.pdf': 'application/pdf',
-                '.png': 'image/png',
-                '.jpg': 'image/jpeg',
-                '.jpeg': 'image/jpeg',
-                '.gif': 'image/gif',
-                '.svg': 'image/svg+xml',
-                '.txt': 'text/plain',
-                '.md': 'text/markdown',
-                '.json': 'application/json',
-                '.html': 'text/html',
-                '.css': 'text/css',
-                '.js': 'application/javascript',
-                '.ts': 'application/typescript',
-            }
-            
-            # Format bytes
-            bytes_size = stat.st_size
-            if bytes_size == 0:
-                size_human = "0 Bytes"
-            else:
-                k = 1024
-                sizes = ["Bytes", "KB", "MB", "GB"]
-                i = 0
-                while bytes_size >= k and i < len(sizes) - 1:
-                    bytes_size /= k
-                    i += 1
-                size_human = f"{round(bytes_size * 100) / 100} {sizes[i]}"
-            
-            return json.dumps({
-                "path": path,
-                "fullPath": str(full_path),
-                "size": stat.st_size,
-                "sizeHuman": size_human,
-                "type": mime_types.get(ext, mimetypes.guess_type(str(full_path))[0] or 'application/octet-stream'),
-                "extension": ext,
-                "modified": stat.st_mtime,
-            }, indent=2)
+            file_info = get_file_info_impl(workspace, path)
+            return json.dumps(file_info, indent=2)
+        except (ValueError, FileNotFoundError) as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error getting file info: {e}"
     
@@ -392,16 +497,6 @@ def create_simple_tools(runtime, workspace_dir: Optional[str] = None) -> Dict[st
     workspace = Path(workspace_dir) if workspace_dir else Path.cwd()
     workspace.mkdir(parents=True, exist_ok=True)
     
-    # Helper function to validate that a path is within the workspace directory
-    # This prevents directory traversal attacks by ensuring the resolved path
-    # is actually within the workspace, not just a string prefix match
-    def is_path_within_workspace(relative_path: str) -> bool:
-        resolved_workspace = workspace.resolve()
-        resolved_path = (workspace / relative_path).resolve()
-        # Path must either equal the workspace or start with workspace + separator
-        return resolved_path == resolved_workspace or \
-               str(resolved_path).startswith(str(resolved_workspace) + os.sep)
-    
     def list_skills(query: Optional[str] = None) -> List[Dict]:
         skills = runtime.list_skills()
         if query:
@@ -425,7 +520,7 @@ def create_simple_tools(runtime, workspace_dir: Optional[str] = None) -> Dict[st
     
     def write_file(path: str, content: str) -> str:
         # Security: ensure path is within workspace (prevents directory traversal)
-        if not is_path_within_workspace(path):
+        if not is_path_within_workspace(workspace, path):
             raise ValueError(f"Path {path} escapes workspace directory")
         full_path = workspace / path
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -434,94 +529,28 @@ def create_simple_tools(runtime, workspace_dir: Optional[str] = None) -> Dict[st
     
     def read_file(path: str) -> str:
         # Security: ensure path is within workspace (prevents directory traversal)
-        if not is_path_within_workspace(path):
+        if not is_path_within_workspace(workspace, path):
             raise ValueError(f"Path {path} escapes workspace directory")
         full_path = workspace / path
         return full_path.read_text(encoding='utf-8')
     
     def list_workspace_files(subdir: Optional[str] = None, recursive: bool = False, pattern: Optional[str] = None) -> List[Dict]:
-        import fnmatch
         target_dir = workspace / subdir if subdir else workspace
         if not target_dir.exists():
             return []
         
         files = []
-        
-        def walk_dir(dir_path: Path, base_path: Path = Path("")):
-            try:
-                for entry in dir_path.iterdir():
-                    rel_path = base_path / entry.name if base_path else Path(entry.name)
-                    if entry.is_dir():
-                        if recursive:
-                            walk_dir(entry, rel_path)
-                    else:
-                        if pattern and not fnmatch.fnmatch(entry.name, pattern):
-                            continue
-                        stat = entry.stat()
-                        files.append({
-                            "path": str(rel_path),
-                            "size": stat.st_size,
-                            "modified": stat.st_mtime,
-                        })
-            except PermissionError:
-                pass
-        
-        walk_dir(target_dir, Path(subdir) if subdir else Path(""))
+        walk_directory(
+            target_dir,
+            Path(subdir) if subdir else Path(""),
+            recursive,
+            pattern,
+            files
+        )
         return files
     
     def get_file_info(path: str) -> Dict:
-        import mimetypes
-        # Security: ensure path is within workspace (prevents directory traversal)
-        if not is_path_within_workspace(path):
-            raise ValueError(f"Path {path} escapes workspace directory")
-        full_path = workspace / path
-        if not full_path.exists():
-            raise FileNotFoundError(f"File not found: {path}")
-        
-        stat = full_path.stat()
-        ext = full_path.suffix.lower()
-        
-        mime_types = {
-            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            '.pdf': 'application/pdf',
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif',
-            '.svg': 'image/svg+xml',
-            '.txt': 'text/plain',
-            '.md': 'text/markdown',
-            '.json': 'application/json',
-            '.html': 'text/html',
-            '.css': 'text/css',
-            '.js': 'application/javascript',
-            '.ts': 'application/typescript',
-        }
-        
-        # Format bytes
-        bytes_size = stat.st_size
-        if bytes_size == 0:
-            size_human = "0 Bytes"
-        else:
-            k = 1024
-            sizes = ["Bytes", "KB", "MB", "GB"]
-            i = 0
-            while bytes_size >= k and i < len(sizes) - 1:
-                bytes_size /= k
-                i += 1
-            size_human = f"{round(bytes_size * 100) / 100} {sizes[i]}"
-        
-        return {
-            "path": path,
-            "fullPath": str(full_path),
-            "size": stat.st_size,
-            "sizeHuman": size_human,
-            "type": mime_types.get(ext, mimetypes.guess_type(str(full_path))[0] or 'application/octet-stream'),
-            "extension": ext,
-            "modified": stat.st_mtime,
-        }
+        return get_file_info_impl(workspace, path)
     
     return {
         "list_skills": list_skills,
