@@ -85,6 +85,26 @@ function createSkillTools(runtime, options = {}) {
     fs.mkdirSync(workspaceDir, { recursive: true });
   }
 
+  // Create/update package.json in workspace to support CommonJS (used by Claude Skills)
+  // This ensures CommonJS scripts work even if parent project uses ES modules
+  const workspacePackageJson = path.join(workspaceDir, 'package.json');
+  const packageJsonContent = JSON.stringify({ type: 'commonjs' }, null, 2) + '\n';
+  if (!fs.existsSync(workspacePackageJson)) {
+    fs.writeFileSync(workspacePackageJson, packageJsonContent);
+  } else {
+    // Update if it exists but doesn't have the right type
+    try {
+      const existing = JSON.parse(fs.readFileSync(workspacePackageJson, 'utf-8'));
+      if (existing.type !== 'commonjs') {
+        existing.type = 'commonjs';
+        fs.writeFileSync(workspacePackageJson, JSON.stringify(existing, null, 2) + '\n');
+      }
+    } catch (e) {
+      // If parsing fails, overwrite with correct content
+      fs.writeFileSync(workspacePackageJson, packageJsonContent);
+    }
+  }
+
   // Helper function to format bytes
   function formatBytes(bytes) {
     if (bytes === 0) return '0 Bytes';

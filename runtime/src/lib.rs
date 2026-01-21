@@ -574,17 +574,19 @@ When a user's request matches a skill's capabilities:
 
 When a skill instructs you to create a JavaScript/TypeScript file:
 
-1. **Use ES module syntax**: Always use `import` statements, NOT `require()`. The project uses ES modules.
-   - ✅ CORRECT: `import { Document, Packer } from 'docx'; import fs from 'fs';`
-   - ❌ WRONG: `const { Document } = require('docx'); const fs = require('fs');`
+1. **Follow the skill's documentation**: Skills may use CommonJS (`require()`) or ES modules (`import`). Follow the examples in the skill's documentation (e.g., `docx-js.md`).
+   - **CommonJS** (most Claude Skills use this): `const { Document, Packer } = require('docx'); const fs = require('fs');`
+   - **ES modules**: `import { Document, Packer } from 'docx'; import fs from 'fs';`
+   - When in doubt, use CommonJS as it's the most common format for Claude Skills
 
 2. **Write to workspace directory**: Use the workspace directory for output files:
    - Access via `process.env.SKILL_WORKSPACE` or use the configured workspace path
    - Example: `fs.writeFileSync(path.join(process.env.SKILL_WORKSPACE || './output', 'document.docx'), buffer)`
 
 3. **Execute generated scripts**: After creating a script file, you MUST execute it:
+   - For CommonJS JavaScript files: Use `run_sandboxed_bash('node path/to/script.js', working_dir, allow_process=true)`
+   - For ES module JavaScript files: Use `run_sandboxed_bash('node --input-type=module path/to/script.js', working_dir, allow_process=true)` or use `.mjs` extension
    - For TypeScript files: Use `run_sandboxed_bash('npx tsx path/to/script.ts', working_dir, allow_process=true)`
-   - For JavaScript files: Use `run_sandboxed_bash('node path/to/script.js', working_dir, allow_process=true)`
    - **CRITICAL**: Always set `allow_process=true` when executing scripts (npx, node, etc.)
    - Set `working_dir` to the workspace directory where the script is located
 
