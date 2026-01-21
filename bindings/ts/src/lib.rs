@@ -110,11 +110,23 @@ pub struct ExecutionResult {
     pub audit: AuditRecord,
 }
 
+// Define all #[napi] structs before their impl blocks (required for NAPI macro expansion)
 #[napi]
 pub struct SkillExecutionSessionWrapper {
     inner: Mutex<SkillExecutionSession>,
 }
 
+#[napi]
+pub struct ExecutionContextWrapper {
+    inner: Mutex<ExecutionContext>,
+}
+
+#[napi]
+pub struct OpenSkillRuntimeWrapper {
+    inner: Mutex<OpenSkillRuntime>,
+}
+
+// Now define all impl blocks
 #[napi]
 impl SkillExecutionSessionWrapper {
     #[napi]
@@ -161,11 +173,6 @@ impl SkillExecutionSessionWrapper {
     pub fn summarize(&self) -> String {
         self.inner.lock().unwrap().summarize_fork()
     }
-}
-
-#[napi]
-pub struct ExecutionContextWrapper {
-    inner: Mutex<ExecutionContext>,
 }
 
 #[napi]
@@ -227,11 +234,6 @@ impl ExecutionContextWrapper {
     pub fn summarize(&self) -> String {
         self.inner.lock().unwrap().summarize()
     }
-}
-
-#[napi]
-pub struct OpenSkillRuntimeWrapper {
-    inner: Mutex<OpenSkillRuntime>,
 }
 
 #[napi]
@@ -387,7 +389,7 @@ impl OpenSkillRuntimeWrapper {
 
         let exec_options = if let Some(opts) = options {
             ExecutionOptions {
-                timeout_ms: opts.timeout_ms.map(|t| if t < 0 { 0 } else { t as u64 }),
+                timeout_ms: safe_timeout_ms(opts.timeout_ms),
                 memory_mb: opts.memory_mb.map(|m| if m < 0 { 0 } else { m as u64 }),
                 input: opts.input.and_then(|s| {
                     serde_json::from_str(&s).ok()
@@ -564,7 +566,7 @@ impl OpenSkillRuntimeWrapper {
                 }
                 _ => ExecutionTarget::Auto,
             };
-            let timeout = opts.timeout_ms.map(|t| if t < 0 { 0 } else { t as u64 });
+            let timeout = safe_timeout_ms(opts.timeout_ms);
             let input = opts.input.and_then(|s| serde_json::from_str(&s).ok());
             (target, timeout, input)
         } else {
@@ -669,6 +671,13 @@ fn parse_execution_status(status: Option<String>) -> openskills_runtime::Runtime
     }
 }
 
+/// Safely convert i64 timeout to u64, clamping negative values to 0.
+/// This prevents two's complement wrapping where negative values become
+/// extremely large unsigned values (e.g., -1 becomes ~18 quintillion ms).
+fn safe_timeout_ms(timeout: Option<i64>) -> Option<u64> {
+    timeout.map(|t| if t < 0 { 0 } else { t as u64 })
+}
+
 // ============================================================================
 // Standalone sandboxed command execution
 // ============================================================================
@@ -712,7 +721,7 @@ pub fn run_sandboxed_shell_command(
                 }
             })
             .collect(),
-        timeout_ms: perms.timeout_ms.map(|t| t as u64).unwrap_or(30000),
+        timeout_ms: safe_timeout_ms(perms.timeout_ms).unwrap_or(30000),
     };
 
     let result = run_sandboxed_command(&command, &PathBuf::from(&working_dir), rust_perms)
