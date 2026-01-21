@@ -192,26 +192,44 @@ writing clear instructions.
 
 #### Context Forking
 
-Skills with `context: fork` in their manifest execute in isolated contexts where intermediate outputs are captured separately. Only summaries are returned to the parent context, preventing context pollution:
+Skills with `context: fork` in their manifest execute in isolated contexts where intermediate outputs are captured separately. Only summaries are returned to the parent context, preventing context pollution.
 
-```rust
-use openskills_runtime::{OpenSkillRuntime, ExecutionContext, ExecutionOptions};
+**Important**: Fork context starts **after** skill activation, not before.
 
-let mut runtime = OpenSkillRuntime::new();
-let main_context = ExecutionContext::new();
+**Fork Lifecycle**:
 
-// Execute skill with context management
-// If skill has context: fork, it automatically isolates execution
-let result = runtime.execute_skill_with_context(
-    "explorer-skill",
-    ExecutionOptions::default(),
-    &main_context
-)?;
+1. **Activation Phase** (main context):
+   ```rust
+   // activate_skill() loads instructions in main context
+   let skill = runtime.activate_skill("explorer-skill")?;
+   // Instructions are returned to main conversation
+   // LLM reads/comprehends instructions here
+   ```
 
-// For forked skills, result.output contains only the summary
-// Intermediate outputs are captured but not returned
-println!("Summary: {}", result.output["summary"]);
-```
+2. **Execution Phase** (fork created):
+   ```rust
+   use openskills_runtime::{OpenSkillRuntime, ExecutionContext, ExecutionOptions};
+
+   let mut runtime = OpenSkillRuntime::new();
+   let main_context = ExecutionContext::new();
+
+   // Fork is created HERE when execution begins
+   // If skill has context: fork, it automatically isolates execution
+   let result = runtime.execute_skill_with_context(
+       "explorer-skill",
+       ExecutionOptions::default(),
+       &main_context
+   )?;
+
+   // For forked skills, result.output contains only the summary
+   // Intermediate outputs (tool calls, errors, debug logs) are captured in fork
+   // but not returned to main context
+   println!("Summary: {}", result.output["summary"]);
+   ```
+
+**What Goes Where**:
+- **Main Context**: Skill activation, instruction comprehension, final summary
+- **Fork Context**: Tool calls, intermediate outputs, errors, debug logs, trial-and-error
 
 **Manual context management:**
 

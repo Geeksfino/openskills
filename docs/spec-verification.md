@@ -304,6 +304,27 @@ pub fn discover(&mut self) -> Result<(), OpenSkillError> {
 - `runtime/src/skill_session.rs`: `SkillExecutionSession` manages forked execution
 - `runtime/src/lib.rs:437-577`: `start_skill_session()` and `finish_skill_session()` handle fork behavior
 
+### Fork Context Lifecycle
+
+**Critical Behavior**: Fork context starts **after** skill activation, not before.
+
+1. **Skill Activation (Main Context)**:
+   - `activate_skill()` loads full SKILL.md instructions
+   - Instructions are returned to the main conversation context
+   - LLM reads and comprehends instructions in main context
+   - This happens **before** fork is created
+
+2. **Fork Creation (Execution Phase)**:
+   - Fork is created when execution begins via:
+     - `start_skill_session()` - for instruction-based workflows
+     - `execute_skill_with_context()` - for direct execution
+   - Fork is created **after** skill is loaded and validated
+   - Only execution outputs are isolated in fork
+
+3. **What Goes Where**:
+   - **Main Context**: Skill activation, instruction comprehension, final summary
+   - **Fork Context**: Tool calls, intermediate outputs, errors, debug logs, trial-and-error
+
 **Fork Behavior**:
 ```65:77:runtime/src/context.rs
 pub fn fork(&self) -> Self {
@@ -327,11 +348,28 @@ pub fn summarize(&mut self) -> String {
 ```
 
 **Session-Based Fork** (for instruction-only skills):
-```437:577:runtime/src/lib.rs
-pub fn start_skill_session() -> SkillExecutionSession
-pub fn finish_skill_session() -> ExecutionResult
-// Returns summary-only output for forked skills
+```647:676:runtime/src/lib.rs
+pub fn start_skill_session(...) -> SkillExecutionSession {
+    // 1. Load full skill (with instructions) - happens in main context
+    let skill = self.registry.load_full_skill(skill_id)?;
+    
+    // 2. Check if forked - fork is created AFTER loading
+    let is_forked = skill.manifest.is_forked();
+    let context = if is_forked {
+        Some(base_context.fork())  // Fork created here
+    } else {
+        None
+    };
+    
+    // 3. Return session with fork context (if applicable)
+    // Tool calls during execution will be recorded in fork
+}
 ```
+
+**Key Implementation Detail**:
+- `activate_skill()` does NOT create a fork - it returns instructions to main context
+- Fork is only created when `start_skill_session()` or `execute_skill_with_context()` is called
+- This ensures skill instructions are part of the main conversation, while execution noise is isolated
 
 ---
 

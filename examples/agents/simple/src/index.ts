@@ -91,7 +91,7 @@ const model = openai(config.model);
 // =============================================================================
 
 async function main() {
-  const userQuery = process.argv[2] ||
+  const userQuery = process.argv[2] || 
     "What skills are available? Then help me create a Word document with a title 'Hello World' and a paragraph of text.";
 
   console.log("\n" + "=".repeat(70));
@@ -116,10 +116,10 @@ async function main() {
         await new Promise(resolve => setTimeout(resolve, Math.min(1000 * Math.pow(2, attempt - 2), 10000)));
       }
 
-      const result = await generateText({
+    const result = await generateText({
         model,
-        system: systemPrompt,
-        prompt: userQuery,
+      system: systemPrompt,
+      prompt: userQuery,
         tools,
         maxSteps: config.maxSteps,
       });
@@ -127,25 +127,25 @@ async function main() {
       console.log("\n" + "=".repeat(70));
       console.log("✅ Agent Response:");
       console.log("=".repeat(70));
-      console.log(result.text);
-
-      if (result.toolCalls && result.toolCalls.length > 0) {
+    console.log(result.text);
+    
+    if (result.toolCalls && result.toolCalls.length > 0) {
         console.log("\n" + "=".repeat(70));
         console.log(`🔧 Tool Calls (${result.toolCalls.length}):`);
         console.log("=".repeat(70));
-        for (const call of result.toolCalls) {
+      for (const call of result.toolCalls) {
           const argsPreview = JSON.stringify(call.args).slice(0, 150);
           console.log(`\n  ${call.toolName}:`);
           console.log(`    Args: ${argsPreview}${argsPreview.length >= 150 ? '...' : ''}`);
         }
       }
 
-      if (result.toolResults && result.toolResults.length > 0) {
+    if (result.toolResults && result.toolResults.length > 0) {
         console.log("\n" + "=".repeat(70));
         console.log(`📋 Tool Results (${result.toolResults.length}):`);
         console.log("=".repeat(70));
-        for (const res of result.toolResults) {
-          const preview = typeof res.result === 'string' 
+      for (const res of result.toolResults) {
+        const preview = typeof res.result === 'string' 
             ? res.result.slice(0, 200) + (res.result.length > 200 ? '...' : '')
             : JSON.stringify(res.result).slice(0, 200);
           console.log(`\n  [${res.toolName}]:`);
@@ -195,6 +195,22 @@ async function main() {
             console.error("\nStack trace:");
             console.error(error.stack);
           }
+        }
+        
+        // Enhanced error diagnostics
+        console.error("\n" + "=".repeat(70));
+        console.error("🔍 Error Diagnostics:");
+        console.error("=".repeat(70));
+        console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        if ((error as any)?.cause) {
+          console.error("Error cause:", JSON.stringify((error as any).cause, Object.getOwnPropertyNames((error as any).cause), 2));
+        }
+        if ((error as any)?.response) {
+          console.error("HTTP Response status:", (error as any).response?.status);
+          console.error("HTTP Response headers:", JSON.stringify((error as any).response?.headers, null, 2));
+        }
+        if ((error as any)?.request) {
+          console.error("HTTP Request details:", JSON.stringify((error as any).request, null, 2));
         }
         
         // If we have partial results, show them

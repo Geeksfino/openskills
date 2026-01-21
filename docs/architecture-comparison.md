@@ -78,32 +78,50 @@ runtime.execute_skill("code-review", options)
 
 ### Claude Skills with Context Fork
 
+**Important**: Fork context starts **after** skill activation, not before.
+
 ```
 Main Context (User Conversation)
 │
 ├─ User: "Explore the authentication system"
 │
-├─ Claude activates skill: explorer (context: fork)
-│  │
-│  └─► FORKED CONTEXT (Isolated) ⭐
-│      ├─ Read auth.ts
-│      ├─ Read user.ts
-│      ├─ Analyze patterns
-│      ├─ Debug output: "Found 3 auth flows..."
-│      ├─ Trial 1: Check JWT
-│      ├─ Trial 2: Check OAuth
-│      └─ GENERATE SUMMARY
-│          "Authentication uses JWT + OAuth2.
-│           3 main flows: login, refresh, logout."
+├─ Step 1: Skill Activation (MAIN CONTEXT) ⚠️
+│  ├─ Agent calls: activate_skill("explorer")
+│  ├─ Runtime loads full SKILL.md instructions
+│  ├─ Instructions returned to main context
+│  └─ LLM reads/comprehends instructions in main context
 │
-├─ ⬅️ SUMMARY INJECTED to main context
-│  (Not all intermediate steps)
+├─ Step 2: Fork Creation (EXECUTION PHASE) ⭐
+│  ├─ Agent calls: start_skill_session("explorer") or execute_skill_with_context()
+│  ├─ Runtime detects: context: fork in manifest
+│  └─ FORKED CONTEXT CREATED HERE (isolated sub-agent)
+│      │
+│      └─► FORKED CONTEXT (Isolated Execution)
+│          ├─ Read auth.ts → OUTPUT IN FORK
+│          ├─ Read user.ts → OUTPUT IN FORK
+│          ├─ Analyze patterns → OUTPUT IN FORK
+│          ├─ Debug output: "Found 3 auth flows..." → OUTPUT IN FORK
+│          ├─ Trial 1: Check JWT → OUTPUT IN FORK
+│          ├─ Trial 2: Check OAuth → OUTPUT IN FORK
+│          └─ GENERATE SUMMARY
+│              "Authentication uses JWT + OAuth2.
+│               3 main flows: login, refresh, logout."
+│
+├─ Step 3: Summary Return (MAIN CONTEXT)
+│  ├─ ⬅️ SUMMARY INJECTED to main context
+│  └─ (Not all intermediate steps)
 │
 └─ User sees clean summary, not debug logs
 
 Token savings: ~5000 tokens (kept intermediate work isolated)
 UX benefit: Clean conversation flow
 ```
+
+**Key Points**:
+- **Activation happens in main context**: Skill instructions are loaded and read in the main conversation
+- **Fork starts during execution**: Isolated context is created when execution begins
+- **Only execution outputs are forked**: Tool calls, errors, and debug logs stay in fork
+- **Summary returns to main**: Final results are extracted and returned to main context
 
 ### OpenSkills Updated Behavior
 

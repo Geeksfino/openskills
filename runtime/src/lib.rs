@@ -629,6 +629,19 @@ Example response:
     ///
     /// This implements the "activation" step of progressive disclosure:
     /// the full instructions are only loaded when the skill is activated.
+    ///
+    /// # Fork Context Behavior
+    ///
+    /// **Important**: This function does NOT create a fork context, even if the skill
+    /// has `context: fork` in its manifest. Fork is created later during execution.
+    ///
+    /// - Skill instructions are returned to the **main conversation context**
+    /// - LLM reads and comprehends instructions in main context
+    /// - Fork is only created when `start_skill_session()` or `execute_skill_with_context()`
+    ///   is called, isolating execution outputs (tool calls, errors, debug logs)
+    ///
+    /// This ensures skill instructions are part of the main conversation for comprehension,
+    /// while execution noise is isolated in the fork context.
     pub fn activate_skill(&self, skill_id: &str) -> Result<LoadedSkill, OpenSkillError> {
         // Lazy load: get full skill content (including instructions) from registry
         let skill = self.registry.load_full_skill(skill_id)?;
@@ -644,6 +657,27 @@ Example response:
     /// and needs to respect `context: fork` semantics. If the skill is forked,
     /// the returned session includes an isolated context for recording tool
     /// calls, intermediate outputs, and results.
+    ///
+    /// # Fork Context Behavior
+    ///
+    /// **Important**: Fork context is created **after** skill activation, not before.
+    ///
+    /// 1. **Activation Phase** (happens before this call):
+    ///    - `activate_skill()` loads full SKILL.md instructions
+    ///    - Instructions are returned to main conversation context
+    ///    - LLM reads/comprehends instructions in main context
+    ///
+    /// 2. **Execution Phase** (this function):
+    ///    - Fork is created here if skill has `context: fork`
+    ///    - Tool calls during execution are recorded in fork context
+    ///    - Intermediate outputs (errors, debug logs) stay in fork
+    ///
+    /// 3. **Summary Return** (via `finish_skill_session()`):
+    ///    - Only final summary/results are returned to main context
+    ///    - Prevents context pollution from trial-and-error
+    ///
+    /// This design ensures skill instructions are part of the main conversation
+    /// (for comprehension), while execution noise is isolated in the fork.
     pub fn start_skill_session(
         &mut self,
         skill_id: &str,
@@ -655,10 +689,14 @@ Example response:
         }
 
         // Load full skill (with instructions) for session
+        // Note: This happens in main context - instructions are already
+        // available to the agent via activate_skill() if called earlier
         let skill = self.registry.load_full_skill(skill_id)?;
 
         validate_skill(&skill)?;
 
+        // Fork is created HERE, after skill is loaded
+        // This isolates execution outputs, not instruction comprehension
         let is_forked = skill.manifest.is_forked();
         let context = if is_forked {
             let base_context = parent_context.cloned().unwrap_or_else(ExecutionContext::new);

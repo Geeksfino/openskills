@@ -3,6 +3,27 @@
 //! This module provides context forking capabilities to isolate skill execution
 //! and prevent context pollution. Skills with `context: fork` execute in isolated
 //! contexts where intermediate outputs are captured and only summaries are returned.
+//!
+//! # Fork Context Lifecycle
+//!
+//! **Important**: Fork context is created **after** skill activation, not before.
+//!
+//! 1. **Activation Phase** (main context):
+//!    - `activate_skill()` loads full SKILL.md instructions
+//!    - Instructions are returned to main conversation context
+//!    - LLM reads/comprehends instructions in main context
+//!
+//! 2. **Execution Phase** (fork created):
+//!    - Fork is created when `start_skill_session()` or `execute_skill_with_context()` is called
+//!    - Tool calls during execution are recorded in fork context
+//!    - Intermediate outputs (errors, debug logs) stay in fork
+//!
+//! 3. **Summary Return** (main context):
+//!    - Only final summary/results are returned to main context
+//!    - Prevents context pollution from trial-and-error
+//!
+//! This design ensures skill instructions are part of the main conversation (for comprehension),
+//! while execution noise is isolated in the fork context.
 
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
