@@ -80,11 +80,13 @@ OpenSkills will evolve to address limitations while maintaining its WASM-first p
 - 🔒 **Dual Sandbox Architecture**: WASM/WASI 0.3 + macOS seatbelt (unique in the ecosystem)
 - 🧰 **Native Script Support**: Execute Python and shell scripts on macOS via seatbelt
 - 🤖 **Any Agent Framework**: Integrate with LangChain, Vercel AI SDK, or custom frameworks
+- 🚀 **Pre-built Tools**: Ready-to-use tool definitions for TS/Python (~200 lines less code)
 - 📊 **Progressive Disclosure**: Efficient tiered loading (metadata → instructions → resources)
 - 🔌 **Multi-Language Bindings**: Rust core with TypeScript and Python bindings
 - 🛡️ **Capability-Based Security**: Fine-grained permissions via WASI and seatbelt profiles
 - 🏗️ **Build Tool**: `openskills build` for compiling TS/JS to WASM components
 - 🌐 **Cross-Platform**: WASM execution is identical on macOS, Linux, Windows
+- 📁 **Workspace Management**: Built-in sandboxed workspace for file I/O operations
 
 ## Quick Start
 
@@ -220,27 +222,68 @@ See [Developer Guide](docs/developers.md) for detailed usage examples.
 
 ### Integrating with Agent Frameworks
 
-OpenSkills works with **any agent framework** to give agents access to Claude-compatible skills. Here are examples:
+OpenSkills works with **any agent framework** to give agents access to Claude-compatible skills. The runtime provides **pre-built tools** that eliminate boilerplate code and simplify agent setup.
 
-**LangChain (TypeScript/Python)**
+#### ⭐ Recommended: Pre-built Tools (Simplified Setup)
+
+**Vercel AI SDK (TypeScript)** - ~120 lines total:
 ```typescript
 import { OpenSkillRuntime } from "@finogeek/openskills";
-import { DynamicStructuredTool } from "@langchain/core/tools";
+import { createSkillTools, getAgentSystemPrompt } from "@finogeek/openskills/tools";
+import { generateText } from "ai";
 
+// Initialize runtime
 const runtime = OpenSkillRuntime.fromDirectory("./skills");
 runtime.discoverSkills();
 
-const tool = new DynamicStructuredTool({
-  name: "run_skill",
-  schema: z.object({ skill_id: z.string(), input: z.string() }),
-  func: async ({ skill_id, input }) => {
-    const result = runtime.executeSkill(skill_id, { input });
-    return result.outputJson;
-  },
+// Create pre-built tools (replaces ~200 lines of manual tool definitions)
+const tools = createSkillTools(runtime, {
+  workspaceDir: "./output"  // Sandboxed workspace for file I/O
+});
+
+// Get skill-agnostic system prompt (teaches agent HOW to use skills)
+const systemPrompt = getAgentSystemPrompt(runtime);
+
+// Use with any LLM
+const result = await generateText({
+  model: yourModel,
+  system: systemPrompt,
+  prompt: userQuery,
+  tools,
 });
 ```
 
-**Vercel AI SDK**
+**LangChain (Python)** - Pre-built tools available:
+```python
+from openskills import OpenSkillRuntime
+from openskills_tools import create_langchain_tools, get_agent_system_prompt
+
+# Initialize runtime
+runtime = OpenSkillRuntime.from_directory("./skills")
+runtime.discover_skills()
+
+# Create pre-built LangChain tools
+tools = create_langchain_tools(runtime, workspace_dir="./output")
+
+# Get system prompt
+system_prompt = get_agent_system_prompt(runtime)
+
+# Use with LangChain agent
+agent = create_agent(model, tools, system_prompt=system_prompt)
+```
+
+**Benefits of Pre-built Tools:**
+- ✅ **~200 lines less code**: No need to manually define tools
+- ✅ **Workspace management**: Automatic sandboxed file I/O
+- ✅ **Skill-agnostic prompts**: Runtime generates system prompts
+- ✅ **Security built-in**: Path validation, permission checks
+- ✅ **Works with any skill**: No code changes needed
+
+#### Manual Integration (Advanced)
+
+If you need custom tool definitions, you can still integrate manually:
+
+**Vercel AI SDK (Manual)**
 ```typescript
 import { OpenSkillRuntime } from "@finogeek/openskills";
 import { tool } from "ai";
@@ -254,7 +297,7 @@ const runSkill = tool({
 });
 ```
 
-See [examples/agents](examples/agents/) for complete integration examples with LangChain, Vercel AI SDK, and more.
+See [examples/agents/simple](examples/agents/simple/) for a complete example using pre-built tools, or [examples/agents](examples/agents/) for other integration patterns.
 
 ## Architecture
 
