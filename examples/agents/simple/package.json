@@ -7,8 +7,9 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.0.0",
-    "@finogeek/openskills": "file:../../bindings/ts",
-    "ai": "^6.0.0",
+    "@finogeek/openskills": "file:../../../bindings/ts",
+    "ai": "^4.3.19",
+    "docx": "^9.5.1",
     "dotenv": "^16.4.5",
     "zod": "^3.23.8"
   },

@@ -1,13 +1,21 @@
-## OpenSkills + AI SDK + DeepSeek
+## OpenSkills + AI SDK + DeepSeek (Claude Skills Compatible)
 
-This example demonstrates using OpenSkills with Vercel's AI SDK, configured to use DeepSeek Chat as the LLM provider and the official docx skill for Word document creation.
+This example demonstrates using OpenSkills with Vercel's AI SDK, configured to use DeepSeek Chat as the LLM provider. It properly implements the Claude Skills pattern: instruction-based skills where the LLM reads and follows the SKILL.md instructions.
+
+### How Claude Skills Work
+
+1. **Discovery**: Agent discovers skills from the skills directory
+2. **Activation**: When a request matches a skill, the agent calls `activateSkill()` to get the full SKILL.md instructions
+3. **Follow Instructions**: The LLM reads and follows the instructions step-by-step
+4. **Use Scripts**: Skills may include Python scripts that the LLM runs as instructed
 
 ### Features
 
 - ✅ Uses DeepSeek Chat model via OpenAI-compatible API
-- ✅ Integrates with Claude official docx skill for Word document operations
+- ✅ Proper Claude Skills implementation (instruction-based, not execution-based)
+- ✅ `activate_skill` tool to load SKILL.md instructions
+- ✅ `list_skills` tool to discover available skills
 - ✅ Environment-based configuration via `.env` file
-- ✅ Supports creating, editing, and analyzing Word documents
 
 ### Setup
 
@@ -64,6 +72,8 @@ npm run start "Create a Word document with a professional report about AI agents
 ### Notes
 
 - Skills are loaded from `examples/claude-official-skills/skills`
-- The docx skill is primarily instructional (no WASM module required)
-- DeepSeek uses OpenAI-compatible API, so we configure it with `baseURL: "https://api.deepseek.com/v1"`
-- The agent will guide you through the document creation process step by step
+- Claude Skills are instruction-based: SKILL.md contains instructions for the LLM to follow
+- The agent calls `activateSkill()` to get full instructions, not `executeSkill()`
+- Skills may reference helper files (docx-js.md, ooxml.md) and Python scripts
+- DeepSeek uses OpenAI-compatible API with `baseURL: "https://api.deepseek.com/v1"`
+- Uses AI SDK v4 for DeepSeek compatibility (v6 has breaking changes)

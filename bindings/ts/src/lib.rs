@@ -1,9 +1,11 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use openskills_runtime::{
-    ExecutionContext, ExecutionOptions, OpenSkillRuntime, OutputType, RuntimeConfig,
-    RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
+    CommandPermissions, ExecutionContext, ExecutionOptions, ExecutionTarget, OpenSkillRuntime,
+    OutputType, RuntimeConfig, RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
+    run_sandboxed_command,
 };
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 #[napi(object)]
@@ -37,6 +39,53 @@ pub struct ExecutionOptionsJs {
     pub input: Option<String>, // JSON string
 }
 
+/// Options for targeted skill execution.
+#[napi(object)]
+pub struct TargetExecutionOptionsJs {
+    /// Target type: "auto", "script", or "wasm"
+    pub target_type: Option<String>,
+    /// Path to script/wasm (required for "script" and "wasm" types)
+    pub path: Option<String>,
+    /// Arguments for script execution (only for "script" type)
+    pub args: Option<Vec<String>>,
+    /// Override timeout in milliseconds
+    #[napi(ts_type = "number")]
+    pub timeout_ms: Option<i64>,
+    /// Input data (JSON string)
+    pub input: Option<String>,
+}
+
+/// Permissions for sandboxed command execution.
+#[napi(object)]
+pub struct CommandPermissionsJs {
+    /// Allow network access.
+    pub allow_network: Option<bool>,
+    /// Allow subprocess spawning.
+    pub allow_process: Option<bool>,
+    /// Directories the command can read from.
+    pub read_paths: Option<Vec<String>>,
+    /// Directories the command can write to.
+    pub write_paths: Option<Vec<String>>,
+    /// Environment variables to pass through (array of ["KEY", "VALUE"] pairs).
+    pub env_vars: Option<Vec<Vec<String>>>,
+    /// Timeout in milliseconds.
+    #[napi(ts_type = "number")]
+    pub timeout_ms: Option<i64>,
+}
+
+/// Result from sandboxed command execution.
+#[napi(object)]
+pub struct CommandResultJs {
+    /// Exit code (0 = success).
+    pub exit_code: i32,
+    /// Captured stdout.
+    pub stdout: String,
+    /// Captured stderr.
+    pub stderr: String,
+    /// Whether the command timed out.
+    pub timed_out: bool,
+}
+
 #[napi(object)]
 pub struct AuditRecord {
     pub skill_id: String,
@@ -64,6 +113,54 @@ pub struct ExecutionResult {
 #[napi]
 pub struct SkillExecutionSessionWrapper {
     inner: Mutex<SkillExecutionSession>,
+}
+
+#[napi]
+impl SkillExecutionSessionWrapper {
+    #[napi]
+    pub fn is_forked(&self) -> bool {
+        self.inner.lock().unwrap().is_forked()
+    }
+
+    #[napi]
+    pub fn context_id(&self) -> Option<String> {
+        self.inner
+            .lock()
+            .unwrap()
+            .context_id()
+            .map(|id| id.to_string())
+    }
+
+    #[napi]
+    pub fn record_tool_call(&self, tool: String, output_json: String) -> Result<()> {
+        let output: serde_json::Value = serde_json::from_str(&output_json)
+            .unwrap_or_else(|_| serde_json::json!({ "output": output_json }));
+        self.inner.lock().unwrap().record_tool_call(&tool, &output);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn record_result(&self, output_json: String) -> Result<()> {
+        let output: serde_json::Value = serde_json::from_str(&output_json)
+            .unwrap_or_else(|_| serde_json::json!({ "output": output_json }));
+        self.inner.lock().unwrap().record_result(&output);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn record_stdout(&self, stdout: String) {
+        self.inner.lock().unwrap().record_stdout_if_present(&stdout);
+    }
+
+    #[napi]
+    pub fn record_stderr(&self, stderr: String) {
+        self.inner.lock().unwrap().record_stderr_if_present(&stderr);
+    }
+
+    #[napi]
+    pub fn summarize(&self) -> String {
+        self.inner.lock().unwrap().summarize_fork()
+    }
 }
 
 #[napi]
@@ -434,53 +531,114 @@ impl OpenSkillRuntimeWrapper {
             .check_tool_permission(&skill_id, &tool, description, std::collections::HashMap::new())
             .map_err(|e| Error::from_reason(e.to_string()))
     }
-}
 
-#[napi]
-impl SkillExecutionSessionWrapper {
+    /// Run a specific target (script/WASM) within a skill.
+    ///
+    /// This is designed for Claude Skills where SKILL.md instructions tell
+    /// the agent which script to run (e.g., "run python ooxml/scripts/unpack.py").
     #[napi]
-    pub fn is_forked(&self) -> bool {
-        self.inner.lock().unwrap().is_forked()
+    pub fn run_skill_target(
+        &self,
+        skill_id: String,
+        options: Option<TargetExecutionOptionsJs>,
+    ) -> Result<ExecutionResult> {
+        let mut runtime = self.inner.lock().unwrap();
+
+        let (target, timeout_ms, input) = if let Some(opts) = options {
+            let target = match opts.target_type.as_deref() {
+                Some("script") => {
+                    let path = opts.path.ok_or_else(|| {
+                        Error::from_reason("path is required for script target".to_string())
+                    })?;
+                    ExecutionTarget::Script {
+                        path,
+                        args: opts.args.unwrap_or_default(),
+                    }
+                }
+                Some("wasm") => {
+                    let path = opts.path.ok_or_else(|| {
+                        Error::from_reason("path is required for wasm target".to_string())
+                    })?;
+                    ExecutionTarget::Wasm { path }
+                }
+                _ => ExecutionTarget::Auto,
+            };
+            let timeout = opts.timeout_ms.map(|t| if t < 0 { 0 } else { t as u64 });
+            let input = opts.input.and_then(|s| serde_json::from_str(&s).ok());
+            (target, timeout, input)
+        } else {
+            (ExecutionTarget::Auto, None, None)
+        };
+
+        let result = runtime
+            .run_skill_target(&skill_id, target, timeout_ms, input)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
+        let output_json = serde_json::to_string(&result.output)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
+        let exit_status = match result.audit.exit_status {
+            RuntimeExecutionStatus::Success => "success".to_string(),
+            RuntimeExecutionStatus::Timeout => "timeout".to_string(),
+            RuntimeExecutionStatus::PermissionDenied => "permission_denied".to_string(),
+            RuntimeExecutionStatus::Failed(msg) => format!("failed:{}", msg),
+        };
+
+        Ok(ExecutionResult {
+            output_json,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            audit: AuditRecord {
+                skill_id: result.audit.skill_id,
+                version: result.audit.version,
+                input_hash: result.audit.input_hash,
+                output_hash: result.audit.output_hash,
+                start_time_ms: result.audit.start_time_ms.min(i64::MAX as u64) as i64,
+                duration_ms: result.audit.duration_ms.min(i64::MAX as u64) as i64,
+                permissions_used: result.audit.permissions_used,
+                exit_status,
+                stdout: result.audit.stdout,
+                stderr: result.audit.stderr,
+            },
+        })
     }
 
+    /// Read a file from a skill directory.
+    ///
+    /// This allows agents to read helper files (like `docx-js.md`) that skills
+    /// reference in their SKILL.md instructions.
     #[napi]
-    pub fn context_id(&self) -> Option<String> {
-        self.inner
-            .lock()
-            .unwrap()
-            .context_id()
-            .map(|id| id.to_string())
+    pub fn read_skill_file(&self, skill_id: String, relative_path: String) -> Result<String> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .read_skill_file(&skill_id, &relative_path)
+            .map_err(|e| Error::from_reason(e.to_string()))
     }
 
+    /// List files in a skill directory (or subdirectory).
+    ///
+    /// Returns relative paths from the skill root.
     #[napi]
-    pub fn record_tool_call(&self, tool: String, output_json: String) -> Result<()> {
-        let output: serde_json::Value = serde_json::from_str(&output_json)
-            .unwrap_or_else(|_| serde_json::json!({ "output": output_json }));
-        self.inner.lock().unwrap().record_tool_call(&tool, &output);
-        Ok(())
+    pub fn list_skill_files(
+        &self,
+        skill_id: String,
+        subdir: Option<String>,
+        recursive: Option<bool>,
+    ) -> Result<Vec<String>> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .list_skill_files(&skill_id, subdir.as_deref(), recursive.unwrap_or(false))
+            .map_err(|e| Error::from_reason(e.to_string()))
     }
 
+    /// Get the root directory path for a skill.
     #[napi]
-    pub fn record_result(&self, output_json: String) -> Result<()> {
-        let output: serde_json::Value = serde_json::from_str(&output_json)
-            .unwrap_or_else(|_| serde_json::json!({ "output": output_json }));
-        self.inner.lock().unwrap().record_result(&output);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn record_stdout(&self, stdout: String) {
-        self.inner.lock().unwrap().record_stdout_if_present(&stdout);
-    }
-
-    #[napi]
-    pub fn record_stderr(&self, stderr: String) {
-        self.inner.lock().unwrap().record_stderr_if_present(&stderr);
-    }
-
-    #[napi]
-    pub fn summarize(&self) -> String {
-        self.inner.lock().unwrap().summarize_fork()
+    pub fn get_skill_root(&self, skill_id: String) -> Result<String> {
+        let runtime = self.inner.lock().unwrap();
+        let path = runtime
+            .get_skill_root(&skill_id)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(path.to_string_lossy().to_string())
     }
 }
 
@@ -507,5 +665,75 @@ fn parse_execution_status(status: Option<String>) -> openskills_runtime::Runtime
             )
         }
         _ => openskills_runtime::RuntimeExecutionStatus::Success,
+    }
+}
+
+// ============================================================================
+// Standalone sandboxed command execution
+// ============================================================================
+
+/// Run a shell command in a sandboxed environment (macOS only).
+///
+/// This provides Claude Code-like sandboxed bash execution for agents.
+/// Uses macOS Seatbelt sandbox-exec.
+#[napi]
+pub fn run_sandboxed_shell_command(
+    command: String,
+    working_dir: String,
+    permissions: Option<CommandPermissionsJs>,
+) -> Result<CommandResultJs> {
+    let perms = permissions.unwrap_or_default();
+    
+    let rust_perms = CommandPermissions {
+        allow_network: perms.allow_network.unwrap_or(false),
+        allow_process: perms.allow_process.unwrap_or(false),
+        read_paths: perms
+            .read_paths
+            .unwrap_or_default()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        write_paths: perms
+            .write_paths
+            .unwrap_or_default()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        env_vars: perms
+            .env_vars
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|pair| {
+                if pair.len() >= 2 {
+                    Some((pair[0].clone(), pair[1].clone()))
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        timeout_ms: perms.timeout_ms.map(|t| t as u64).unwrap_or(30000),
+    };
+
+    let result = run_sandboxed_command(&command, &PathBuf::from(&working_dir), rust_perms)
+        .map_err(|e| Error::from_reason(e.to_string()))?;
+
+    Ok(CommandResultJs {
+        exit_code: result.exit_code,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        timed_out: result.timed_out,
+    })
+}
+
+impl Default for CommandPermissionsJs {
+    fn default() -> Self {
+        Self {
+            allow_network: None,
+            allow_process: None,
+            read_paths: None,
+            write_paths: None,
+            env_vars: None,
+            timeout_ms: None,
+        }
     }
 }

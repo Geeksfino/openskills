@@ -7,7 +7,7 @@
 
 use crate::errors::OpenSkillError;
 use crate::manifest::SkillManifest;
-use crate::skill_parser::parse_skill_md;
+use crate::skill_parser::{parse_frontmatter_only, parse_skill_md};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -15,7 +15,22 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// A loaded Claude Skill.
+/// Skill metadata stored at discovery time (progressive disclosure tier 1).
+/// Does NOT include instructions - those are loaded on activation.
+#[derive(Debug, Clone)]
+pub struct SkillMetadata {
+    /// Skill ID (directory name, must match manifest name).
+    pub id: String,
+    /// Root directory of the skill.
+    pub root: PathBuf,
+    /// Parsed manifest from SKILL.md frontmatter.
+    pub manifest: SkillManifest,
+    /// Location type (personal, project, nested).
+    pub location: SkillLocation,
+}
+
+/// A loaded Claude Skill with full content (for backward compatibility and internal use).
+/// This is created when a skill is activated (progressive disclosure tier 2).
 #[derive(Debug, Clone)]
 pub struct Skill {
     /// Skill ID (directory name, must match manifest name).
@@ -66,8 +81,8 @@ pub struct SkillDescriptor {
 
 /// Registry of discovered Claude Skills.
 pub struct SkillRegistry {
-    /// All discovered skills, keyed by ID.
-    skills: HashMap<String, Skill>,
+    /// Skill metadata only - instructions NOT loaded (progressive disclosure).
+    skills: HashMap<String, SkillMetadata>,
     /// Project root for relative path resolution.
     project_root: Option<PathBuf>,
 }
@@ -188,10 +203,10 @@ impl SkillRegistry {
                 continue;
             }
 
-            // Load and parse the skill
-            match self.load_skill(&id, &path, &skill_md_path, location.clone()) {
-                Ok(skill) => {
-                    self.skills.insert(id, skill);
+            // Load and parse the skill metadata (frontmatter only)
+            match self.load_skill_metadata(&id, &path, &skill_md_path, location.clone()) {
+                Ok(metadata) => {
+                    self.skills.insert(id, metadata);
                 }
                 Err(e) => {
                     // Log warning but continue scanning
@@ -203,25 +218,25 @@ impl SkillRegistry {
         Ok(())
     }
 
-    /// Load a skill from a SKILL.md file.
-    fn load_skill(
+    /// Load skill metadata from a SKILL.md file (frontmatter only).
+    /// This implements progressive disclosure - only metadata is loaded at discovery time.
+    fn load_skill_metadata(
         &self,
         id: &str,
         root: &Path,
         skill_md_path: &Path,
         location: SkillLocation,
-    ) -> Result<Skill, OpenSkillError> {
+    ) -> Result<SkillMetadata, OpenSkillError> {
         let content = fs::read_to_string(skill_md_path)?;
-        let parsed = parse_skill_md(&content)?;
+        let manifest = parse_frontmatter_only(&content)?;  // NEW: frontmatter only
 
         // Validate skill ID matches name
-        validate_skill_id(id, &parsed.manifest)?;
+        validate_skill_id(id, &manifest)?;
 
-        Ok(Skill {
+        Ok(SkillMetadata {
             id: id.to_string(),
             root: root.to_path_buf(),
-            manifest: parsed.manifest,
-            instructions: parsed.instructions,
+            manifest,
             location,
         })
     }
@@ -231,9 +246,29 @@ impl SkillRegistry {
         self.scan_directory(dir.as_ref(), SkillLocation::Custom)
     }
 
-    /// Get a skill by ID.
-    pub fn get(&self, id: &str) -> Option<&Skill> {
+    /// Get skill metadata by ID.
+    pub fn get(&self, id: &str) -> Option<&SkillMetadata> {
         self.skills.get(id)
+    }
+    
+    /// Load full skill content (including instructions) by ID.
+    /// This is used when a skill is activated (progressive disclosure tier 2).
+    pub fn load_full_skill(&self, id: &str) -> Result<Skill, OpenSkillError> {
+        let metadata = self.skills.get(id)
+            .ok_or_else(|| OpenSkillError::SkillNotFound(id.to_string()))?;
+        
+        // Lazy load: read and parse full SKILL.md NOW (not at discovery)
+        let skill_md_path = metadata.root.join("SKILL.md");
+        let content = fs::read_to_string(&skill_md_path)?;
+        let parsed = parse_skill_md(&content)?;  // Full parse with body
+        
+        Ok(Skill {
+            id: metadata.id.clone(),
+            root: metadata.root.clone(),
+            manifest: parsed.manifest,
+            instructions: parsed.instructions,  // Body loaded here
+            location: metadata.location.clone(),
+        })
     }
 
     /// List all skills (progressive disclosure - only descriptors).
@@ -249,9 +284,9 @@ impl SkillRegistry {
             .collect()
     }
 
-    /// Get all skills.
+    /// Get all skill metadata.
     #[allow(dead_code)] // May be useful for future API extensions
-    pub fn all(&self) -> impl Iterator<Item = &Skill> {
+    pub fn all(&self) -> impl Iterator<Item = &SkillMetadata> {
         self.skills.values()
     }
 }
@@ -326,6 +361,9 @@ mod tests {
             agent: None,
             hooks: None,
             user_invocable: None,
+            license: None,
+            compatibility: None,
+            metadata: None,
         };
         assert!(validate_skill_id("my-skill", &manifest).is_ok());
     }
@@ -341,6 +379,9 @@ mod tests {
             agent: None,
             hooks: None,
             user_invocable: None,
+            license: None,
+            compatibility: None,
+            metadata: None,
         };
         assert!(validate_skill_id("my-skill", &manifest).is_err());
     }
@@ -356,6 +397,9 @@ mod tests {
             agent: None,
             hooks: None,
             user_invocable: None,
+            license: None,
+            compatibility: None,
+            metadata: None,
         };
         assert!(validate_skill_id("My_Skill", &manifest).is_err());
     }

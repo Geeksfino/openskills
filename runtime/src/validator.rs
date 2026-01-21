@@ -70,6 +70,27 @@ pub fn validate_name(name: &str) -> Result<(), OpenSkillError> {
         )));
     }
 
+    // No leading hyphen
+    if name.starts_with('-') {
+        return Err(OpenSkillError::InvalidManifest(
+            "Skill name cannot start with a hyphen".to_string(),
+        ));
+    }
+
+    // No trailing hyphen
+    if name.ends_with('-') {
+        return Err(OpenSkillError::InvalidManifest(
+            "Skill name cannot end with a hyphen".to_string(),
+        ));
+    }
+
+    // No consecutive hyphens
+    if name.contains("--") {
+        return Err(OpenSkillError::InvalidManifest(
+            "Skill name cannot contain consecutive hyphens".to_string(),
+        ));
+    }
+
     // Cannot contain XML-like tags
     if name.contains('<') || name.contains('>') {
         return Err(OpenSkillError::InvalidManifest(
@@ -327,9 +348,94 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_name_leading_hyphen_rejected() {
+        assert!(validate_name("-invalid").is_err());
+    }
+
+    #[test]
+    fn test_validate_name_trailing_hyphen_rejected() {
+        assert!(validate_name("invalid-").is_err());
+    }
+
+    #[test]
+    fn test_validate_name_consecutive_hyphens_rejected() {
+        assert!(validate_name("in--valid").is_err());
+    }
+
+    #[test]
     fn test_validate_name_reserved() {
         assert!(validate_name("claude").is_err());
         assert!(validate_name("anthropic").is_err());
+    }
+
+    #[test]
+    fn test_validate_description_max_length() {
+        let max_desc = "x".repeat(1024);
+        assert!(validate_description(&max_desc).is_ok());
+        
+        let too_long = "x".repeat(1025);
+        assert!(validate_description(&too_long).is_err());
+    }
+
+    #[test]
+    fn test_validate_name_max_length() {
+        let max_name = "x".repeat(64);
+        assert!(validate_name(&max_name).is_ok());
+        
+        let too_long = "x".repeat(65);
+        assert!(validate_name(&too_long).is_err());
+    }
+
+    #[test]
+    fn test_validate_description_special_characters() {
+        // Description can contain special characters (unlike name)
+        assert!(validate_description("Test skill with special chars: !@#$%^&*()").is_ok());
+        assert!(validate_description("Test with unicode: 测试技能").is_ok());
+    }
+
+    #[test]
+    fn test_validate_description_xml_tags() {
+        assert!(validate_description("Normal description").is_ok());
+        assert!(validate_description("Description with <script>").is_err());
+        assert!(validate_description("Description with </tag>").is_err());
+    }
+
+    #[test]
+    fn test_validate_context_invalid_value() {
+        use crate::manifest::SkillManifest;
+        let manifest = SkillManifest {
+            name: "test-skill".to_string(),
+            description: "Test".to_string(),
+            context: Some("invalid".to_string()),
+            allowed_tools: None,
+            model: None,
+            agent: None,
+            hooks: None,
+            user_invocable: None,
+            license: None,
+            compatibility: None,
+            metadata: None,
+        };
+        assert!(validate_manifest(&manifest).is_err());
+    }
+
+    #[test]
+    fn test_validate_context_valid_fork() {
+        use crate::manifest::SkillManifest;
+        let manifest = SkillManifest {
+            name: "test-skill".to_string(),
+            description: "Test".to_string(),
+            context: Some("fork".to_string()),
+            allowed_tools: None,
+            model: None,
+            agent: None,
+            hooks: None,
+            user_invocable: None,
+            license: None,
+            compatibility: None,
+            metadata: None,
+        };
+        assert!(validate_manifest(&manifest).is_ok());
     }
 
     #[test]

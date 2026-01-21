@@ -1,6 +1,7 @@
 use openskills_runtime::{
-    ExecutionContext, ExecutionOptions, OpenSkillRuntime, OutputType, RuntimeConfig,
-    RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
+    CommandPermissions, ExecutionContext, ExecutionOptions, OpenSkillRuntime, OutputType,
+    RuntimeConfig, RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
+    run_sandboxed_command,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -486,11 +487,85 @@ impl ExecutionContextWrapper {
     }
 }
 
+/// Run a shell command in a sandboxed environment (macOS only).
+///
+/// This provides Claude Code-like sandboxed bash execution for agents.
+/// Uses macOS Seatbelt sandbox-exec.
+///
+/// Args:
+///     command: Shell command to execute
+///     working_dir: Working directory for the command
+///     allow_network: Allow network access (default: False)
+///     allow_process: Allow subprocess spawning (default: False)
+///     read_paths: List of paths the command can read from
+///     write_paths: List of paths the command can write to
+///     env_vars: Dict of environment variables to pass through
+///     timeout_ms: Timeout in milliseconds (default: 30000)
+///
+/// Returns:
+///     Dict with exit_code, stdout, stderr, timed_out
+#[pyfunction]
+#[pyo3(signature = (command, working_dir, *, allow_network = false, allow_process = false, read_paths = None, write_paths = None, env_vars = None, timeout_ms = 30000))]
+fn run_sandboxed_shell_command(
+    py: Python<'_>,
+    command: String,
+    working_dir: String,
+    allow_network: bool,
+    allow_process: bool,
+    read_paths: Option<Vec<String>>,
+    write_paths: Option<Vec<String>>,
+    env_vars: Option<&Bound<'_, PyDict>>,
+    timeout_ms: u64,
+) -> PyResult<Py<PyAny>> {
+    // Convert env_vars from Python dict to Vec<(String, String)>
+    let env_vec: Vec<(String, String)> = if let Some(env_dict) = env_vars {
+        env_dict
+            .iter()
+            .filter_map(|(k, v)| {
+                let key: Option<String> = k.extract().ok();
+                let value: Option<String> = v.extract().ok();
+                key.zip(value)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let perms = CommandPermissions {
+        allow_network,
+        allow_process,
+        read_paths: read_paths
+            .unwrap_or_default()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        write_paths: write_paths
+            .unwrap_or_default()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        env_vars: env_vec,
+        timeout_ms,
+    };
+
+    let result = run_sandboxed_command(&command, &PathBuf::from(&working_dir), perms)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+    let dict = PyDict::new(py);
+    dict.set_item("exit_code", result.exit_code)?;
+    dict.set_item("stdout", result.stdout)?;
+    dict.set_item("stderr", result.stderr)?;
+    dict.set_item("timed_out", result.timed_out)?;
+
+    Ok(dict.into())
+}
+
 #[pymodule]
 fn openskills(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OpenSkillRuntimeWrapper>()?;
     m.add_class::<SkillExecutionSessionWrapper>()?;
     m.add_class::<ExecutionContextWrapper>()?;
+    m.add_function(wrap_pyfunction!(run_sandboxed_shell_command, m)?)?;
     Ok(())
 }
 

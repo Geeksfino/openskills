@@ -63,8 +63,14 @@ pub fn parse_skill_md(content: &str) -> Result<ParsedSkillMd, OpenSkillError> {
 pub fn validate_name(name: &str) -> Result<(), OpenSkillError> {
     // Checks: empty, length <= 64, lowercase/alphanumeric/hyphens only
     // Rejects: XML tags, reserved words
+    // NEW: Rejects leading hyphen, trailing hyphen, consecutive hyphens
 }
 ```
+
+**Additional Constraints (Updated 2025-01-18)**:
+- ✅ No leading hyphen (e.g., `-invalid` rejected)
+- ✅ No trailing hyphen (e.g., `invalid-` rejected)
+- ✅ No consecutive hyphens (e.g., `in--valid` rejected)
 
 ### 2.2 Description Field
 
@@ -88,21 +94,29 @@ pub fn validate_name(name: &str) -> Result<(), OpenSkillError> {
 ### 3.1 allowed-tools
 
 **Specification**:
-- Comma-separated list or YAML array
+- Comma-separated list, space-separated list, or YAML array
 - Tools Claude can use without permission
 
 **Implementation**:
-✅ **FULLY COMPLIANT**
+✅ **FULLY COMPLIANT** (Updated: 2025-01-18)
 
 **Evidence**:
-- `runtime/src/manifest.rs:53-73`: Supports both comma-separated string and YAML list
+- `runtime/src/manifest.rs:65-71`: Supports YAML list, comma-separated, and space-separated strings
+- `runtime/src/manifest.rs:73-85`: `to_vec()` handles comma and space delimiters
 - `runtime/src/manifest.rs:172-178`: `get_allowed_tools()` returns Vec<String>
 
 **Code**:
-```53:73:runtime/src/manifest.rs
+```65:85:runtime/src/manifest.rs
 pub enum AllowedTools {
     List(Vec<String>),
     CommaSeparated(String),
+}
+
+impl AllowedTools {
+    pub fn to_vec(&self) -> Vec<String> {
+        // Supports comma-delimited AND space-delimited
+        s.split(|c| c == ',' || c == ' ')
+    }
 }
 ```
 
@@ -163,13 +177,16 @@ if let Some(ref ctx) = manifest.context {
 **Specification**:
 - Lifecycle hooks: `PreToolUse`, `PostToolUse`, `Stop`
 - Each hook can have multiple entries with matcher, command, cwd, timeout_ms
+- Hooks execute in sandboxed environment
 
 **Implementation**:
-✅ **FULLY COMPLIANT**
+✅ **FULLY COMPLIANT** (Updated: 2025-01-18)
 
 **Evidence**:
 - `runtime/src/manifest.rs:75-101`: `HooksConfig` with `pre_tool_use`, `post_tool_use`, `stop`
 - `HookEntry` supports matcher, command, cwd, timeout_ms
+- `runtime/src/hook_runner.rs`: Full hook execution pipeline with matcher support
+- `runtime/src/lib.rs:939-960`: `execute_hooks()` method for runtime hook execution
 
 **Code**:
 ```75:101:runtime/src/manifest.rs
@@ -180,12 +197,18 @@ pub struct HooksConfig {
 }
 
 pub struct HookEntry {
-    pub matcher: Option<String>,
+    pub matcher: Option<String>,  // Glob pattern for tool matching
     pub command: String,
     pub cwd: Option<String>,
     pub timeout_ms: Option<u64>,
 }
 ```
+
+**Hook Execution**:
+- `HookRunner::execute()` matches hooks by tool name using glob patterns
+- Commands execute in sandboxed environment (macOS seatbelt)
+- Working directory defaults to skill root, can be overridden per hook
+- Timeout defaults to 30s, can be overridden per hook
 
 ### 3.6 user-invocable
 
@@ -241,17 +264,26 @@ pub fn discover(&mut self) -> Result<(), OpenSkillError> {
 - **Tier 3 (Resources)**: Supporting files loaded on demand
 
 ### Implementation Status
-✅ **FULLY COMPLIANT**
+✅ **FULLY COMPLIANT** (Updated: 2025-01-18)
 
 **Evidence**:
-- `runtime/src/registry.rs:58-65`: `SkillDescriptor` contains only metadata
-- `runtime/src/lib.rs:347-378`: `activate_skill()` loads full SKILL.md content
-- `runtime/src/lib.rs:380-435`: `execute_skill()` loads WASM/resources on demand
+- `runtime/src/registry.rs:59-67`: `SkillMetadata` struct contains only metadata (no instructions)
+- `runtime/src/skill_parser.rs:68-90`: `parse_frontmatter_only()` extracts only YAML frontmatter
+- `runtime/src/registry.rs:207-227`: `load_skill_metadata()` uses frontmatter-only parsing at discovery
+- `runtime/src/registry.rs:234-250`: `load_full_skill()` lazy loads full SKILL.md on activation
+- `runtime/src/lib.rs:434-447`: `activate_skill()` calls `load_full_skill()` to get instructions
+- `runtime/src/lib.rs:execute_skill()`: Loads WASM/resources on demand
 
 **Progressive Loading**:
-1. `discover_skills()` → Returns `Vec<SkillDescriptor>` (Tier 1)
-2. `activate_skill()` → Returns `LoadedSkill` with full instructions (Tier 2)
+1. `discover_skills()` → Parses frontmatter only, stores `SkillMetadata` (Tier 1)
+2. `activate_skill()` → Calls `load_full_skill()` to read and parse full SKILL.md (Tier 2)
 3. `execute_skill()` → Loads WASM module if present (Tier 3)
+
+**Key Implementation Details**:
+- Registry stores `SkillMetadata` (no instructions field) at discovery time
+- `parse_frontmatter_only()` discards body after extracting YAML
+- Full `Skill` struct (with instructions) is only created on activation
+- Memory usage scales with skill count × metadata size, not × full SKILL.md size
 
 ---
 
@@ -406,9 +438,15 @@ The spec mentions OS-level sandboxing (seatbelt/seccomp). OpenSkills uses WASM/W
 ### ✅ Fully Compliant Areas
 1. SKILL.md format (YAML frontmatter + Markdown)
 2. Required fields (name, description) with all constraints
+   - ✅ Name validation: no leading/trailing/consecutive hyphens (added 2025-01-18)
 3. Optional fields (allowed-tools, model, context, agent, hooks, user-invocable)
+   - ✅ allowed-tools: supports comma, space, and YAML list formats (updated 2025-01-18)
+   - ✅ hooks: full execution pipeline with matcher support (added 2025-01-18)
+   - ✅ license, compatibility, metadata fields (added 2025-01-18)
 4. Skill discovery paths (personal, project, nested)
 5. Progressive disclosure (3-tier loading)
+   - ✅ True metadata-only discovery (implemented 2025-01-18)
+   - ✅ Lazy body loading on activation (implemented 2025-01-18)
 6. Context fork mechanism
 7. Validation rules
 8. Language bindings

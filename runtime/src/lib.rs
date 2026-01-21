@@ -33,6 +33,7 @@ mod build;
 mod context;
 mod errors;
 mod executor;
+mod hook_runner;
 mod manifest;
 mod skill_session;
 mod native_runner;
@@ -48,7 +49,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use audit::{AuditRecord, AuditSink, NoopAuditSink};
 use errors::OpenSkillError;
-use executor::{execute_skill, ExecutionOptions as ExecOpts};
+use executor::{
+    execute_skill, read_skill_file, run_skill_target, list_skill_files,
+    ExecutionOptions as ExecOpts,
+};
 use permission_callback::PermissionManager;
 use registry::{Skill, SkillRegistry};
 use serde_json::Value;
@@ -69,6 +73,15 @@ pub use permission_callback::{
 pub use skill_parser::parse_skill_md;
 pub use registry::{SkillDescriptor, SkillLocation};
 pub use validator::{analyze_skill_tokens, validate_skill_path, TokenAnalysis, ValidationResult, ValidationStats};
+
+// Re-export execution target types for public API
+pub use executor::{ExecutionTarget, TargetExecutionOptions};
+
+// Re-export sandboxed command execution API
+pub use executor::{CommandPermissions, CommandResult, run_sandboxed_command};
+
+// Re-export hook execution API
+pub use hook_runner::{HookEvent, HookRunner};
 
 /// Runtime configuration for skill discovery.
 #[derive(Debug, Clone)]
@@ -427,14 +440,12 @@ impl OpenSkillRuntime {
     /// This implements the "activation" step of progressive disclosure:
     /// the full instructions are only loaded when the skill is activated.
     pub fn activate_skill(&self, skill_id: &str) -> Result<LoadedSkill, OpenSkillError> {
-        let skill = self
-            .registry
-            .get(skill_id)
-            .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
+        // Lazy load: get full skill content (including instructions) from registry
+        let skill = self.registry.load_full_skill(skill_id)?;
 
-        validate_skill(skill)?;
+        validate_skill(&skill)?;
 
-        Ok(LoadedSkill::from(skill))
+        Ok(LoadedSkill::from(&skill))
     }
 
     /// Start a skill execution session for instruction-based workflows.
@@ -453,12 +464,10 @@ impl OpenSkillRuntime {
             self.discover_skills()?;
         }
 
-        let skill = self
-            .registry
-            .get(skill_id)
-            .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
+        // Load full skill (with instructions) for session
+        let skill = self.registry.load_full_skill(skill_id)?;
 
-        validate_skill(skill)?;
+        validate_skill(&skill)?;
 
         let is_forked = skill.manifest.is_forked();
         let context = if is_forked {
@@ -469,7 +478,7 @@ impl OpenSkillRuntime {
         };
 
         Ok(SkillExecutionSession::new(
-            LoadedSkill::from(skill),
+            LoadedSkill::from(&skill),
             is_forked,
             input.unwrap_or(Value::Null),
             context,
@@ -545,12 +554,13 @@ impl OpenSkillRuntime {
         description: Option<String>,
         context: std::collections::HashMap<String, String>,
     ) -> Result<bool, OpenSkillError> {
-        let skill = self
+        // Only need metadata for permission checking
+        let metadata = self
             .registry
             .get(skill_id)
             .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
 
-        let allowed = skill.manifest.get_allowed_tools();
+        let allowed = metadata.manifest.get_allowed_tools();
         if !allowed.is_empty() && !allowed.iter().any(|t| t == tool) {
             return Err(OpenSkillError::PermissionDenied(format!(
                 "Tool {} is not allowed for skill {}",
@@ -631,12 +641,10 @@ impl OpenSkillRuntime {
             self.discover_skills()?;
         }
 
-        let skill = self
-            .registry
-            .get(skill_id)
-            .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
+        // Load full skill (with instructions) for execution
+        let skill = self.registry.load_full_skill(skill_id)?;
 
-        validate_skill(skill)?;
+        validate_skill(&skill)?;
 
         // Check if skill should run in forked context
         let is_forked = skill.manifest.is_forked();
@@ -683,7 +691,7 @@ impl OpenSkillRuntime {
             wasm_module: None,
         };
 
-        let execution = execute_skill(skill, exec_options)?;
+        let execution = execute_skill(&skill, exec_options)?;
         let duration_ms = start.elapsed().as_millis() as u64;
 
         // Capture outputs in forked context if applicable
@@ -749,12 +757,13 @@ impl OpenSkillRuntime {
 
     /// Check if a tool is allowed for a skill.
     pub fn is_tool_allowed(&self, skill_id: &str, tool: &str) -> Result<bool, OpenSkillError> {
-        let skill = self
+        // Only need metadata for tool checking
+        let metadata = self
             .registry
             .get(skill_id)
             .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
 
-        let allowed = skill.manifest.get_allowed_tools();
+        let allowed = metadata.manifest.get_allowed_tools();
         
         // Empty list means all tools allowed
         if allowed.is_empty() {
@@ -762,6 +771,199 @@ impl OpenSkillRuntime {
         }
 
         Ok(allowed.iter().any(|t| t == tool))
+    }
+
+    /// Run a specific target (script/WASM) within a skill.
+    ///
+    /// This is designed for Claude Skills where SKILL.md instructions tell
+    /// the agent which script to run (e.g., "run python ooxml/scripts/unpack.py").
+    ///
+    /// # Arguments
+    ///
+    /// * `skill_id` - The skill containing the target
+    /// * `target` - What to execute (Script, Wasm, or Auto)
+    /// * `options` - Execution options (timeout, input, etc.)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Run a specific Python script within the docx skill
+    /// let result = runtime.run_skill_target(
+    ///     "docx",
+    ///     ExecutionTarget::Script {
+    ///         path: "ooxml/scripts/unpack.py".to_string(),
+    ///         args: vec!["document.docx".to_string(), "output/".to_string()],
+    ///     },
+    ///     TargetExecutionOptions {
+    ///         timeout_ms: Some(30000),
+    ///         ..Default::default()
+    ///     },
+    /// )?;
+    /// ```
+    pub fn run_skill_target(
+        &mut self,
+        skill_id: &str,
+        target: ExecutionTarget,
+        timeout_ms: Option<u64>,
+        input: Option<Value>,
+    ) -> Result<ExecutionResult, OpenSkillError> {
+        // Ensure registry is loaded
+        if self.registry.is_empty() {
+            self.discover_skills()?;
+        }
+
+        // Load full skill (with instructions) for target execution
+        let skill = self.registry.load_full_skill(skill_id)?;
+
+        validate_skill(&skill)?;
+
+        // Check permissions for risky tools before execution
+        let allowed_tools = skill.manifest.get_allowed_tools();
+        use permission_callback::{get_risk_level, is_risky_tool};
+        use std::collections::HashMap;
+
+        for tool in &allowed_tools {
+            if is_risky_tool(tool) {
+                let granted = self.permission_manager.check_permission(
+                    skill_id,
+                    tool,
+                    format!("Execute {} operations", tool),
+                    get_risk_level(tool),
+                    HashMap::new(),
+                )?;
+
+                if !granted {
+                    return Err(OpenSkillError::PermissionDenied(format!(
+                        "User denied {} permission for skill {}",
+                        tool, skill_id
+                    )));
+                }
+            }
+        }
+
+        let start = Instant::now();
+        let start_epoch = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis() as u64;
+
+        let options = TargetExecutionOptions {
+            target,
+            timeout_ms,
+            input,
+            ..Default::default()
+        };
+
+        let execution = run_skill_target(&skill, options)?;
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        let audit = AuditRecord {
+            skill_id: skill.id.clone(),
+            version: "1.0".to_string(),
+            input_hash: "".to_string(),
+            output_hash: audit::hash_json(&execution.output),
+            start_time_ms: start_epoch,
+            duration_ms,
+            permissions_used: execution.permissions_used.clone(),
+            exit_status: execution.exit_status.clone(),
+            stdout: execution.stdout.clone(),
+            stderr: execution.stderr.clone(),
+        };
+
+        self.audit_sink.record(&audit);
+
+        Ok(ExecutionResult {
+            output: execution.output,
+            stdout: execution.stdout,
+            stderr: execution.stderr,
+            audit,
+        })
+    }
+
+    /// Read a file from a skill directory.
+    ///
+    /// This allows agents to read helper files (like `docx-js.md`) that skills
+    /// reference in their SKILL.md instructions.
+    ///
+    /// # Security
+    ///
+    /// The path must be within the skill directory. Attempts to escape via
+    /// `..` or symlinks are rejected.
+    pub fn read_skill_file(&self, skill_id: &str, relative_path: &str) -> Result<String, OpenSkillError> {
+        // Only need metadata (root path) for file reading
+        let metadata = self
+            .registry
+            .get(skill_id)
+            .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
+
+        read_skill_file(&metadata.root, relative_path)
+    }
+
+    /// List files in a skill directory (or subdirectory).
+    ///
+    /// Returns relative paths from the skill root.
+    ///
+    /// # Arguments
+    ///
+    /// * `skill_id` - The skill to list files from
+    /// * `subdir` - Optional subdirectory (e.g., "scripts", "ooxml/scripts")
+    /// * `recursive` - Whether to list recursively
+    pub fn list_skill_files(
+        &self,
+        skill_id: &str,
+        subdir: Option<&str>,
+        recursive: bool,
+    ) -> Result<Vec<String>, OpenSkillError> {
+        // Only need metadata (root path) for file listing
+        let metadata = self
+            .registry
+            .get(skill_id)
+            .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
+
+        list_skill_files(&metadata.root, subdir, recursive)
+    }
+
+    /// Get the root directory path for a skill.
+    ///
+    /// This is useful for agents that need to construct absolute paths
+    /// for skill resources.
+    pub fn get_skill_root(&self, skill_id: &str) -> Result<PathBuf, OpenSkillError> {
+        // Only need metadata (root path)
+        let metadata = self
+            .registry
+            .get(skill_id)
+            .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
+
+        Ok(metadata.root.clone())
+    }
+
+    /// Execute hooks for a skill event.
+    ///
+    /// This runs matching hooks (PreToolUse, PostToolUse, or Stop) for a skill.
+    /// Hooks are executed in a sandboxed environment with the skill's root directory
+    /// as the working directory (or the hook's specified cwd if provided).
+    ///
+    /// # Arguments
+    ///
+    /// * `skill_id` - The skill to execute hooks for
+    /// * `event` - The hook event to trigger
+    ///
+    /// # Returns
+    ///
+    /// A vector of command results, one for each matching hook that was executed.
+    pub fn execute_hooks(
+        &self,
+        skill_id: &str,
+        event: HookEvent,
+    ) -> Result<Vec<CommandResult>, OpenSkillError> {
+        let skill = self.activate_skill(skill_id)?;
+
+        if let Some(hooks) = skill.manifest.hooks {
+            let runner = HookRunner::new(hooks, self.get_skill_root(skill_id)?);
+            runner.execute(&event)
+        } else {
+            Ok(Vec::new())
+        }
     }
 }
 
