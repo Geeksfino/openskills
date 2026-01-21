@@ -247,23 +247,27 @@ function createSkillTools(runtime, options = {}) {
     }),
 
     /**
-     * Run a script from a skill in the sandbox.
+     * Run a script or WASM module from a skill in the sandbox.
+     * The sandbox type (WASM or native seatbelt/seccomp) is auto-detected from file extension.
      */
     run_skill_script: tool({
       description:
-        'Run a Python or Shell script from a skill directory in a sandbox. Use when SKILL.md instructions say to run a script.',
+        'Run a script or WASM module from a skill directory in a sandbox. The sandbox type is auto-detected from file extension: .wasm files use WASM sandbox, .py/.sh files use native sandbox (seatbelt on macOS). Use when SKILL.md instructions say to run a script or execute a WASM function.',
       parameters: z.object({
         skill_id: z.string().describe('The skill ID'),
-        script_path: z.string().describe('Path to the script relative to skill root'),
-        args: z.array(z.string()).optional().describe('Arguments to pass to the script'),
+        script_path: z.string().describe('Path to the script or WASM module relative to skill root (e.g., "scripts/unpack.py" or "wasm/skill.wasm")'),
+        args: z.array(z.string()).optional().describe('Arguments to pass to native scripts (ignored for WASM)'),
+        input: z.string().optional().describe('JSON input to pass to the script/WASM module (e.g., \'{"action": "init_skill", "skill_name": "my-skill"}\')'),
         timeout_ms: z.number().optional().describe('Timeout in milliseconds (default: 30000)'),
       }),
-      execute: async ({ skill_id, script_path, args, timeout_ms }) => {
+      execute: async ({ skill_id, script_path, args, input, timeout_ms }) => {
         try {
+          // Auto-detect sandbox type from file extension (handled by runtime)
           const result = runtime.runSkillTarget(skill_id, {
-            targetType: 'script',
+            // targetType not specified = auto-detect from path extension
             path: script_path,
             args: args ?? [],
+            input: input,
             timeoutMs: timeout_ms ?? 30000,
           });
           return JSON.stringify(

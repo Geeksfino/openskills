@@ -564,6 +564,18 @@ impl OpenSkillRuntimeWrapper {
                     })?;
                     ExecutionTarget::Wasm { path }
                 }
+                Some("auto") | None => {
+                    // Auto-detect from path extension if path is provided
+                    // Uses ExecutionTarget::Path for transparent WASM vs native sandbox selection
+                    if let Some(path) = opts.path {
+                        ExecutionTarget::Path {
+                            path,
+                            args: opts.args.unwrap_or_default(),
+                        }
+                    } else {
+                        ExecutionTarget::Auto
+                    }
+                }
                 _ => ExecutionTarget::Auto,
             };
             let timeout = safe_timeout_ms(opts.timeout_ms);

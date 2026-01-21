@@ -144,7 +144,7 @@ async function main() {
         console.log("\n" + "=".repeat(70));
         console.log(`📋 Tool Results (${result.toolResults.length}):`);
         console.log("=".repeat(70));
-      for (const res of result.toolResults) {
+      for (const res of result.toolResults as Array<{ toolName: string; result: unknown }>) {
         const preview = typeof res.result === 'string' 
             ? res.result.slice(0, 200) + (res.result.length > 200 ? '...' : '')
             : JSON.stringify(res.result).slice(0, 200);

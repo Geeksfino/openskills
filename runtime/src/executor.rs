@@ -55,12 +55,20 @@ pub struct ExecutionOptions {
 pub enum ExecutionTarget {
     /// Auto-detect: find entry point (script.py, main.py, skill.wasm, etc.)
     Auto,
+    /// Run a specific file - auto-detect type from extension (.wasm = WASM, .py/.sh = native).
+    /// This is the recommended variant for transparent sandbox selection.
+    Path {
+        path: String,
+        args: Vec<String>, // Only used for native scripts, ignored for WASM
+    },
     /// Run a specific script (relative path within skill directory).
+    /// Deprecated: Use `Path` instead for transparent sandbox selection.
     Script {
         path: String,
         args: Vec<String>,
     },
     /// Run a specific WASM module (relative path within skill directory).
+    /// Deprecated: Use `Path` instead for transparent sandbox selection.
     Wasm {
         path: String,
     },
@@ -256,6 +264,75 @@ pub fn run_skill_target(
                     &allowed_tools,
                     options.workspace_dir.as_deref(),
                 ),
+            }
+        }
+        ExecutionTarget::Path { path, args } => {
+            // Auto-detect execution type from file extension
+            let full_path = skill.root.join(&path);
+            if !full_path.exists() {
+                return Err(OpenSkillError::NativeExecutionError(format!(
+                    "File not found: {}",
+                    full_path.display()
+                )));
+            }
+
+            // Validate path is within skill directory (security)
+            let canonical_skill = skill.root.canonicalize().map_err(|e| {
+                OpenSkillError::NativeExecutionError(format!(
+                    "Failed to canonicalize skill root: {}",
+                    e
+                ))
+            })?;
+            let canonical_file = full_path.canonicalize().map_err(|e| {
+                OpenSkillError::NativeExecutionError(format!(
+                    "Failed to canonicalize file path: {}",
+                    e
+                ))
+            })?;
+            if !canonical_file.starts_with(&canonical_skill) {
+                return Err(OpenSkillError::NativeExecutionError(format!(
+                    "Path escapes skill directory: {}",
+                    path
+                )));
+            }
+
+            // Auto-detect execution type from extension
+            let path_lower = path.to_lowercase();
+            if path_lower.ends_with(".wasm") {
+                // Execute as WASM
+                execute_wasm(
+                    skill,
+                    &path,
+                    input,
+                    wasm_config.timeout_ms,
+                    &enforcer,
+                    options.workspace_dir.as_deref(),
+                )
+            } else {
+                // Execute as native script (seatbelt on macOS, seccomp on Linux when available)
+                let script_type = detect_script_type(&full_path)?;
+                let input_with_args = if args.is_empty() {
+                    input
+                } else {
+                    let mut obj = match input {
+                        Value::Object(map) => map,
+                        _ => serde_json::Map::new(),
+                    };
+                    obj.insert("args".to_string(), Value::Array(
+                        args.iter().map(|a| Value::String(a.clone())).collect()
+                    ));
+                    Value::Object(obj)
+                };
+                execute_native(
+                    skill,
+                    &full_path,
+                    script_type,
+                    input_with_args,
+                    wasm_config.timeout_ms,
+                    &enforcer,
+                    &allowed_tools,
+                    options.workspace_dir.as_deref(),
+                )
             }
         }
         ExecutionTarget::Script { path, args } => {

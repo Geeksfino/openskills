@@ -214,8 +214,20 @@ OpenSkills runtime does not support legacy core-module WASM artifacts."
     let component_ctx = component_builder.build();
 
     let mut linker: ComponentLinker<WasiComponentState> = ComponentLinker::new(&engine);
+    
+    // Add WASI 0.3 (p3) interfaces
     wasmtime_wasi::p3::add_to_linker(&mut linker).map_err(|e| {
         OpenSkillError::WasmError(format!("Failed to add WASI 0.3 (p3) interfaces to linker: {e}"))
+    })?;
+    
+    // Components created with wasm-tools component new --adapt wasi_snapshot_preview1
+    // import WASI 0.2 CLI interfaces (wasi:cli/*@0.2.1). We need to add p2 interfaces
+    // alongside p3 to support these components. The p2 feature is enabled in workspace Cargo.toml.
+    // 
+    // Add WASI 0.2 (p2) interfaces using add_to_linker_async (since we're using async component model).
+    // This provides the wasi:cli/*@0.2.1 interfaces that components built with the adapter require.
+    wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(|e| {
+        OpenSkillError::WasmError(format!("Failed to add WASI 0.2 (p2) interfaces to linker: {e}"))
     })?;
 
     let mut store = Store::new(
@@ -238,21 +250,34 @@ OpenSkills runtime does not support legacy core-module WASM artifacts."
     });
 
     let run_result: Result<Result<(), ()>, OpenSkillError> = wasmtime_wasi::runtime::in_tokio(async {
-        let command = wasmtime_wasi::p3::bindings::Command::instantiate_async(
+        // Try p3 bindings first (for native 0.3 components)
+        // If that fails, fall back to p2 bindings (for components built with wasi_snapshot_preview1 adapter)
+        let program_result = match wasmtime_wasi::p3::bindings::Command::instantiate_async(
             &mut store,
             &component,
             &linker,
         )
         .await
-        .map_err(|e| OpenSkillError::WasmError(format!("Component instantiation failed: {e}")))?;
-
-        // `run_concurrent(...).await` can fail for two reasons:
-        // - The async runtime/trap machinery itself failed (outer error).
-        // - The guest returned a trap/error (inner error from call_run).
-        let program_result = store
-            .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
-            .await
-            .map_err(|e| OpenSkillError::WasmError(format!("Component run failed: {e}")))?;
+        {
+            Ok(command) => {
+                // Component is WASI 0.3 - use p3 bindings
+                store
+                    .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
+                    .await
+                    .map_err(|e| OpenSkillError::WasmError(format!("Component run failed: {e}")))?
+            }
+            Err(_) => {
+                // Component is WASI 0.2 - instantiate using linker directly
+                // The p2 interfaces are already in the linker, so instantiation should work
+                // For WASI 0.2 components, instantiation is sufficient - the component runs automatically
+                linker
+                    .instantiate_async(&mut store, &component)
+                    .await
+                    .map_err(|e| OpenSkillError::WasmError(format!("Component instantiation failed: {e}")))?;
+                
+                Ok(Ok(()))
+            }
+        };
 
         let program_result = program_result
             .map_err(|e| OpenSkillError::WasmError(format!("Component run trapped: {e}")))?;

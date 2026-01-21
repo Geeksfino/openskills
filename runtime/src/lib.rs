@@ -559,15 +559,18 @@ When a user's request matches a skill's capabilities:
 2. **Read the instructions carefully**: The SKILL.md contains everything you need to know
 3. **Follow the instructions exactly**: Execute the steps as described in SKILL.md
 4. **Use helper files if referenced**: Call `read_skill_file(skill_id, path)` to read referenced docs (e.g., `docx-js.md`)
-5. **Run scripts as instructed**: 
-   - For scripts in the skill directory: Call `run_skill_script(skill_id, script_path, args)`
+5. **Run scripts or WASM modules as instructed**: 
+   - For scripts/WASM in the skill directory: Call `run_skill_script(skill_id, path, args?, input?)`
+     - The sandbox type is auto-detected from file extension: `.wasm` → WASM sandbox, `.py/.sh` → native sandbox
+     - For WASM modules, pass JSON input: `run_skill_script("skill-id", "wasm/skill.wasm", null, '{"action": "..."}')`
    - For scripts you generate in the workspace: Use `run_sandboxed_bash()` to execute them
 
 ## Important
 
 - Each skill's SKILL.md contains all the knowledge you need - do NOT assume prior knowledge about any skill
 - The instructions may reference helper files within the skill directory - read them when needed
-- The instructions may tell you to run scripts - these are sandboxed for security
+- The instructions may tell you to run scripts or WASM modules - these are sandboxed for security
+- The sandbox type is transparent: WASM files use WASM sandbox, Python/shell scripts use native OS sandbox
 - Output files are written to the workspace directory (available as SKILL_WORKSPACE environment variable)
 
 ## Code Generation and Execution
@@ -614,7 +617,7 @@ Example response:
 - `activate_skill(skill_id)` - Load full SKILL.md instructions for a skill
 - `read_skill_file(skill_id, path)` - Read a file from a skill directory
 - `list_skill_files(skill_id, subdir?, recursive?)` - List files in a skill directory
-- `run_skill_script(skill_id, script_path, args)` - Run a sandboxed script from a skill
+- `run_skill_script(skill_id, path, args?, input?)` - Run a script or WASM module from a skill (auto-detects sandbox type from extension)
 - `run_sandboxed_bash(command, working_dir?, allow_process?)` - Run a sandboxed bash command (set allow_process=true for script execution)
 - `write_file(path, content)` - Write a file to the workspace
 - `read_file(path)` - Read a file from the workspace

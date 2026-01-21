@@ -4,7 +4,18 @@
  */
 
 import type { OpenSkillRuntimeWrapper } from './index';
-import type { CoreTool } from 'ai';
+
+/**
+ * CoreTool type from Vercel AI SDK.
+ * Defined locally to avoid requiring 'ai' package at type-check time.
+ * The actual implementation uses the real CoreTool from 'ai' at runtime.
+ */
+type CoreTool = {
+  description?: string;
+  parameters: unknown; // Required by AI SDK Tool type
+  execute?: (...args: unknown[]) => Promise<unknown>;
+  [key: string]: unknown;
+};
 
 /**
  * Options for creating skill tools.
@@ -31,7 +42,7 @@ export interface SkillTools {
   read_skill_file: CoreTool;
   /** List files in a skill directory. */
   list_skill_files: CoreTool;
-  /** Run a script from a skill in the sandbox. */
+  /** Run a script or WASM module from a skill in the sandbox. Auto-detects sandbox type from file extension. */
   run_skill_script: CoreTool;
   /** Run a sandboxed bash command. */
   run_sandboxed_bash: CoreTool;

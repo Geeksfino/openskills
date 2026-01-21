@@ -452,6 +452,19 @@ impl OpenSkillRuntimeWrapper {
                         .extract()?;
                     ExecutionTarget::Wasm { path }
                 }
+                Some("auto") | None => {
+                    // Auto-detect from path extension if path is provided
+                    // Uses ExecutionTarget::Path for transparent WASM vs native sandbox selection
+                    if let Some(path_obj) = opts.get_item("path")? {
+                        let path: String = path_obj.extract()?;
+                        let args: Vec<String> = opts.get_item("args")?
+                            .and_then(|v| v.extract::<Vec<String>>().ok())
+                            .unwrap_or_default();
+                        ExecutionTarget::Path { path, args }
+                    } else {
+                        ExecutionTarget::Auto
+                    }
+                }
                 _ => ExecutionTarget::Auto,
             };
 
