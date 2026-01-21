@@ -376,15 +376,40 @@ When the user asks for document creation, file manipulation, or specialized task
 
 ## IMPORTANT: Actually create files when asked
 
-If the user asks you to create a Word document:
-- Activate the \`docx\` skill and read its instructions
-- Read the referenced docs with read_skill_file (e.g., "docx-js.md")
-- Use the \`docx\` npm package (already installed in this example) to generate a .docx
-- Write a TypeScript script to \`output/create-docx.ts\` via the \`write_file\` tool
-- Run it with: \`bash: "npx tsx output/create-docx.ts"\`
-- Save the document to: \`output/generated.docx\`
-- Verify with: \`bash: "ls -la output"\`
-- Report the final path (\`output/generated.docx\`)`;
+If the user asks you to create a Word document, you MUST complete ALL these steps:
+
+1. **Activate the docx skill**: Call activate_skill("docx") to get instructions
+2. **Read helper docs**: Use read_skill_file("docx", "docx-js.md") to understand the API
+3. **Create TypeScript script**: Write a script to \`output/create-docx.ts\` (NOT src/output/ or src/ - use the output/ directory at the project root) with this exact pattern:
+   \`\`\`typescript
+   import { Document, Packer, Paragraph, TextRun } from 'docx';
+   import fs from 'fs';
+   
+   const doc = new Document({
+     sections: [{
+       children: [
+         new Paragraph({
+           children: [new TextRun({ text: "Title", bold: true, size: 48 })],
+           alignment: "CENTER"
+         }),
+         new Paragraph({ children: [new TextRun({ text: "" })] }),
+         new Paragraph({
+           children: [new TextRun({ text: "Paragraph text", size: 24 })]
+         })
+       ]
+     }]
+   });
+   
+   Packer.toBuffer(doc).then((buffer) => {
+     fs.writeFileSync("output/generated.docx", buffer);
+     console.log("✓ Document created");
+   });
+   \`\`\`
+4. **EXECUTE THE SCRIPT**: Use bash tool: \`bash: "npx tsx output/create-docx.ts"\`
+5. **Verify**: Use bash tool: \`bash: "ls -lh output/generated.docx"\`
+6. **Report**: Tell the user the document was created at output/generated.docx
+
+**CRITICAL**: Do NOT stop after step 3. You MUST execute the script (step 4) to actually create the file!`;
 
 async function main() {
   const userQuery = process.argv[2] || 
@@ -413,7 +438,7 @@ async function main() {
         write_file: writeFileTool,
         bash: bashTool,
       },
-      maxSteps: 10,
+      maxSteps: 20,
     });
     
     console.log("\n" + "=".repeat(60));
