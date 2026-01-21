@@ -85,6 +85,17 @@ function createSkillTools(runtime, options = {}) {
     fs.mkdirSync(workspaceDir, { recursive: true });
   }
 
+  // Helper function to validate that a path is within the workspace directory
+  // This prevents directory traversal attacks by ensuring the resolved path
+  // is actually within the workspace, not just a string prefix match
+  function isPathWithinWorkspace(relativePath) {
+    const resolvedWorkspace = path.resolve(workspaceDir);
+    const resolvedPath = path.resolve(workspaceDir, relativePath);
+    // Path must either equal the workspace or start with workspace + separator
+    return resolvedPath === resolvedWorkspace || 
+           resolvedPath.startsWith(resolvedWorkspace + path.sep);
+  }
+
   // Create/update package.json in workspace to support CommonJS (used by Claude Skills)
   // This ensures CommonJS scripts work even if parent project uses ES modules
   const workspacePackageJson = path.join(workspaceDir, 'package.json');
@@ -297,11 +308,11 @@ function createSkillTools(runtime, options = {}) {
       }),
       execute: async ({ path: relativePath, content }) => {
         try {
-          const fullPath = path.resolve(workspaceDir, relativePath);
-          // Security: ensure path is within workspace
-          if (!fullPath.startsWith(path.resolve(workspaceDir))) {
+          // Security: ensure path is within workspace (prevents directory traversal)
+          if (!isPathWithinWorkspace(relativePath)) {
             return `Error: Path ${relativePath} escapes workspace directory`;
           }
+          const fullPath = path.resolve(workspaceDir, relativePath);
           // Ensure parent directory exists
           const dir = path.dirname(fullPath);
           if (!fs.existsSync(dir)) {
@@ -325,11 +336,11 @@ function createSkillTools(runtime, options = {}) {
       }),
       execute: async ({ path: relativePath }) => {
         try {
-          const fullPath = path.resolve(workspaceDir, relativePath);
-          // Security: ensure path is within workspace
-          if (!fullPath.startsWith(path.resolve(workspaceDir))) {
+          // Security: ensure path is within workspace (prevents directory traversal)
+          if (!isPathWithinWorkspace(relativePath)) {
             return `Error: Path ${relativePath} escapes workspace directory`;
           }
+          const fullPath = path.resolve(workspaceDir, relativePath);
           if (!fs.existsSync(fullPath)) {
             return `Error: File not found: ${relativePath}`;
           }
@@ -402,10 +413,11 @@ function createSkillTools(runtime, options = {}) {
       }),
       execute: async ({ path: relativePath }) => {
         try {
-          const fullPath = path.resolve(workspaceDir, relativePath);
-          if (!fullPath.startsWith(path.resolve(workspaceDir))) {
+          // Security: ensure path is within workspace (prevents directory traversal)
+          if (!isPathWithinWorkspace(relativePath)) {
             return `Error: Path ${relativePath} escapes workspace directory`;
           }
+          const fullPath = path.resolve(workspaceDir, relativePath);
           if (!fs.existsSync(fullPath)) {
             return `Error: File not found: ${relativePath}`;
           }

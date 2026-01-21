@@ -106,6 +106,16 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
     workspace = Path(workspace_dir) if workspace_dir else Path.cwd()
     workspace.mkdir(parents=True, exist_ok=True)
     
+    # Helper function to validate that a path is within the workspace directory
+    # This prevents directory traversal attacks by ensuring the resolved path
+    # is actually within the workspace, not just a string prefix match
+    def is_path_within_workspace(relative_path: str) -> bool:
+        resolved_workspace = workspace.resolve()
+        resolved_path = (workspace / relative_path).resolve()
+        # Path must either equal the workspace or start with workspace + separator
+        return resolved_path == resolved_workspace or \
+               str(resolved_path).startswith(str(resolved_workspace) + os.sep)
+    
     # Schema definitions
     class ListSkillsInput(BaseModel):
         query: Optional[str] = Field(default=None, description="Optional search query to filter skills")
@@ -193,10 +203,10 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
     
     def write_file(path: str, content: str) -> str:
         try:
-            full_path = workspace / path
-            # Security: ensure path is within workspace
-            if not str(full_path.resolve()).startswith(str(workspace.resolve())):
+            # Security: ensure path is within workspace (prevents directory traversal)
+            if not is_path_within_workspace(path):
                 return f"Error: Path {path} escapes workspace directory"
+            full_path = workspace / path
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(content, encoding='utf-8')
             return f"Successfully wrote {len(content)} bytes to {path}"
@@ -205,10 +215,10 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
     
     def read_file(path: str) -> str:
         try:
-            full_path = workspace / path
-            # Security: ensure path is within workspace
-            if not str(full_path.resolve()).startswith(str(workspace.resolve())):
+            # Security: ensure path is within workspace (prevents directory traversal)
+            if not is_path_within_workspace(path):
                 return f"Error: Path {path} escapes workspace directory"
+            full_path = workspace / path
             if not full_path.exists():
                 return f"Error: File not found: {path}"
             return full_path.read_text(encoding='utf-8')
@@ -253,9 +263,10 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
     def get_file_info(path: str) -> str:
         try:
             import mimetypes
-            full_path = workspace / path
-            if not str(full_path.resolve()).startswith(str(workspace.resolve())):
+            # Security: ensure path is within workspace (prevents directory traversal)
+            if not is_path_within_workspace(path):
                 return f"Error: Path {path} escapes workspace directory"
+            full_path = workspace / path
             if not full_path.exists():
                 return f"Error: File not found: {path}"
             
@@ -381,6 +392,16 @@ def create_simple_tools(runtime, workspace_dir: Optional[str] = None) -> Dict[st
     workspace = Path(workspace_dir) if workspace_dir else Path.cwd()
     workspace.mkdir(parents=True, exist_ok=True)
     
+    # Helper function to validate that a path is within the workspace directory
+    # This prevents directory traversal attacks by ensuring the resolved path
+    # is actually within the workspace, not just a string prefix match
+    def is_path_within_workspace(relative_path: str) -> bool:
+        resolved_workspace = workspace.resolve()
+        resolved_path = (workspace / relative_path).resolve()
+        # Path must either equal the workspace or start with workspace + separator
+        return resolved_path == resolved_workspace or \
+               str(resolved_path).startswith(str(resolved_workspace) + os.sep)
+    
     def list_skills(query: Optional[str] = None) -> List[Dict]:
         skills = runtime.list_skills()
         if query:
@@ -403,17 +424,19 @@ def create_simple_tools(runtime, workspace_dir: Optional[str] = None) -> Dict[st
         return runtime.list_skill_files(skill_id, subdir, recursive)
     
     def write_file(path: str, content: str) -> str:
-        full_path = workspace / path
-        if not str(full_path.resolve()).startswith(str(workspace.resolve())):
+        # Security: ensure path is within workspace (prevents directory traversal)
+        if not is_path_within_workspace(path):
             raise ValueError(f"Path {path} escapes workspace directory")
+        full_path = workspace / path
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding='utf-8')
         return f"Wrote {len(content)} bytes to {path}"
     
     def read_file(path: str) -> str:
-        full_path = workspace / path
-        if not str(full_path.resolve()).startswith(str(workspace.resolve())):
+        # Security: ensure path is within workspace (prevents directory traversal)
+        if not is_path_within_workspace(path):
             raise ValueError(f"Path {path} escapes workspace directory")
+        full_path = workspace / path
         return full_path.read_text(encoding='utf-8')
     
     def list_workspace_files(subdir: Optional[str] = None, recursive: bool = False, pattern: Optional[str] = None) -> List[Dict]:
@@ -448,9 +471,10 @@ def create_simple_tools(runtime, workspace_dir: Optional[str] = None) -> Dict[st
     
     def get_file_info(path: str) -> Dict:
         import mimetypes
-        full_path = workspace / path
-        if not str(full_path.resolve()).startswith(str(workspace.resolve())):
+        # Security: ensure path is within workspace (prevents directory traversal)
+        if not is_path_within_workspace(path):
             raise ValueError(f"Path {path} escapes workspace directory")
+        full_path = workspace / path
         if not full_path.exists():
             raise FileNotFoundError(f"File not found: {path}")
         
