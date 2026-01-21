@@ -32,7 +32,7 @@ const config = {
   provider: process.env.LLM_PROVIDER || "deepseek",
   model: process.env.LLM_MODEL || "deepseek-chat",
   apiKey: process.env.DEEPSEEK_API_KEY,
-  skillsDir: path.resolve(__dirname, "..", "..", "..", "claude-official-skills", "skills"),
+  skillsDir: path.resolve(__dirname, "..", "..", "..", "skills"),
   workspaceDir: path.resolve(__dirname, "..", "output"),
   maxSteps: parseInt(process.env.MAX_STEPS || "20", 10),
   maxRetries: parseInt(process.env.MAX_RETRIES || "3", 10),
