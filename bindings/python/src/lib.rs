@@ -9,6 +9,12 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+/// Safely convert timeout from i64 to u64, clamping negative values to 0.
+/// This matches the behavior of TypeScript's safe_timeout_ms function.
+fn safe_timeout_ms(timeout: Option<i64>) -> Option<u64> {
+    timeout.map(|t| if t < 0 { 0 } else { t as u64 })
+}
+
 #[pyclass]
 struct OpenSkillRuntimeWrapper {
     inner: Mutex<OpenSkillRuntime>,
@@ -449,8 +455,11 @@ impl OpenSkillRuntimeWrapper {
                 _ => ExecutionTarget::Auto,
             };
 
+            // Extract as i64 first, then apply safety conversion (clamp negative to 0)
+            // This matches TypeScript behavior and prevents silent failures
             let timeout: Option<u64> = opts.get_item("timeout_ms")?
-                .and_then(|v| v.extract::<u64>().ok());
+                .and_then(|v| v.extract::<i64>().ok())
+                .and_then(|t| safe_timeout_ms(Some(t)));
 
             let input_val: Option<Value> = opts.get_item("input")?
                 .and_then(|input_obj| {
