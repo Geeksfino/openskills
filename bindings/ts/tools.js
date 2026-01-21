@@ -130,17 +130,29 @@ function createSkillTools(runtime, options = {}) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const i = Math.min(
+      Math.floor(Math.log(bytes) / Math.log(k)),
+      sizes.length - 1
+    );
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
   }
 
   // Helper function for glob pattern matching (simple implementation)
+  // Properly escapes all regex metacharacters while preserving glob wildcards
   function matchesPattern(filename, pattern) {
-    // Convert glob pattern to regex
-    const regexPattern = pattern
-      .replace(/\./g, '\\.')
-      .replace(/\*/g, '.*')
-      .replace(/\?/g, '.');
+    // Use placeholders for glob wildcards to avoid escaping issues
+    const withPlaceholders = pattern
+      .replace(/\*/g, '__STAR__')
+      .replace(/\?/g, '__QUESTION__');
+    
+    // Escape all regex metacharacters: [ ] ( ) { } + | \ ^ $ .
+    const escaped = withPlaceholders.replace(/[\[\](){}|\\^$+.]/g, '\\$&');
+    
+    // Convert placeholders back to regex patterns
+    const regexPattern = escaped
+      .replace(/__STAR__/g, '.*')
+      .replace(/__QUESTION__/g, '.');
+    
     const regex = new RegExp('^' + regexPattern + '$');
     return regex.test(filename);
   }
