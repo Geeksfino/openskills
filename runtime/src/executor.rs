@@ -44,6 +44,10 @@ pub struct ExecutionOptions {
     pub input: Option<Value>,
     /// WASM module path override (relative to skill root).
     pub wasm_module: Option<String>,
+    /// Workspace directory for skill I/O operations.
+    /// If set, SKILL_WORKSPACE env var is injected and the directory is
+    /// accessible with write permissions in the sandbox.
+    pub workspace_dir: Option<PathBuf>,
 }
 
 /// Target for skill execution (what to run within a skill).
@@ -81,6 +85,10 @@ pub struct TargetExecutionOptions {
     pub input: Option<Value>,
     /// Working directory override (relative to skill root).
     pub working_dir: Option<String>,
+    /// Workspace directory for skill I/O operations.
+    /// If set, SKILL_WORKSPACE env var is injected and the directory is
+    /// accessible with write permissions in the sandbox.
+    pub workspace_dir: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -139,6 +147,7 @@ pub fn execute_skill(
                 input,
                 wasm_config.timeout_ms,
                 &enforcer,
+                options.workspace_dir.as_deref(),
             )
         }
         ExecutionMode::Native {
@@ -152,6 +161,7 @@ pub fn execute_skill(
             wasm_config.timeout_ms,
             &enforcer,
             &allowed_tools,
+            options.workspace_dir.as_deref(),
         ),
     }
 }
@@ -230,6 +240,7 @@ pub fn run_skill_target(
                         input,
                         wasm_config.timeout_ms,
                         &enforcer,
+                        options.workspace_dir.as_deref(),
                     )
                 }
                 ExecutionMode::Native {
@@ -243,6 +254,7 @@ pub fn run_skill_target(
                     wasm_config.timeout_ms,
                     &enforcer,
                     &allowed_tools,
+                    options.workspace_dir.as_deref(),
                 ),
             }
         }
@@ -299,6 +311,7 @@ pub fn run_skill_target(
                 wasm_config.timeout_ms,
                 &enforcer,
                 &allowed_tools,
+                options.workspace_dir.as_deref(),
             )
         }
         ExecutionTarget::Wasm { path } => {
@@ -336,6 +349,7 @@ pub fn run_skill_target(
                 input,
                 wasm_config.timeout_ms,
                 &enforcer,
+                options.workspace_dir.as_deref(),
             )
         }
     }

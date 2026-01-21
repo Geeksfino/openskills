@@ -74,6 +74,7 @@ fn test_runtime_config_builder() {
         custom_directories: vec![examples_dir.clone()],
         use_standard_locations: false,
         project_root: None,
+        workspace_dir: None,
     };
     
     let mut runtime = OpenSkillRuntime::from_config(config);
@@ -123,6 +124,7 @@ description: Second version (should win)
         custom_directories: vec![dir1.clone(), dir2.clone()],
         use_standard_locations: false,
         project_root: None,
+        workspace_dir: None,
     };
     
     let mut runtime = OpenSkillRuntime::from_config(config);
@@ -162,6 +164,7 @@ description: Skill from nested directory
         custom_directories: vec![],
         use_standard_locations: true, // Enable standard locations to trigger nested discovery
         project_root: Some(temp_dir.path().join("project")),
+        workspace_dir: None,
     };
     
     let mut runtime = OpenSkillRuntime::from_config(config);

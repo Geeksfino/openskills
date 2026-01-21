@@ -408,6 +408,38 @@ The spec mentions OS-level sandboxing (seatbelt/seccomp). OpenSkills uses WASM/W
 
 **Impact**: Positive extension that enhances security and portability without breaking spec compliance.
 
+### Workspace Management
+**Status**: ⚠️ **EXTENSION** (addresses practical agent development needs)
+
+The runtime provides a managed workspace directory for skill I/O:
+- ✅ `get_workspace_dir()` - Returns sandboxed directory for file operations
+- ✅ `SKILL_WORKSPACE` env var - Injected into script/WASM execution
+- ✅ Session-based isolation - Each runtime instance gets unique workspace
+- ✅ Automatic sandbox permissions - Workspace is writable in both WASM and seatbelt
+
+**Evidence**:
+- `runtime/src/lib.rs:353-390`: Workspace management methods
+- `runtime/src/executor.rs:47-52`: `workspace_dir` in execution options
+- `runtime/src/wasm_runner.rs:109-118`: Workspace preopened with write permissions
+- `runtime/src/native_runner.rs:136-143`: Workspace added to seatbelt write paths
+
+**Impact**: Enables skills to create output files in a managed, sandboxed location.
+
+### Pre-built Tool Definitions
+**Status**: ⚠️ **EXTENSION** (reduces integration complexity)
+
+The runtime provides ready-to-use tool definitions for agent frameworks:
+- ✅ TypeScript: `@finogeek/openskills/tools` module
+- ✅ Python: `openskills_tools.py` module
+- ✅ Skill-agnostic system prompt: `get_agent_system_prompt()`
+
+**Evidence**:
+- `bindings/ts/tools.js`: Pre-built AI SDK tools (list_skills, activate_skill, etc.)
+- `bindings/python/openskills_tools.py`: LangChain-compatible tools
+- `runtime/src/lib.rs:521-580`: `get_agent_system_prompt()` method
+
+**Impact**: Reduces agent code from ~400 lines to ~50 lines while ensuring correct Claude Skills patterns.
+
 ---
 
 ## 10. Test Coverage ✅

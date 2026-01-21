@@ -25,6 +25,7 @@ pub fn execute_wasm(
     input: Value,
     timeout_ms: u64,
     enforcer: &PermissionEnforcer,
+    workspace_dir: Option<&std::path::Path>,
 ) -> Result<ExecutionArtifacts, OpenSkillError> {
     let wasm_full_path = skill.root.join(wasm_path);
     let input_json = serde_json::to_string(&input)?;
@@ -109,6 +110,11 @@ pub fn execute_wasm(
         builder.env("SKILL_INPUT", &input_json);
         builder.env("TIMEOUT_MS", &timeout_ms.to_string());
 
+        // Inject workspace directory if configured
+        if let Some(workspace) = workspace_dir {
+            builder.env("SKILL_WORKSPACE", workspace.to_string_lossy().as_ref());
+        }
+
         // Inject random seed if configured
         if let Some(seed) = enforcer.random_seed() {
             builder.env("RANDOM_SEED", &seed.to_string());
@@ -166,6 +172,18 @@ pub fn execute_wasm(
                 DirPerms::READ,
                 FilePerms::READ,
             );
+        }
+
+        // Preopen workspace directory with write permissions
+        if let Some(workspace) = workspace_dir {
+            if workspace.exists() {
+                let _ = builder.preopened_dir(
+                    workspace,
+                    "/workspace",
+                    DirPerms::all(),
+                    FilePerms::all(),
+                );
+            }
         }
     };
 

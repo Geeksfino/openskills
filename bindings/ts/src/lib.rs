@@ -271,6 +271,7 @@ impl OpenSkillRuntimeWrapper {
                 .collect(),
             use_standard_locations: use_standard_locations.unwrap_or(true),
             project_root: project_root.map(|s| s.into()),
+            workspace_dir: None,
         };
         Self {
             inner: Mutex::new(OpenSkillRuntime::from_config(config)),

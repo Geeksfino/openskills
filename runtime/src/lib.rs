@@ -47,6 +47,24 @@ mod wasm_runner;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// Generate a unique session ID for workspace isolation.
+fn generate_session_id() -> String {
+    use std::time::SystemTime;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("session-{}", timestamp)
+}
+
+/// Get the default workspace root directory.
+fn get_default_workspace_root() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("openskills")
+        .join("workspace")
+}
+
 use audit::{AuditRecord, AuditSink, NoopAuditSink};
 use errors::OpenSkillError;
 use executor::{
@@ -92,6 +110,9 @@ pub struct RuntimeConfig {
     pub use_standard_locations: bool,
     /// Project root for relative path resolution.
     pub project_root: Option<PathBuf>,
+    /// Workspace directory for skill I/O operations.
+    /// If not set, defaults to ~/.cache/openskills/workspace/{session_id}/
+    pub workspace_dir: Option<PathBuf>,
 }
 
 /// Execution options for skill invocation.
@@ -149,6 +170,10 @@ pub struct OpenSkillRuntime {
     permission_manager: PermissionManager,
     custom_directories: Vec<PathBuf>,
     use_standard_locations: bool,
+    /// Workspace directory for skill I/O operations.
+    workspace_dir: Option<PathBuf>,
+    /// Session ID for unique workspace paths.
+    session_id: String,
 }
 
 impl OpenSkillRuntime {
@@ -165,6 +190,8 @@ impl OpenSkillRuntime {
             permission_manager: PermissionManager::new(),
             custom_directories: Vec::new(),
             use_standard_locations: true,
+            workspace_dir: None,
+            session_id: generate_session_id(),
         }
     }
 
@@ -180,6 +207,8 @@ impl OpenSkillRuntime {
             permission_manager: PermissionManager::new(),
             custom_directories: config.custom_directories,
             use_standard_locations: config.use_standard_locations,
+            workspace_dir: config.workspace_dir,
+            session_id: generate_session_id(),
         }
     }
 
@@ -191,6 +220,8 @@ impl OpenSkillRuntime {
             permission_manager: PermissionManager::new(),
             custom_directories: Vec::new(),
             use_standard_locations: true,
+            workspace_dir: None,
+            session_id: generate_session_id(),
         }
     }
 
@@ -204,6 +235,8 @@ impl OpenSkillRuntime {
             permission_manager: PermissionManager::new(),
             custom_directories: Vec::new(),
             use_standard_locations: false,
+            workspace_dir: None,
+            session_id: generate_session_id(),
         }
     }
 
@@ -308,6 +341,58 @@ impl OpenSkillRuntime {
     pub fn reset_permission_grants(&self) {
         self.permission_manager.reset_grants();
     }
+
+    // ==================== Workspace Management ====================
+
+    /// Set a custom workspace directory for skill I/O operations.
+    ///
+    /// The workspace directory is a sandboxed location where skills can read/write
+    /// files. This is automatically accessible in WASM and native sandboxes.
+    ///
+    /// Environment variable `SKILL_WORKSPACE` is injected into skill execution
+    /// pointing to this directory.
+    pub fn with_workspace_dir<P: AsRef<Path>>(mut self, dir: P) -> Self {
+        self.workspace_dir = Some(dir.as_ref().to_path_buf());
+        self
+    }
+
+    /// Get the current workspace directory.
+    ///
+    /// Returns the configured workspace directory, or generates a default one
+    /// at `~/.cache/openskills/workspace/{session_id}/`.
+    ///
+    /// The directory is created if it doesn't exist.
+    pub fn get_workspace_dir(&self) -> Result<PathBuf, OpenSkillError> {
+        let dir = self.workspace_dir.clone().unwrap_or_else(|| {
+            get_default_workspace_root().join(&self.session_id)
+        });
+
+        // Ensure the directory exists
+        if !dir.exists() {
+            std::fs::create_dir_all(&dir)?;
+        }
+
+        Ok(dir)
+    }
+
+    /// Get the session ID for this runtime instance.
+    pub fn get_session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// Clean up the workspace directory.
+    ///
+    /// This removes all files and subdirectories in the workspace.
+    /// Use with caution - this is destructive.
+    pub fn cleanup_workspace(&self) -> Result<(), OpenSkillError> {
+        let dir = self.get_workspace_dir()?;
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+        Ok(())
+    }
+
+    // ==================== End Workspace Management ====================
 
     /// Discover and load skills from configured locations.
     ///
@@ -433,6 +518,109 @@ impl OpenSkillRuntime {
             skill_names.join(", "),
             skill_names.len()
         )
+    }
+
+    /// Get a complete skill-agnostic system prompt for agents.
+    ///
+    /// This returns a generic system prompt that teaches the agent how to use
+    /// Claude Skills without any skill-specific knowledge. The agent:
+    /// - Knows what skills are available (name + description)
+    /// - Knows how to activate a skill to get its full instructions
+    /// - Follows the instructions in SKILL.md without prior knowledge
+    ///
+    /// This is the recommended way to integrate skills into an agent.
+    pub fn get_agent_system_prompt(&self) -> String {
+        let skills: Vec<SkillDescriptor> = self
+            .list_skills()
+            .into_iter()
+            .filter(|skill| skill.user_invocable)
+            .collect();
+
+        if skills.is_empty() {
+            return String::from("No skills are currently available.");
+        }
+
+        let mut prompt = String::from(r#"You have access to Claude Skills that provide specialized capabilities.
+
+## Available Skills
+
+"#);
+
+        for skill in &skills {
+            prompt.push_str(&format!("- **{}**: {}\n", skill.id, skill.description));
+        }
+
+        prompt.push_str(r#"
+## How to Use Skills
+
+When a user's request matches a skill's capabilities:
+
+1. **Activate the skill**: Call `activate_skill(skill_id)` to load the full SKILL.md instructions
+2. **Read the instructions carefully**: The SKILL.md contains everything you need to know
+3. **Follow the instructions exactly**: Execute the steps as described in SKILL.md
+4. **Use helper files if referenced**: Call `read_skill_file(skill_id, path)` to read referenced docs (e.g., `docx-js.md`)
+5. **Run scripts as instructed**: 
+   - For scripts in the skill directory: Call `run_skill_script(skill_id, script_path, args)`
+   - For scripts you generate in the workspace: Use `run_sandboxed_bash()` to execute them
+
+## Important
+
+- Each skill's SKILL.md contains all the knowledge you need - do NOT assume prior knowledge about any skill
+- The instructions may reference helper files within the skill directory - read them when needed
+- The instructions may tell you to run scripts - these are sandboxed for security
+- Output files are written to the workspace directory (available as SKILL_WORKSPACE environment variable)
+
+## Code Generation and Execution
+
+When a skill instructs you to create a JavaScript/TypeScript file:
+
+1. **Use ES module syntax**: Always use `import` statements, NOT `require()`. The project uses ES modules.
+   - ✅ CORRECT: `import { Document, Packer } from 'docx'; import fs from 'fs';`
+   - ❌ WRONG: `const { Document } = require('docx'); const fs = require('fs');`
+
+2. **Write to workspace directory**: Use the workspace directory for output files:
+   - Access via `process.env.SKILL_WORKSPACE` or use the configured workspace path
+   - Example: `fs.writeFileSync(path.join(process.env.SKILL_WORKSPACE || './output', 'document.docx'), buffer)`
+
+3. **Execute generated scripts**: After creating a script file, you MUST execute it:
+   - For TypeScript files: Use `run_sandboxed_bash('npx tsx path/to/script.ts', working_dir, allow_process=true)`
+   - For JavaScript files: Use `run_sandboxed_bash('node path/to/script.js', working_dir, allow_process=true)`
+   - **CRITICAL**: Always set `allow_process=true` when executing scripts (npx, node, etc.)
+   - Set `working_dir` to the workspace directory where the script is located
+
+4. **Complete the workflow**: After executing a script that generates files:
+   - Use `list_workspace_files(pattern: "*.docx")` to find generated files
+   - Use `get_file_info(path)` to get file details
+   - Mention the file in your response
+
+## File Output and Delivery
+
+When you generate files (documents, images, etc.):
+
+1. **Files are written to the workspace directory** (available as SKILL_WORKSPACE environment variable)
+2. **After generating files**, use `list_workspace_files()` to discover what was created
+3. **Use `get_file_info(path)`** to get file details (size, type, MIME type) for your response
+4. **Mention files in your response** so the user knows what was created
+5. **Include file paths and types** in your final response
+
+Example response:
+"I've created a Word document for you: 'output/document.docx' (45 KB, Word document)"
+
+## Available Tools
+
+- `list_skills()` - List all available skills
+- `activate_skill(skill_id)` - Load full SKILL.md instructions for a skill
+- `read_skill_file(skill_id, path)` - Read a file from a skill directory
+- `list_skill_files(skill_id, subdir?, recursive?)` - List files in a skill directory
+- `run_skill_script(skill_id, script_path, args)` - Run a sandboxed script from a skill
+- `run_sandboxed_bash(command, working_dir?, allow_process?)` - Run a sandboxed bash command (set allow_process=true for script execution)
+- `write_file(path, content)` - Write a file to the workspace
+- `read_file(path)` - Read a file from the workspace
+- `list_workspace_files(subdir?, recursive?, pattern?)` - List files in the workspace directory
+- `get_file_info(path)` - Get file information (size, type, MIME type)
+"#);
+
+        prompt
     }
 
     /// Activate a skill by ID (load full SKILL.md content).
@@ -689,6 +877,7 @@ impl OpenSkillRuntime {
             memory_mb: options.memory_mb,
             input: options.input.clone(),
             wasm_module: None,
+            workspace_dir: self.get_workspace_dir().ok(),
         };
 
         let execution = execute_skill(&skill, exec_options)?;
@@ -851,6 +1040,7 @@ impl OpenSkillRuntime {
             target,
             timeout_ms,
             input,
+            workspace_dir: self.get_workspace_dir().ok(),
             ..Default::default()
         };
 

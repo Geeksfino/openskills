@@ -95,6 +95,7 @@ mod macos {
         timeout_ms: u64,
         enforcer: &PermissionEnforcer,
         allowed_tools: &[String],
+        workspace_dir: Option<&Path>,
     ) -> Result<ExecutionArtifacts, OpenSkillError> {
         if !script_path.exists() {
             return Err(OpenSkillError::NativeExecutionError(format!(
@@ -127,7 +128,7 @@ mod macos {
                     .unwrap_or_else(|_| p.to_path_buf())
             })
             .collect();
-        let write_paths: Vec<PathBuf> = enforcer
+        let mut write_paths: Vec<PathBuf> = enforcer
             .filesystem_write_paths()
             .iter()
             .map(|p| {
@@ -135,6 +136,13 @@ mod macos {
                     .unwrap_or_else(|_| p.to_path_buf())
             })
             .collect();
+
+        // Add workspace directory to write paths if configured
+        if let Some(workspace) = workspace_dir {
+            if workspace.exists() {
+                write_paths.push(workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf()));
+            }
+        }
 
         let (program, args, program_path) = command_for_script(script_type, script_path)?;
         // Canonicalize the executable path for the seatbelt profile
@@ -181,7 +189,7 @@ mod macos {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        apply_environment(&mut cmd, skill, &input_json, timeout_ms, enforcer, script_type);
+        apply_environment(&mut cmd, skill, &input_json, timeout_ms, enforcer, script_type, workspace_dir);
 
         let mut child = match cmd.spawn() {
             Ok(child) => child,
@@ -305,6 +313,7 @@ mod macos {
         timeout_ms: u64,
         enforcer: &PermissionEnforcer,
         script_type: ScriptType,
+        workspace_dir: Option<&Path>,
     ) {
         cmd.env_clear();
 
@@ -328,6 +337,11 @@ mod macos {
         cmd.env("SKILL_INPUT", input_json);
         cmd.env("TIMEOUT_MS", timeout_ms.to_string());
         cmd.env("SKILL_ROOT", skill.root.to_string_lossy().to_string());
+
+        // Inject workspace directory if configured
+        if let Some(workspace) = workspace_dir {
+            cmd.env("SKILL_WORKSPACE", workspace.to_string_lossy().to_string());
+        }
 
         for key in enforcer.env_allowlist() {
             if let Ok(val) = std::env::var(key) {
@@ -549,6 +563,7 @@ pub fn execute_native(
     _timeout_ms: u64,
     _enforcer: &PermissionEnforcer,
     _allowed_tools: &[String],
+    _workspace_dir: Option<&Path>,
 ) -> Result<ExecutionArtifacts, OpenSkillError> {
     Err(OpenSkillError::UnsupportedPlatform(
         "Native execution requires macOS (seatbelt)".to_string(),
