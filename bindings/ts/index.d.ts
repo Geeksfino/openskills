@@ -26,6 +26,45 @@ export interface ExecutionOptionsJs {
   memoryMb?: number
   input?: string
 }
+/** Options for targeted skill execution. */
+export interface TargetExecutionOptionsJs {
+  /** Target type: "auto", "script", or "wasm" */
+  targetType?: string
+  /** Path to script/wasm (required for "script" and "wasm" types) */
+  path?: string
+  /** Arguments for script execution (only for "script" type) */
+  args?: Array<string>
+  /** Override timeout in milliseconds */
+  timeoutMs?: number
+  /** Input data (JSON string) */
+  input?: string
+}
+/** Permissions for sandboxed command execution. */
+export interface CommandPermissionsJs {
+  /** Allow network access. */
+  allowNetwork?: boolean
+  /** Allow subprocess spawning. */
+  allowProcess?: boolean
+  /** Directories the command can read from. */
+  readPaths?: Array<string>
+  /** Directories the command can write to. */
+  writePaths?: Array<string>
+  /** Environment variables to pass through (array of ["KEY", "VALUE"] pairs). */
+  envVars?: Array<Array<string>>
+  /** Timeout in milliseconds. */
+  timeoutMs?: number
+}
+/** Result from sandboxed command execution. */
+export interface CommandResultJs {
+  /** Exit code (0 = success). */
+  exitCode: number
+  /** Captured stdout. */
+  stdout: string
+  /** Captured stderr. */
+  stderr: string
+  /** Whether the command timed out. */
+  timedOut: boolean
+}
 export interface AuditRecord {
   skillId: string
   version: string
@@ -44,6 +83,13 @@ export interface ExecutionResult {
   stderr: string
   audit: AuditRecord
 }
+/**
+ * Run a shell command in a sandboxed environment (macOS only).
+ *
+ * This provides Claude Code-like sandboxed bash execution for agents.
+ * Uses macOS Seatbelt sandbox-exec.
+ */
+export declare function runSandboxedShellCommand(command: string, workingDir: string, permissions?: CommandPermissionsJs | undefined | null): CommandResultJs
 export declare class SkillExecutionSessionWrapper {
   isForked(): boolean
   contextId(): string | null
@@ -87,6 +133,29 @@ export declare class OpenSkillRuntimeWrapper {
   isToolAllowed(skillId: string, tool: string): boolean
   /** Check if a tool call is permitted for a skill (ask-before-act for risky tools). */
   checkToolPermission(skillId: string, tool: string, description?: string | undefined | null): boolean
+  /**
+   * Run a specific target (script/WASM) within a skill.
+   *
+   * This is designed for Claude Skills where SKILL.md instructions tell
+   * the agent which script to run (e.g., "run python ooxml/scripts/unpack.py").
+   */
+  runSkillTarget(skillId: string, options?: TargetExecutionOptionsJs | undefined | null): ExecutionResult
+  /**
+   * Read a file from a skill directory.
+   *
+   * This allows agents to read helper files (like `docx-js.md`) that skills
+   * reference in their SKILL.md instructions.
+   */
+  readSkillFile(skillId: string, relativePath: string): string
+  /**
+   * List files in a skill directory (or subdirectory).
+   *
+   * Returns relative paths from the skill root.
+   */
+  listSkillFiles(skillId: string, subdir?: string | undefined | null, recursive?: boolean | undefined | null): Array<string>
+  /** Get the root directory path for a skill. */
+  getSkillRoot(skillId: string): string
 }
+
 export type OpenSkillRuntime = OpenSkillRuntimeWrapper
 export const OpenSkillRuntime: typeof OpenSkillRuntimeWrapper

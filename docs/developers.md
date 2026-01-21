@@ -53,37 +53,201 @@ println!("Output: {}", result.output);
 
 ### TypeScript
 
+**Basic Usage:**
 ```typescript
-import { OpenSkillRuntime } from '@openskills/runtime';
+import { OpenSkillRuntime } from '@finogeek/openskills';
 
-const runtime = new OpenSkillRuntime('./skills');
-const skills = runtime.loadSkills();
+const runtime = OpenSkillRuntime.fromDirectory('./skills');
+runtime.discoverSkills();
 
-const result = await runtime.executeSkill(
-  'my-skill',
-  { input: 'data' },
-  { timeoutMs: 5000 }
-);
+const result = runtime.executeSkill('my-skill', {
+  timeoutMs: 5000,
+  input: JSON.stringify({ input: 'data' })
+});
 
-console.log(result.output);
+console.log(result.outputJson);
+```
+
+**With Pre-built Tools (Recommended):**
+```typescript
+import { OpenSkillRuntime } from '@finogeek/openskills';
+import { createSkillTools, getAgentSystemPrompt } from '@finogeek/openskills/tools';
+import { generateText } from 'ai';
+
+const runtime = OpenSkillRuntime.fromDirectory('./skills');
+runtime.discoverSkills();
+
+// Create pre-built tools (replaces ~200 lines of manual definitions)
+const tools = createSkillTools(runtime, {
+  workspaceDir: './output'  // Sandboxed workspace
+});
+
+// Get skill-agnostic system prompt
+const systemPrompt = getAgentSystemPrompt(runtime);
+
+// Use with Vercel AI SDK
+const result = await generateText({
+  model: yourModel,
+  system: systemPrompt,
+  prompt: userQuery,
+  tools,
+});
 ```
 
 ### Python
 
+**Basic Usage:**
 ```python
 from openskills import OpenSkillRuntime
 
-runtime = OpenSkillRuntime('./skills')
-skills = runtime.load_skills()
+runtime = OpenSkillRuntime.from_directory('./skills')
+runtime.discover_skills()
 
 result = runtime.execute_skill(
     'my-skill',
-    {'input': 'data'},
+    input={'input': 'data'},
     timeout_ms=5000
 )
 
 print(result['output'])
 ```
+
+**With Pre-built Tools (Recommended):**
+```python
+from openskills import OpenSkillRuntime
+from openskills_tools import create_langchain_tools, get_agent_system_prompt
+
+runtime = OpenSkillRuntime.from_directory('./skills')
+runtime.discover_skills()
+
+# Create pre-built LangChain tools
+tools = create_langchain_tools(runtime, workspace_dir='./output')
+
+# Get system prompt
+system_prompt = get_agent_system_prompt(runtime)
+
+# Use with LangChain
+from langchain.agents import create_agent
+agent = create_agent(model, tools, system_prompt=system_prompt)
+```
+
+## Pre-built Tools (Simplified Agent Setup)
+
+OpenSkills provides **pre-built tool definitions** that eliminate boilerplate code and simplify agent integration. Instead of manually defining tools for each skill operation, you can use ready-made tools that work with any agent framework.
+
+### TypeScript: `createSkillTools()`
+
+The `@finogeek/openskills/tools` module provides pre-built tools for Vercel AI SDK:
+
+```typescript
+import { OpenSkillRuntime } from '@finogeek/openskills';
+import { createSkillTools, getAgentSystemPrompt } from '@finogeek/openskills/tools';
+import { generateText } from 'ai';
+
+const runtime = OpenSkillRuntime.fromDirectory('./skills');
+runtime.discoverSkills();
+
+// Create all necessary tools in one call
+const tools = createSkillTools(runtime, {
+  workspaceDir: './output'  // Optional: sandboxed workspace directory
+});
+
+// Available tools:
+// - list_skills: List available skills
+// - activate_skill: Load full SKILL.md instructions
+// - read_skill_file: Read helper files from skills
+// - list_skill_files: List files in skill directories
+// - run_skill_script: Execute sandboxed Python/shell scripts
+// - run_sandboxed_bash: Run sandboxed bash commands
+// - write_file: Write to workspace (with path validation)
+// - read_file: Read from workspace (with path validation)
+// - list_workspace_files: List files in workspace
+// - get_file_info: Get file metadata
+
+// Get skill-agnostic system prompt
+const systemPrompt = getAgentSystemPrompt(runtime);
+
+// Use with any LLM
+const result = await generateText({
+  model: yourModel,
+  system: systemPrompt,
+  prompt: userQuery,
+  tools,
+});
+```
+
+**Benefits:**
+- ✅ **~200 lines less code**: No manual tool definitions
+- ✅ **Security built-in**: Path validation, workspace isolation
+- ✅ **Workspace management**: Automatic sandboxed file I/O
+- ✅ **Skill-agnostic**: Works with any skill without code changes
+
+### Python: `create_langchain_tools()` and `create_simple_tools()`
+
+For Python, you have two options:
+
+**LangChain Integration:**
+```python
+from openskills import OpenSkillRuntime
+from openskills_tools import create_langchain_tools, get_agent_system_prompt
+
+runtime = OpenSkillRuntime.from_directory('./skills')
+runtime.discover_skills()
+
+# Create LangChain-compatible tools
+tools = create_langchain_tools(runtime, workspace_dir='./output')
+
+# Get system prompt
+system_prompt = get_agent_system_prompt(runtime)
+
+# Use with LangChain
+from langchain.agents import create_agent
+agent = create_agent(model, tools, system_prompt=system_prompt)
+```
+
+**Framework-Agnostic (Simple Functions):**
+```python
+from openskills import OpenSkillRuntime
+from openskills_tools import create_simple_tools
+
+runtime = OpenSkillRuntime.from_directory('./skills')
+runtime.discover_skills()
+
+# Create simple callable functions (works with any framework)
+tools = create_simple_tools(runtime, workspace_dir='./output')
+
+# Use tools directly
+skills = tools['list_skills']()
+loaded = tools['activate_skill']('my-skill')
+tools['write_file']('output.txt', 'Hello, World!')
+```
+
+### Workspace Management
+
+The pre-built tools include **automatic workspace management** for file I/O operations:
+
+- **Sandboxed directory**: All file operations are isolated to the workspace
+- **Path validation**: Prevents directory traversal attacks
+- **Automatic creation**: Workspace directory is created if it doesn't exist
+- **Environment variable**: Skills can access workspace via `SKILL_WORKSPACE` env var
+
+```typescript
+// TypeScript
+const tools = createSkillTools(runtime, {
+  workspaceDir: './output'  // All file I/O goes here
+});
+
+// Files written via write_file tool are sandboxed to ./output
+```
+
+```python
+# Python
+tools = create_langchain_tools(runtime, workspace_dir='./output')
+
+# Files written via write_file tool are sandboxed to ./output
+```
+
+See [examples/agents/simple](examples/agents/simple/) for a complete working example.
 
 ## CLI
 
@@ -192,26 +356,44 @@ writing clear instructions.
 
 #### Context Forking
 
-Skills with `context: fork` in their manifest execute in isolated contexts where intermediate outputs are captured separately. Only summaries are returned to the parent context, preventing context pollution:
+Skills with `context: fork` in their manifest execute in isolated contexts where intermediate outputs are captured separately. Only summaries are returned to the parent context, preventing context pollution.
 
-```rust
-use openskills_runtime::{OpenSkillRuntime, ExecutionContext, ExecutionOptions};
+**Important**: Fork context starts **after** skill activation, not before.
 
-let mut runtime = OpenSkillRuntime::new();
-let main_context = ExecutionContext::new();
+**Fork Lifecycle**:
 
-// Execute skill with context management
-// If skill has context: fork, it automatically isolates execution
-let result = runtime.execute_skill_with_context(
-    "explorer-skill",
-    ExecutionOptions::default(),
-    &main_context
-)?;
+1. **Activation Phase** (main context):
+   ```rust
+   // activate_skill() loads instructions in main context
+   let skill = runtime.activate_skill("explorer-skill")?;
+   // Instructions are returned to main conversation
+   // LLM reads/comprehends instructions here
+   ```
 
-// For forked skills, result.output contains only the summary
-// Intermediate outputs are captured but not returned
-println!("Summary: {}", result.output["summary"]);
-```
+2. **Execution Phase** (fork created):
+   ```rust
+   use openskills_runtime::{OpenSkillRuntime, ExecutionContext, ExecutionOptions};
+
+   let mut runtime = OpenSkillRuntime::new();
+   let main_context = ExecutionContext::new();
+
+   // Fork is created HERE when execution begins
+   // If skill has context: fork, it automatically isolates execution
+   let result = runtime.execute_skill_with_context(
+       "explorer-skill",
+       ExecutionOptions::default(),
+       &main_context
+   )?;
+
+   // For forked skills, result.output contains only the summary
+   // Intermediate outputs (tool calls, errors, debug logs) are captured in fork
+   // but not returned to main context
+   println!("Summary: {}", result.output["summary"]);
+   ```
+
+**What Goes Where**:
+- **Main Context**: Skill activation, instruction comprehension, final summary
+- **Fork Context**: Tool calls, intermediate outputs, errors, debug logs, trial-and-error
 
 **Manual context management:**
 

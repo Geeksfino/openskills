@@ -1,128 +1,238 @@
+/**
+ * Simple OpenSkills Agent - Claude Skills Compatible
+ *
+ * This agent demonstrates the correct pattern for using Claude Skills:
+ * - Skill-agnostic: no hardcoded knowledge about any specific skill
+ * - Runtime-provided tools: uses pre-built tools from @finogeek/openskills/tools
+ * - Generic system prompt: teaches the agent HOW to use skills, not WHAT they do
+ *
+ * The agent:
+ * 1. Discovers available skills at startup
+ * 2. Matches user requests to skills via semantic understanding
+ * 3. Activates matching skills to get full instructions from SKILL.md
+ * 4. Follows the instructions exactly - all domain knowledge comes from the skill
+ */
+
 import "dotenv/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
+import fs from "node:fs";
 import { OpenSkillRuntime } from "@finogeek/openskills";
-// Use ai SDK directly for tool calling with DeepSeek
-import { generateText, tool } from "ai";
+import { createSkillTools, getAgentSystemPrompt } from "@finogeek/openskills/tools";
+import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Load configuration from environment variables
-const LLM_PROVIDER = process.env.LLM_PROVIDER || "deepseek";
-const LLM_MODEL = process.env.LLM_MODEL || "deepseek-chat";
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+// =============================================================================
+// Configuration
+// =============================================================================
 
-if (!DEEPSEEK_API_KEY) {
+const config = {
+  provider: process.env.LLM_PROVIDER || "deepseek",
+  model: process.env.LLM_MODEL || "deepseek-chat",
+  apiKey: process.env.DEEPSEEK_API_KEY,
+  skillsDir: path.resolve(__dirname, "..", "..", "..", "skills"),
+  workspaceDir: path.resolve(__dirname, "..", "output"),
+  maxSteps: parseInt(process.env.MAX_STEPS || "20", 10),
+  maxRetries: parseInt(process.env.MAX_RETRIES || "3", 10),
+  timeout: parseInt(process.env.API_TIMEOUT || "300000", 10), // 5 minutes default
+};
+
+if (!config.apiKey) {
   console.error("Error: DEEPSEEK_API_KEY is not set in .env file");
+  console.error("Please create a .env file with your DeepSeek API key:");
+  console.error("  DEEPSEEK_API_KEY=your-api-key-here");
   process.exit(1);
 }
 
-// DeepSeek uses OpenAI-compatible API, so we use the OpenAI provider with custom baseURL
+// =============================================================================
+// Initialize Runtime and Tools
+// =============================================================================
 
-// Load skills from claude-official-skills directory
-const claudeSkillsDir = path.resolve(
-  __dirname,
-  "..",
-  "..",
-  "..",
-  "claude-official-skills",
-  "skills"
-);
-
-const runtime = OpenSkillRuntime.fromDirectory(claudeSkillsDir);
+console.log("🔧 Initializing OpenSkills runtime...");
+const runtime = OpenSkillRuntime.fromDirectory(config.skillsDir);
 runtime.discoverSkills();
 
-// Get the docx skill specifically
 const skills = runtime.listSkills();
-const docxSkill = skills.find((s) => s.id === "docx");
-
-if (!docxSkill) {
-  console.error("Error: docx skill not found in claude-official-skills/skills");
+if (skills.length === 0) {
+  console.error("Error: No skills found in", config.skillsDir);
   process.exit(1);
 }
 
-const catalog = skills
-  .map((skill) => `- ${skill.id}: ${skill.description}`)
-  .join("\n");
+// Ensure workspace directory exists
+fs.mkdirSync(config.workspaceDir, { recursive: true });
 
-// Create OpenAI client configured for DeepSeek
+// Create pre-built tools from the runtime
+// This replaces ~200 lines of manual tool definitions
+console.log("🔧 Creating skill tools...");
+const tools = createSkillTools(runtime, {
+  workspaceDir: config.workspaceDir,
+});
+
+// Get skill-agnostic system prompt from the runtime
+// This teaches the agent HOW to use skills without any skill-specific knowledge
+console.log("🔧 Generating system prompt...");
+const systemPrompt = getAgentSystemPrompt(runtime);
+
+// =============================================================================
+// LLM Configuration
+// =============================================================================
+
 const openai = createOpenAI({
-  apiKey: DEEPSEEK_API_KEY,
+  apiKey: config.apiKey,
   baseURL: "https://api.deepseek.com/v1",
 });
 
-// Enhanced skill execution tool that supports docx operations
-const runSkill = tool({
-  description: `Execute an OpenSkills skill by id. The 'docx' skill is available for creating, editing, and analyzing Word documents (.docx files).`,
-  inputSchema: z.object({
-    skill_id: z.string().describe("The skill ID to execute (e.g., 'docx' for Word document operations)"),
-    input: z.string().describe("Input text or query for the skill. For docx skill, describe what document you want to create or edit."),
-  }),
-  execute: async ({ skill_id, input }) => {
-    try {
-      const result = runtime.executeSkill(skill_id, {
-        timeout_ms: 30000, // Increased timeout for docx operations
-        input: JSON.stringify({ query: input }),
-      });
-      return result.outputJson ?? "";
-    } catch (error) {
-      return `Error executing skill ${skill_id}: ${error instanceof Error ? error.message : String(error)}`;
-    }
-  },
-});
+const model = openai(config.model);
 
-const systemPrompt = [
-  "You are a helpful assistant specialized in creating and editing Word documents (.docx files).",
-  "",
-  "You have access to the 'docx' skill which can help you:",
-  "- Create new Word documents from scratch",
-  "- Edit existing Word documents",
-  "- Analyze document contents",
-  "- Work with tracked changes and comments",
-  "",
-  "When a user asks you to create or edit a Word document:",
-  "1. Use the 'docx' skill by calling run_skill with skill_id='docx'",
-  "2. Provide clear instructions in the input about what document to create or what changes to make",
-  "3. The skill will guide you through the process using docx-js for new documents or OOXML editing for existing ones",
-  "",
-  "Available skills:",
-  catalog,
-  "",
-  "Always be helpful and provide clear explanations of what you're doing.",
-].join("\n");
+// =============================================================================
+// Main Agent Loop
+// =============================================================================
 
-// Example: Create a Word document
 async function main() {
   const userQuery = process.argv[2] || 
-    "Create a Word document with a title page, table of contents, and a section about OpenSkills runtime capabilities. Include headings and formatted text.";
+    "What skills are available? Then help me create a Word document with a title 'Hello World' and a paragraph of text.";
 
-  console.log("🤖 OpenSkills DocX Assistant");
-  console.log("Using model:", LLM_MODEL);
-  console.log("Using provider:", LLM_PROVIDER);
+  console.log("\n" + "=".repeat(70));
+  console.log("🤖 OpenSkills Agent (Claude Skills Compatible)");
+  console.log("=".repeat(70));
+  console.log("Model:", config.model);
+  console.log("Provider:", config.provider);
+  console.log("Skills directory:", config.skillsDir);
+  console.log("Skills found:", skills.length);
+  console.log("Workspace:", config.workspaceDir);
+  console.log("Max steps:", config.maxSteps);
   console.log("\n📝 User request:", userQuery);
-  console.log("\n" + "=".repeat(60) + "\n");
+  console.log("\n" + "=".repeat(70) + "\n");
 
-  try {
+  // Retry logic for network errors
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
+    try {
+      if (attempt > 1) {
+        console.log(`\n🔄 Retry attempt ${attempt}/${config.maxRetries}...`);
+        // Wait before retrying (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, Math.min(1000 * Math.pow(2, attempt - 2), 10000)));
+      }
+
     const result = await generateText({
-      model: openai(LLM_MODEL) as any,
+        model,
       system: systemPrompt,
       prompt: userQuery,
-      tools: {
-        run_skill: runSkill,
-      },
-    });
-    console.log("\n" + "=".repeat(60));
-    console.log("\n✅ Response:");
+        tools,
+        maxSteps: config.maxSteps,
+      });
+
+      console.log("\n" + "=".repeat(70));
+      console.log("✅ Agent Response:");
+      console.log("=".repeat(70));
     console.log(result.text);
+    
     if (result.toolCalls && result.toolCalls.length > 0) {
-      console.log("\n🔧 Tool calls made:", result.toolCalls.length);
+        console.log("\n" + "=".repeat(70));
+        console.log(`🔧 Tool Calls (${result.toolCalls.length}):`);
+        console.log("=".repeat(70));
+      for (const call of result.toolCalls) {
+          const argsPreview = JSON.stringify(call.args).slice(0, 150);
+          console.log(`\n  ${call.toolName}:`);
+          console.log(`    Args: ${argsPreview}${argsPreview.length >= 150 ? '...' : ''}`);
+        }
+      }
+
+    if (result.toolResults && result.toolResults.length > 0) {
+        console.log("\n" + "=".repeat(70));
+        console.log(`📋 Tool Results (${result.toolResults.length}):`);
+        console.log("=".repeat(70));
+      for (const res of result.toolResults) {
+        const preview = typeof res.result === 'string' 
+            ? res.result.slice(0, 200) + (res.result.length > 200 ? '...' : '')
+            : JSON.stringify(res.result).slice(0, 200);
+          console.log(`\n  [${res.toolName}]:`);
+          console.log(`    ${preview}`);
+        }
+      }
+
+      console.log("\n" + "=".repeat(70));
+      console.log("✅ Agent execution completed successfully");
+      console.log("=".repeat(70) + "\n");
+      
+      // Success - break out of retry loop
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      // Check if it's a retryable error (network/timeout issues)
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorName = error instanceof Error ? error.name : '';
+      const errorString = String(error);
+      const errorCause = (error as any)?.cause;
+      const causeMessage = errorCause instanceof Error ? errorCause.message : String(errorCause || '');
+      const causeCode = (errorCause as any)?.code || '';
+      
+      const isRetryable = 
+        errorMessage.includes('socket') ||
+        errorMessage.includes('timeout') ||
+        errorMessage.includes('ECONNRESET') ||
+        errorMessage.includes('UND_ERR_SOCKET') ||
+        errorMessage.includes('terminated') ||
+        errorMessage.includes('Failed to process successful response') ||
+        errorName === 'AbortError' ||
+        causeMessage.includes('socket') ||
+        causeMessage.includes('other side closed') ||
+        causeCode === 'UND_ERR_SOCKET';
+      
+      if (!isRetryable || attempt === config.maxRetries) {
+        // Not retryable or out of retries
+        console.error("\n" + "=".repeat(70));
+        console.error("❌ Error:");
+        console.error("=".repeat(70));
+        console.error(error);
+        if (error instanceof Error) {
+          console.error("\nError name:", error.name);
+          console.error("Error message:", error.message);
+          if (error.stack) {
+            console.error("\nStack trace:");
+            console.error(error.stack);
+          }
+        }
+        
+        // Enhanced error diagnostics
+        console.error("\n" + "=".repeat(70));
+        console.error("🔍 Error Diagnostics:");
+        console.error("=".repeat(70));
+        console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        if ((error as any)?.cause) {
+          console.error("Error cause:", JSON.stringify((error as any).cause, Object.getOwnPropertyNames((error as any).cause), 2));
+        }
+        if ((error as any)?.response) {
+          console.error("HTTP Response status:", (error as any).response?.status);
+          console.error("HTTP Response headers:", JSON.stringify((error as any).response?.headers, null, 2));
+        }
+        if ((error as any)?.request) {
+          console.error("HTTP Request details:", JSON.stringify((error as any).request, null, 2));
+        }
+        
+        // If we have partial results, show them
+        if (attempt < config.maxRetries) {
+          console.error(`\n⚠️  Failed after ${attempt} attempts. This may be a network issue.`);
+        }
+        
+        process.exit(1);
+      } else {
+        // Retryable error - log and continue to next attempt
+        console.warn(`\n⚠️  Attempt ${attempt} failed (${error instanceof Error ? error.message : String(error)}). Retrying...`);
+      }
     }
-  } catch (error) {
-    console.error("\n❌ Error:", error);
-    process.exit(1);
+  }
+  
+  // Should never reach here, but just in case
+  if (lastError) {
+    throw lastError;
   }
 }
 
-main();
+main().catch((error) => {
+  console.error("Fatal error:", error);
+  process.exit(1);
+});

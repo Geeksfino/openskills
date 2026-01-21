@@ -5,9 +5,23 @@
   "license": "MIT",
   "main": "index.js",
   "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.js",
+      "import": "./index.js"
+    },
+    "./tools": {
+      "types": "./tools.d.ts",
+      "require": "./tools.js",
+      "import": "./tools.js"
+    }
+  },
   "files": [
     "index.js",
     "index.d.ts",
+    "tools.js",
+    "tools.d.ts",
     "*.node"
   ],
   "repository": {
@@ -34,5 +48,17 @@
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
     "typescript": "^5.3.3"
+  },
+  "peerDependencies": {
+    "ai": ">=3.0.0",
+    "zod": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
   }
 }

@@ -62,10 +62,10 @@ fn test_skill_session_non_forked_returns_full_output() {
     runtime.discover_skills().unwrap();
 
     let session = runtime
-        .start_skill_session("example-skill", None, None)
+        .start_skill_session("explaining-code", None, None)
         .expect("start skill session");
 
-    assert!(!session.is_forked(), "example-skill should not be forked");
+    assert!(!session.is_forked(), "explaining-code should not be forked");
     assert!(session.context_id().is_none(), "non-forked session has no context");
 
     let final_output = json!({ "review": "OK" });

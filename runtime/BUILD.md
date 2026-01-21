@@ -2,15 +2,15 @@
 
 The `openskills build` command compiles TypeScript/JavaScript skills to WASM components for execution in the OpenSkills runtime.
 
-## How It Works: javy-codegen Library
+## How It Works: Plugin-Based Build Backends
 
-OpenSkills uses **`javy-codegen`** (a Rust crate from crates.io) as a library dependency to compile JavaScript/TypeScript to WASM. This approach:
+OpenSkills uses a **plugin-based build system** to compile JavaScript/TypeScript to WASM. The default plugin is **`javy`** (via `javy-codegen`), but other plugins can be added over time. This approach:
 
-- **No CLI Required**: Unlike the `javy` CLI tool, we use the library directly, so no separate binary installation is needed
-- **Programmatic Compilation**: JavaScript → WASM compilation happens via Rust API calls, not shell commands
-- **Plugin-Based**: The library requires a `plugin.wasm` file (the javy plugin) to perform the actual compilation
+- **No CLI Required**: Plugins can compile via Rust libraries without external binaries
+- **Programmatic Compilation**: JavaScript → WASM compilation happens via Rust API calls
+- **Pluggable Backends**: Developers choose which compiler backend to use
 
-### Understanding the Plugin
+### Understanding the Default Plugin (javy)
 
 The **javy plugin** (`plugin.wasm`) is a WASM module that contains the QuickJS runtime and compilation logic. It's required because:
 
@@ -23,10 +23,29 @@ This separation allows:
 - **Plugin updates**: The plugin can be updated independently if needed
 - **No CLI dependency**: Everything happens programmatically within the OpenSkills build process
 
-## Quick Start
+## Setup
+
+**Before building your first skill**, run the setup script to install required tools:
 
 ```bash
-# Build a skill from the current directory
+# From the OpenSkills repository root
+./scripts/setup_build_tools.sh
+```
+
+This script will:
+- ✅ Download the WASI preview1 adapter (required for WASI 0.3 components)
+- ✅ Install `javy` CLI (downloads pre-built binary when available, falls back to building from source)
+- ✅ Install `wasm-tools` (for component conversion)
+- ✅ Check for optional tools like AssemblyScript
+
+The setup script automatically detects your OS and architecture, downloads pre-built binaries when available, and falls back to building from source if needed.
+
+## Quick Start
+
+After running the setup script, you can build skills:
+
+```bash
+# Build a skill from the current directory (auto-detect plugin)
 openskills build
 
 # Build a specific skill directory
@@ -37,13 +56,98 @@ openskills build --verbose
 
 # Force rebuild (ignore up-to-date check)
 openskills build --force
+
+# List available plugins
+openskills build --list-plugins
+
+# Choose a plugin explicitly
+openskills build --plugin quickjs  # Recommended: uses pre-built tools
+
+# QuickJS via javy CLI + wasm-tools component conversion
+openskills build --plugin quickjs
+
+# AssemblyScript via asc + wasm-tools component conversion
+openskills build --plugin assemblyscript
+
+# Provide plugin options (example: override adapter path)
+openskills build --plugin quickjs \
+  --plugin-option adapter_path=/path/to/wasi_preview1_adapter.wasm
 ```
+
+### Config File (Optional)
+
+Place `.openskills.toml` or `openskills.toml` in the skill directory to set defaults:
+
+```toml
+[build]
+plugin = "javy"
+
+[build.plugin_options]
+plugin_path = "/tmp/javy/plugin_wizened.wasm"
+```
+
+CLI flags override config file values.
 
 ## Requirements
 
-### Required: javy Plugin
+### Required: javy Plugin (default backend)
 
 OpenSkills uses **`javy-codegen`** as a library dependency (no CLI installation needed), but requires a **`plugin.wasm`** file to perform the actual JavaScript → WASM compilation.
+
+### QuickJS Plugin (javy CLI + wasm-tools)
+
+**Quick Setup** (recommended):
+```bash
+./scripts/setup_build_tools.sh
+openskills build --plugin quickjs
+```
+
+The setup script downloads the WASI adapter and checks for required tools. The adapter is also **auto-downloaded** on first build if not found.
+
+**Manual Setup**:
+1. Install `javy` CLI:
+   ```bash
+   git clone https://github.com/bytecodealliance/javy.git /tmp/javy
+   cd /tmp/javy && cargo install --path crates/cli
+   ```
+2. Install `wasm-tools`:
+   ```bash
+   cargo install wasm-tools
+   ```
+3. The WASI adapter is auto-downloaded to `~/.cache/openskills/`, or provide manually:
+   ```bash
+   export WASI_ADAPTER_PATH=/path/to/wasi_snapshot_preview1.command.wasm
+   ```
+
+### AssemblyScript Plugin (asc + wasm-tools)
+
+**Quick Setup** (recommended):
+```bash
+./scripts/setup_build_tools.sh
+openskills build --plugin assemblyscript
+```
+
+**Manual Setup**:
+1. Install AssemblyScript:
+   ```bash
+   npm install -g assemblyscript
+   ```
+2. Install `wasm-tools`:
+   ```bash
+   cargo install wasm-tools
+   ```
+3. The WASI adapter is auto-downloaded, or set `WASI_ADAPTER_PATH` environment variable.
+
+### Adapter Auto-Detection
+
+The QuickJS and AssemblyScript plugins automatically search for the WASI adapter in:
+1. Explicit `--plugin-option adapter_path=...`
+2. `WASI_ADAPTER_PATH` environment variable
+3. `~/.cache/openskills/wasi_preview1_adapter.wasm`
+4. `~/.wasmtime/wasi_snapshot_preview1.command.wasm`
+5. Current directory (`wasi_preview1_adapter.wasm`)
+
+If not found, the adapter is **automatically downloaded** from the Bytecode Alliance wasmtime releases.
 
 #### What is the Plugin?
 
@@ -109,11 +213,11 @@ The build tool automatically detects source files in this order:
 
 ### TypeScript
 1. **Transpile**: TypeScript → JavaScript (using esbuild or tsc)
-2. **Compile**: JavaScript → WASM component (using `javy-codegen` library + plugin)
+2. **Compile**: JavaScript → WASM component (using the selected build plugin)
 3. **Output**: `wasm/skill.wasm`
 
 ### JavaScript
-1. **Compile**: JavaScript → WASM component (using `javy-codegen` library + plugin)
+1. **Compile**: JavaScript → WASM component (using the selected build plugin)
 2. **Output**: `wasm/skill.wasm`
 
 ### Under the Hood
@@ -122,10 +226,10 @@ When you run `openskills build`, here's what happens:
 
 1. **Source Detection**: Finds your TypeScript/JavaScript source file
 2. **TypeScript Transpilation** (if needed): Uses esbuild or tsc to convert TS → JS
-3. **Plugin Loading**: Loads the javy plugin from `JAVY_PLUGIN_PATH` or current directory
-4. **WASM Generation**: Uses `javy-codegen::Generator` to:
+3. **Plugin Loading**: Resolves the selected build plugin and its dependencies
+4. **WASM Generation**: Uses the plugin backend to:
    - Read JavaScript source
-   - Execute it in the QuickJS runtime (via plugin)
+   - Execute it in the JavaScript runtime (QuickJS for the default javy plugin)
    - Generate WASM bytecode
    - Embed the bytecode in a WASM component
 5. **Output**: Writes the compiled WASM to `wasm/skill.wasm`

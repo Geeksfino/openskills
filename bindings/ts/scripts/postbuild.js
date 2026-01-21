@@ -36,21 +36,34 @@ if (fs.existsSync(indexJsPath)) {
 
 // Process index.d.ts
 if (fs.existsSync(indexDtsPath)) {
-  const dtsContent = fs.readFileSync(indexDtsPath, 'utf8');
+  let dtsContent = fs.readFileSync(indexDtsPath, 'utf8');
+  let modified = false;
 
-  // Check if the value export already exists
-  if (dtsContent.includes('export const OpenSkillRuntime: typeof OpenSkillRuntimeWrapper')) {
-    console.log('OpenSkillRuntime value export already exists in index.d.ts');
-  } else if (dtsContent.includes('export type OpenSkillRuntime = OpenSkillRuntimeWrapper')) {
-    // Add the value export declaration if it doesn't exist
-    const newContent = dtsContent.replace(
-      /export type OpenSkillRuntime = OpenSkillRuntimeWrapper$/m,
-      'export type OpenSkillRuntime = OpenSkillRuntimeWrapper\nexport const OpenSkillRuntime: typeof OpenSkillRuntimeWrapper'
-    );
-    fs.writeFileSync(indexDtsPath, newContent, 'utf8');
-    console.log('Added OpenSkillRuntime value export to index.d.ts');
+  // Check if the exports already exist
+  const hasTypeExport = dtsContent.includes('export type OpenSkillRuntime = OpenSkillRuntimeWrapper');
+  const hasConstExport = dtsContent.includes('export const OpenSkillRuntime: typeof OpenSkillRuntimeWrapper');
+
+  if (hasTypeExport && hasConstExport) {
+    console.log('OpenSkillRuntime exports already exist in index.d.ts');
   } else {
-    console.warn('Could not find OpenSkillRuntime type export to add value export in index.d.ts');
+    // Add missing exports at the end of the file
+    const exportsToAdd = [];
+    if (!hasTypeExport) {
+      exportsToAdd.push('export type OpenSkillRuntime = OpenSkillRuntimeWrapper');
+    }
+    if (!hasConstExport) {
+      exportsToAdd.push('export const OpenSkillRuntime: typeof OpenSkillRuntimeWrapper');
+    }
+    
+    if (exportsToAdd.length > 0) {
+      // Ensure file ends with newline, then add exports
+      if (!dtsContent.endsWith('\n')) {
+        dtsContent += '\n';
+      }
+      dtsContent += '\n' + exportsToAdd.join('\n') + '\n';
+      fs.writeFileSync(indexDtsPath, dtsContent, 'utf8');
+      console.log('Added OpenSkillRuntime exports to index.d.ts');
+    }
   }
 } else {
   console.warn('index.d.ts not found, skipping');

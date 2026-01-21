@@ -112,16 +112,26 @@ pip install finclip-openskills
 
 ### 构建技能
 
-OpenSkills 使用 **`javy-codegen`**（一个 Rust 库）将 JavaScript/TypeScript 编译为 WASM。这种方法不需要安装 `javy` CLI 工具——编译通过库以编程方式完成。
+OpenSkills 使用**插件化构建系统**将 JavaScript/TypeScript 编译为 WASM。系统支持多个构建后端（插件），您可以选择最适合您需求的编译器。
 
-**先决条件**：您需要一个 `plugin.wasm` 文件（javy 插件）。使用我们的辅助脚本构建一次：
+**插件系统架构：**
+- **插件**：处理编译的模块化构建后端（例如：`javy`、`quickjs`、`assemblyscript`）
+- **自动检测**：未指定插件时，系统按顺序尝试可用插件，直到找到一个可用的
+- **插件选择**：通过 `--plugin` 标志或 `.openskills.toml` 配置文件显式选择
+
+**新用户推荐**：`quickjs` 插件（设置最简单 - 只需运行下面的设置脚本）
+
+**首次设置**（构建技能前必需）：
+
+运行设置脚本以安装构建工具并下载依赖：
 
 ```bash
-# 构建 javy 插件（一次性设置）
-./scripts/build_javy_plugin.sh
-
-# 导出插件路径（或添加到您的 shell 配置文件中）
-export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+# 这将：
+# - 下载 WASI 适配器
+# - 安装 javy CLI（如果可用则下载预构建二进制文件）
+# - 安装 wasm-tools
+# - 检查可选工具（AssemblyScript）
+./scripts/setup_build_tools.sh
 ```
 
 **构建技能**：
@@ -131,14 +141,57 @@ export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wa
 cd my-skill
 openskills build
 
-# 这将使用 javy-codegen 编译 src/index.ts → wasm/skill.wasm
+# 自动检测：按顺序尝试插件（javy → quickjs → assemblyscript）
+# 直到找到一个可用且具有所有依赖项的插件
 ```
 
-**工作原理**：
-- OpenSkills 使用 `javy-codegen`（一个 Rust crate）作为库依赖
-- 该库需要一个 `plugin.wasm` 文件来执行 JavaScript → WASM 编译
-- 插件从 javy 仓库构建并"wizened"（初始化）以供使用
-- 一旦您有了插件，就可以在没有任何 CLI 工具的情况下构建技能
+**显式选择插件**：
+```bash
+openskills build --plugin quickjs       # 推荐：设置最简单
+openskills build --plugin javy          # 需要 javy plugin.wasm 文件
+openskills build --plugin assemblyscript # 需要 asc 编译器
+openskills build --list-plugins         # 显示所有可用插件及其状态
+```
+
+**插件对比：**
+- **`quickjs`**（推荐）：设置最简单 - 只需运行设置脚本。使用 javy CLI + wasm-tools。支持 WASI 0.3。
+- **`javy`**：需要构建 javy plugin.wasm 文件。使用 javy-codegen 库。传统支持。
+- **`assemblyscript`**：高性能的类似 TypeScript 的语言。需要 asc 编译器。
+
+**替代方案：javy 插件设置**（如果您更喜欢默认的 javy 插件）：
+
+如果您想使用 `javy` 插件而不是 `quickjs`，您需要构建 javy 插件：
+
+```bash
+# 构建 javy 插件（一次性设置）
+./scripts/build_javy_plugin.sh
+
+# 导出插件路径（或添加到您的 shell 配置文件中）
+export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+```
+
+**配置文件（可选）**：在技能目录放置 `.openskills.toml` 或 `openskills.toml`。
+
+```toml
+[build]
+plugin = "quickjs"  # 或 "assemblyscript"
+
+# 插件选项通常自动检测
+# [build.plugin_options]
+# adapter_path = "~/.cache/openskills/wasi_preview1_adapter.wasm"
+```
+
+**插件系统工作原理**：
+1. **插件选择**：您可以通过 `--plugin` 标志、配置文件指定插件，或让系统自动检测
+2. **自动检测**：未指定插件时，系统按顺序尝试已注册的插件，直到找到一个：
+   - 可用（具有所有必需的依赖项）
+   - 支持源文件扩展名（.ts、.js 等）
+3. **插件执行**：每个插件处理完整的编译管道：
+   - TypeScript 转译（如需要）
+   - JavaScript/TypeScript → WASM 核心模块
+   - WASM 核心 → WASI 0.3 组件（用于 quickjs/assemblyscript）
+4. **自动设置**：QuickJS/AssemblyScript 插件在需要时自动下载 WASI 适配器
+5. **配置**：可以通过 `.openskills.toml` 或 `--plugin-option` 标志配置插件
 
 查看 [构建工具指南](runtime/BUILD.md) 了解有关构建过程和插件机制的详细信息。
 

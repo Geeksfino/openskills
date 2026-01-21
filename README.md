@@ -80,11 +80,13 @@ OpenSkills will evolve to address limitations while maintaining its WASM-first p
 - 🔒 **Dual Sandbox Architecture**: WASM/WASI 0.3 + macOS seatbelt (unique in the ecosystem)
 - 🧰 **Native Script Support**: Execute Python and shell scripts on macOS via seatbelt
 - 🤖 **Any Agent Framework**: Integrate with LangChain, Vercel AI SDK, or custom frameworks
+- 🚀 **Pre-built Tools**: Ready-to-use tool definitions for TS/Python (~200 lines less code)
 - 📊 **Progressive Disclosure**: Efficient tiered loading (metadata → instructions → resources)
 - 🔌 **Multi-Language Bindings**: Rust core with TypeScript and Python bindings
 - 🛡️ **Capability-Based Security**: Fine-grained permissions via WASI and seatbelt profiles
 - 🏗️ **Build Tool**: `openskills build` for compiling TS/JS to WASM components
 - 🌐 **Cross-Platform**: WASM execution is identical on macOS, Linux, Windows
+- 📁 **Workspace Management**: Built-in sandboxed workspace for file I/O operations
 
 ## Quick Start
 
@@ -112,16 +114,26 @@ pip install finclip-openskills
 
 ### Building a Skill
 
-OpenSkills uses **`javy-codegen`** (a Rust library) to compile JavaScript/TypeScript to WASM. This approach doesn't require installing the `javy` CLI tool—the compilation happens programmatically using the library.
+OpenSkills uses a **plugin-based build system** for compiling JavaScript/TypeScript → WASM. The system supports multiple build backends (plugins), allowing you to choose the compiler that best fits your needs.
 
-**Prerequisites**: You need a `plugin.wasm` file (the javy plugin). Build it once using our helper script:
+**Plugin System Architecture:**
+- **Plugins**: Modular build backends that handle compilation (e.g., `javy`, `quickjs`, `assemblyscript`)
+- **Auto-detection**: When no plugin is specified, the system tries available plugins in order until one works
+- **Plugin selection**: Choose explicitly via `--plugin` flag or `.openskills.toml` config file
+
+**Recommended for new users**: The `quickjs` plugin (easiest setup - just run the setup script below)
+
+**First-time setup** (required before building skills):
+
+Run the setup script to install build tools and download dependencies:
 
 ```bash
-# Build the javy plugin (one-time setup)
-./scripts/build_javy_plugin.sh
-
-# Export the plugin path (or add to your shell profile)
-export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+# This will:
+# - Download the WASI adapter
+# - Install javy CLI (downloads pre-built binary when available)
+# - Install wasm-tools
+# - Check for optional tools (AssemblyScript)
+./scripts/setup_build_tools.sh
 ```
 
 **Build a skill**:
@@ -131,14 +143,57 @@ export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wa
 cd my-skill
 openskills build
 
-# This compiles src/index.ts → wasm/skill.wasm using javy-codegen
+# Auto-detection: tries plugins in order (javy → quickjs → assemblyscript)
+# until it finds one that's available and has all dependencies
 ```
 
-**How it works**:
-- OpenSkills uses `javy-codegen` (a Rust crate) as a library dependency
-- The library requires a `plugin.wasm` file to perform JavaScript → WASM compilation
-- The plugin is built from the javy repository and "wizened" (initialized) for use
-- Once you have the plugin, you can build skills without any CLI tools
+**Choose a plugin explicitly**:
+```bash
+openskills build --plugin quickjs       # Recommended: easiest setup
+openskills build --plugin javy          # Requires javy plugin.wasm file
+openskills build --plugin assemblyscript # Requires asc compiler
+openskills build --list-plugins         # Show all available plugins and their status
+```
+
+**Plugin comparison:**
+- **`quickjs`** (recommended): Easiest setup - just run setup script. Uses javy CLI + wasm-tools. Supports WASI 0.3.
+- **`javy`**: Requires building javy plugin.wasm file. Uses javy-codegen library. Legacy support.
+- **`assemblyscript`**: High-performance TypeScript-like language. Requires asc compiler.
+
+**Alternative: javy plugin setup** (if you prefer the default javy plugin):
+
+If you want to use the `javy` plugin instead of `quickjs`, you need to build the javy plugin:
+
+```bash
+# Build the javy plugin (one-time setup)
+./scripts/build_javy_plugin.sh
+
+# Export the plugin path (or add to your shell profile)
+export JAVY_PLUGIN_PATH=/tmp/javy/target/wasm32-wasip1/release/plugin_wizened.wasm
+```
+
+**Config file (optional)**: place `.openskills.toml` or `openskills.toml` in the skill directory.
+
+```toml
+[build]
+plugin = "quickjs"  # or "assemblyscript"
+
+# Plugin options are usually auto-detected
+# [build.plugin_options]
+# adapter_path = "~/.cache/openskills/wasi_preview1_adapter.wasm"
+```
+
+**How the plugin system works**:
+1. **Plugin selection**: You can specify a plugin via `--plugin` flag, config file, or let the system auto-detect
+2. **Auto-detection**: When no plugin is specified, the system tries registered plugins in order until it finds one that:
+   - Is available (has all required dependencies)
+   - Supports the source file extension (.ts, .js, etc.)
+3. **Plugin execution**: Each plugin handles the full compilation pipeline:
+   - TypeScript transpilation (if needed)
+   - JavaScript/TypeScript → WASM core module
+   - WASM core → WASI 0.3 component (for quickjs/assemblyscript)
+4. **Automatic setup**: QuickJS/AssemblyScript plugins auto-download the WASI adapter if needed
+5. **Configuration**: Plugins can be configured via `.openskills.toml` or `--plugin-option` flags
 
 See [Build Tool Guide](runtime/BUILD.md) for detailed information about the build process and plugin mechanism.
 
@@ -167,27 +222,68 @@ See [Developer Guide](docs/developers.md) for detailed usage examples.
 
 ### Integrating with Agent Frameworks
 
-OpenSkills works with **any agent framework** to give agents access to Claude-compatible skills. Here are examples:
+OpenSkills works with **any agent framework** to give agents access to Claude-compatible skills. The runtime provides **pre-built tools** that eliminate boilerplate code and simplify agent setup.
 
-**LangChain (TypeScript/Python)**
+#### ⭐ Recommended: Pre-built Tools (Simplified Setup)
+
+**Vercel AI SDK (TypeScript)** - ~120 lines total:
 ```typescript
 import { OpenSkillRuntime } from "@finogeek/openskills";
-import { DynamicStructuredTool } from "@langchain/core/tools";
+import { createSkillTools, getAgentSystemPrompt } from "@finogeek/openskills/tools";
+import { generateText } from "ai";
 
+// Initialize runtime
 const runtime = OpenSkillRuntime.fromDirectory("./skills");
 runtime.discoverSkills();
 
-const tool = new DynamicStructuredTool({
-  name: "run_skill",
-  schema: z.object({ skill_id: z.string(), input: z.string() }),
-  func: async ({ skill_id, input }) => {
-    const result = runtime.executeSkill(skill_id, { input });
-    return result.outputJson;
-  },
+// Create pre-built tools (replaces ~200 lines of manual tool definitions)
+const tools = createSkillTools(runtime, {
+  workspaceDir: "./output"  // Sandboxed workspace for file I/O
+});
+
+// Get skill-agnostic system prompt (teaches agent HOW to use skills)
+const systemPrompt = getAgentSystemPrompt(runtime);
+
+// Use with any LLM
+const result = await generateText({
+  model: yourModel,
+  system: systemPrompt,
+  prompt: userQuery,
+  tools,
 });
 ```
 
-**Vercel AI SDK**
+**LangChain (Python)** - Pre-built tools available:
+```python
+from openskills import OpenSkillRuntime
+from openskills_tools import create_langchain_tools, get_agent_system_prompt
+
+# Initialize runtime
+runtime = OpenSkillRuntime.from_directory("./skills")
+runtime.discover_skills()
+
+# Create pre-built LangChain tools
+tools = create_langchain_tools(runtime, workspace_dir="./output")
+
+# Get system prompt
+system_prompt = get_agent_system_prompt(runtime)
+
+# Use with LangChain agent
+agent = create_agent(model, tools, system_prompt=system_prompt)
+```
+
+**Benefits of Pre-built Tools:**
+- ✅ **~200 lines less code**: No need to manually define tools
+- ✅ **Workspace management**: Automatic sandboxed file I/O
+- ✅ **Skill-agnostic prompts**: Runtime generates system prompts
+- ✅ **Security built-in**: Path validation, permission checks
+- ✅ **Works with any skill**: No code changes needed
+
+#### Manual Integration (Advanced)
+
+If you need custom tool definitions, you can still integrate manually:
+
+**Vercel AI SDK (Manual)**
 ```typescript
 import { OpenSkillRuntime } from "@finogeek/openskills";
 import { tool } from "ai";
@@ -201,7 +297,7 @@ const runSkill = tool({
 });
 ```
 
-See [examples/agents](examples/agents/) for complete integration examples with LangChain, Vercel AI SDK, and more.
+See [examples/agents/simple](examples/agents/simple/) for a complete example using pre-built tools, or [examples/agents](examples/agents/) for other integration patterns.
 
 ## Architecture
 

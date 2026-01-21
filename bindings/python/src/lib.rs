@@ -1,12 +1,19 @@
 use openskills_runtime::{
-    ExecutionContext, ExecutionOptions, OpenSkillRuntime, OutputType, RuntimeConfig,
-    RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
+    CommandPermissions, ExecutionContext, ExecutionOptions, ExecutionTarget, OpenSkillRuntime, OutputType,
+    RuntimeConfig, RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
+    run_sandboxed_command,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Mutex;
+
+/// Safely convert timeout from i64 to u64, clamping negative values to 0.
+/// This matches the behavior of TypeScript's safe_timeout_ms function.
+fn safe_timeout_ms(timeout: Option<i64>) -> Option<u64> {
+    timeout.map(|t| if t < 0 { 0 } else { t as u64 })
+}
 
 #[pyclass]
 struct OpenSkillRuntimeWrapper {
@@ -61,6 +68,7 @@ impl OpenSkillRuntimeWrapper {
                 .collect(),
             use_standard_locations,
             project_root: project_root.map(PathBuf::from),
+            workspace_dir: None,
         };
         Self {
             inner: Mutex::new(OpenSkillRuntime::from_config(config)),
@@ -378,6 +386,134 @@ impl OpenSkillRuntimeWrapper {
             .check_tool_permission(&skill_id, &tool, description, std::collections::HashMap::new())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
+
+    /// Read a file from a skill directory.
+    ///
+    /// This allows agents to read helper files (like `docx-js.md`) that skills
+    /// reference in their SKILL.md instructions.
+    fn read_skill_file(&self, skill_id: String, relative_path: String) -> PyResult<String> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .read_skill_file(&skill_id, &relative_path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// List files in a skill directory (or subdirectory).
+    ///
+    /// Returns relative paths from the skill root.
+    #[pyo3(signature = (skill_id, subdir=None, recursive=false))]
+    fn list_skill_files(
+        &self,
+        skill_id: String,
+        subdir: Option<String>,
+        recursive: bool,
+    ) -> PyResult<Vec<String>> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .list_skill_files(&skill_id, subdir.as_deref(), recursive)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Run a specific target (script/WASM) within a skill.
+    ///
+    /// This is designed for Claude Skills where SKILL.md instructions tell
+    /// the agent which script to run (e.g., "run python ooxml/scripts/unpack.py").
+    #[pyo3(signature = (skill_id, options=None))]
+    fn run_skill_target(
+        &self,
+        py: Python<'_>,
+        skill_id: String,
+        options: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        let mut runtime = self.inner.lock().unwrap();
+
+        // Parse options from Python dict
+        let (target, timeout_ms, input_val) = if let Some(opts) = options {
+            let target_type: Option<String> = opts.get_item("target_type")?
+                .and_then(|v| v.extract().ok());
+            
+            let target = match target_type.as_deref() {
+                Some("script") => {
+                    let path: String = opts.get_item("path")?
+                        .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                            "path is required for script target"
+                        ))?
+                        .extract()?;
+                    let args: Vec<String> = opts.get_item("args")?
+                        .and_then(|v| v.extract::<Vec<String>>().ok())
+                        .unwrap_or_default();
+                    ExecutionTarget::Script { path, args }
+                }
+                Some("wasm") => {
+                    let path: String = opts.get_item("path")?
+                        .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                            "path is required for wasm target"
+                        ))?
+                        .extract()?;
+                    ExecutionTarget::Wasm { path }
+                }
+                _ => ExecutionTarget::Auto,
+            };
+
+            // Extract as i64 first, then apply safety conversion (clamp negative to 0)
+            // This matches TypeScript behavior and prevents silent failures
+            let timeout: Option<u64> = opts.get_item("timeout_ms")?
+                .and_then(|v| v.extract::<i64>().ok())
+                .and_then(|t| safe_timeout_ms(Some(t)));
+
+            let input_val: Option<Value> = opts.get_item("input")?
+                .and_then(|input_obj| {
+                    let json_module = py.import("json").ok()?;
+                    let json_dumps = json_module.getattr("dumps").ok()?;
+                    let json_str: String = json_dumps.call1((input_obj,)).ok()?.extract().ok()?;
+                    serde_json::from_str(&json_str).ok()
+                });
+
+            (target, timeout, input_val)
+        } else {
+            (ExecutionTarget::Auto, None, None)
+        };
+
+        let result = runtime
+            .run_skill_target(&skill_id, target, timeout_ms, input_val)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        // Convert Value to JSON string, then parse to Python object
+        let json_str = serde_json::to_string(&result.output)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Serialization error: {e}"
+            )))?;
+        let json_module = py.import("json")?;
+        let json_loads = json_module.getattr("loads")?;
+        let output: Py<PyAny> = json_loads.call1((json_str,))?.into();
+
+        let exit_status = match result.audit.exit_status {
+            RuntimeExecutionStatus::Success => "success".to_string(),
+            RuntimeExecutionStatus::Timeout => "timeout".to_string(),
+            RuntimeExecutionStatus::PermissionDenied => "permission_denied".to_string(),
+            RuntimeExecutionStatus::Failed(msg) => format!("failed:{}", msg),
+        };
+
+        let audit = PyDict::new(py);
+        audit.set_item("skill_id", result.audit.skill_id)?;
+        audit.set_item("version", result.audit.version)?;
+        audit.set_item("input_hash", result.audit.input_hash)?;
+        audit.set_item("output_hash", result.audit.output_hash)?;
+        audit.set_item("start_time_ms", result.audit.start_time_ms)?;
+        audit.set_item("duration_ms", result.audit.duration_ms)?;
+        audit.set_item("permissions_used", result.audit.permissions_used)?;
+        audit.set_item("exit_status", exit_status)?;
+        audit.set_item("stdout", result.audit.stdout)?;
+        audit.set_item("stderr", result.audit.stderr)?;
+
+        let response = PyDict::new(py);
+        response.set_item("output", output)?;
+        response.set_item("stdout", result.stdout)?;
+        response.set_item("stderr", result.stderr)?;
+        response.set_item("audit", audit)?;
+
+        Ok(response.into())
+    }
 }
 
 #[pymethods]
@@ -486,11 +622,85 @@ impl ExecutionContextWrapper {
     }
 }
 
+/// Run a shell command in a sandboxed environment (macOS only).
+///
+/// This provides Claude Code-like sandboxed bash execution for agents.
+/// Uses macOS Seatbelt sandbox-exec.
+///
+/// Args:
+///     command: Shell command to execute
+///     working_dir: Working directory for the command
+///     allow_network: Allow network access (default: False)
+///     allow_process: Allow subprocess spawning (default: False)
+///     read_paths: List of paths the command can read from
+///     write_paths: List of paths the command can write to
+///     env_vars: Dict of environment variables to pass through
+///     timeout_ms: Timeout in milliseconds (default: 30000)
+///
+/// Returns:
+///     Dict with exit_code, stdout, stderr, timed_out
+#[pyfunction]
+#[pyo3(signature = (command, working_dir, *, allow_network = false, allow_process = false, read_paths = None, write_paths = None, env_vars = None, timeout_ms = 30000))]
+fn run_sandboxed_shell_command(
+    py: Python<'_>,
+    command: String,
+    working_dir: String,
+    allow_network: bool,
+    allow_process: bool,
+    read_paths: Option<Vec<String>>,
+    write_paths: Option<Vec<String>>,
+    env_vars: Option<&Bound<'_, PyDict>>,
+    timeout_ms: u64,
+) -> PyResult<Py<PyAny>> {
+    // Convert env_vars from Python dict to Vec<(String, String)>
+    let env_vec: Vec<(String, String)> = if let Some(env_dict) = env_vars {
+        env_dict
+            .iter()
+            .filter_map(|(k, v)| {
+                let key: Option<String> = k.extract().ok();
+                let value: Option<String> = v.extract().ok();
+                key.zip(value)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let perms = CommandPermissions {
+        allow_network,
+        allow_process,
+        read_paths: read_paths
+            .unwrap_or_default()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        write_paths: write_paths
+            .unwrap_or_default()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        env_vars: env_vec,
+        timeout_ms,
+    };
+
+    let result = run_sandboxed_command(&command, &PathBuf::from(&working_dir), perms)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+    let dict = PyDict::new(py);
+    dict.set_item("exit_code", result.exit_code)?;
+    dict.set_item("stdout", result.stdout)?;
+    dict.set_item("stderr", result.stderr)?;
+    dict.set_item("timed_out", result.timed_out)?;
+
+    Ok(dict.into())
+}
+
 #[pymodule]
 fn openskills(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OpenSkillRuntimeWrapper>()?;
     m.add_class::<SkillExecutionSessionWrapper>()?;
     m.add_class::<ExecutionContextWrapper>()?;
+    m.add_function(wrap_pyfunction!(run_sandboxed_shell_command, m)?)?;
     Ok(())
 }
 

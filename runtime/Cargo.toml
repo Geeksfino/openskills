@@ -20,6 +20,7 @@ path = "src/bin/openskills-runtime.rs"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
+toml = "0.8"
 
 # Error handling
 thiserror = "1.0"
@@ -31,6 +32,9 @@ hex = "0.4"
 # Filesystem traversal
 walkdir = "2.4"
 dirs = "5.0"
+
+# Pattern matching for hook matchers
+glob = "0.3"
 
 # URL parsing for network permissions
 url = "2.5"
@@ -46,16 +50,20 @@ wasmtime-wasi = { workspace = true }
 cap-std = "2.0"
 tokio = { version = "1", features = ["io-util", "rt-multi-thread"] }
 
-# JavaScript to WASM compilation
+# JavaScript to WASM compilation (plugin-based)
 # Only include when building the binary (build tool), not when building as a library
 # This prevents wasmtime version conflicts when building Python/TS bindings
 javy-codegen = { version = "3.0", optional = true }
 
 [features]
-default = ["build-tool"]
-# Enable javy-codegen for the build tool binary
-# Python/TS bindings disable this via default-features = false to avoid wasmtime conflicts
-build-tool = ["javy-codegen"]
+default = ["build-tool", "plugin-javy"]
+# Enable build tooling (compiler plugins).
+# Python/TS bindings disable this via default-features = false to avoid wasmtime conflicts.
+build-tool = []
+# Built-in compiler plugins
+plugin-javy = ["javy-codegen"]
+plugin-quickjs = []
+plugin-assemblyscript = []
 
 [dev-dependencies]
 tempfile = "3.10"

@@ -1305,6 +1305,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1919,6 +1925,7 @@ version = "0.2.0"
 dependencies = [
  "cap-std 2.0.2",
  "dirs",
+ "glob",
  "hex",
  "javy-codegen",
  "serde",
@@ -1928,6 +1935,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "toml 0.8.23",
  "url",
  "walkdir",
  "wasmtime 40.0.2",

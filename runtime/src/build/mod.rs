@@ -4,14 +4,25 @@
 //! - TypeScript (.ts) → transpile to JS → compile to WASM
 //! - JavaScript (.js) → compile to WASM
 //!
-//! Uses javy-codegen library for JS→WASM compilation.
+//! Build backends are plugin-based so developers can choose compilers.
 
 use crate::errors::OpenSkillError;
+use crate::build::config::BuildConfigFile;
+use crate::build::plugin::PluginConfig;
+use crate::build::registry::PluginRegistry;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[cfg(feature = "build-tool")]
-use javy_codegen::{Generator, JS, LinkingKind, Plugin, SourceEmbedding};
+pub mod config;
+pub mod plugin;
+pub mod plugins;
+pub mod registry;
+
+/// List all available build plugins.
+pub fn list_build_plugins() -> Vec<plugin::PluginInfo> {
+    PluginRegistry::new().list()
+}
 
 /// Build configuration for skill compilation.
 #[derive(Debug, Clone)]
@@ -26,6 +37,10 @@ pub struct BuildConfig {
     pub force: bool,
     /// Verbose output.
     pub verbose: bool,
+    /// Build plugin to use (None = auto-detect).
+    pub plugin: Option<String>,
+    /// Plugin-specific configuration.
+    pub plugin_config: HashMap<String, String>,
 }
 
 impl Default for BuildConfig {
@@ -36,6 +51,8 @@ impl Default for BuildConfig {
             output_file: None,
             force: false,
             verbose: false,
+            plugin: None,
+            plugin_config: HashMap::new(),
         }
     }
 }
@@ -62,8 +79,6 @@ pub fn detect_source_file(skill_dir: &Path) -> Result<PathBuf, OpenSkillError> {
         skill_dir.display()
     )))
 }
-
-// Note: javy-codegen is now a library dependency, so no need to check for CLI installation
 
 /// Transpile TypeScript to JavaScript.
 pub fn transpile_typescript(
@@ -92,9 +107,7 @@ pub fn transpile_typescript(
                 &format!("--outfile={}", output_js.display()),
             ])
             .status()
-            .map_err(|e| {
-                OpenSkillError::BuildError(format!("Failed to run esbuild: {}", e))
-            })?;
+            .map_err(|e| OpenSkillError::BuildError(format!("Failed to run esbuild: {}", e)))?;
 
         if !status.success() {
             return Err(OpenSkillError::BuildError(
@@ -125,10 +138,7 @@ pub fn transpile_typescript(
   }
 }"#;
             std::fs::write(&tsconfig, default_tsconfig).map_err(|e| {
-                OpenSkillError::BuildError(format!(
-                    "Failed to create tsconfig.json: {}",
-                    e
-                ))
+                OpenSkillError::BuildError(format!("Failed to create tsconfig.json: {}", e))
             })?;
         }
 
@@ -137,9 +147,7 @@ pub fn transpile_typescript(
             .arg("--outDir")
             .arg(output_js.parent().unwrap().to_string_lossy().to_string())
             .status()
-            .map_err(|e| {
-                OpenSkillError::BuildError(format!("Failed to run tsc: {}", e))
-            })?;
+            .map_err(|e| OpenSkillError::BuildError(format!("Failed to run tsc: {}", e)))?;
 
         if !status.success() {
             return Err(OpenSkillError::BuildError(
@@ -151,10 +159,7 @@ pub fn transpile_typescript(
         let tsc_output = ts_file.with_extension("js");
         if tsc_output.exists() && tsc_output != output_js {
             std::fs::rename(&tsc_output, output_js).map_err(|e| {
-                OpenSkillError::BuildError(format!(
-                    "Failed to move tsc output: {}",
-                    e
-                ))
+                OpenSkillError::BuildError(format!("Failed to move tsc output: {}", e))
             })?;
         }
 
@@ -166,111 +171,12 @@ pub fn transpile_typescript(
     ))
 }
 
-/// Compile JavaScript to WASM component using javy-codegen library.
-#[cfg(feature = "build-tool")]
-pub fn compile_js_to_wasm(
-    js_file: &Path,
-    output_wasm: &Path,
-    verbose: bool,
-) -> Result<(), OpenSkillError> {
-    // Ensure output directory exists
-    if let Some(parent) = output_wasm.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            OpenSkillError::BuildError(format!(
-                "Failed to create output directory: {}",
-                e
-            ))
-        })?;
-    }
-
-    if verbose {
-        eprintln!("Compiling {} to {}", js_file.display(), output_wasm.display());
-    }
-
-    // Read JavaScript source
-    let js = JS::from_file(js_file).map_err(|e| {
-        OpenSkillError::BuildError(format!(
-            "Failed to read JavaScript file {}: {}",
-            js_file.display(),
-            e
-        ))
-    })?;
-
-    // Load the javy plugin
-    // The plugin can be provided via JAVY_PLUGIN_PATH environment variable,
-    // or we'll try to find it in common locations
-    let plugin = {
-        let plugin_path = std::env::var("JAVY_PLUGIN_PATH")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| {
-                // Try common locations
-                let candidates = [
-                    PathBuf::from("plugin_wizened.wasm"),
-                    PathBuf::from("plugin.wasm"),
-                    PathBuf::from("../javy/target/wasm32-wasip1/release/plugin_wizened.wasm"),
-                    PathBuf::from("../javy/target/wasm32-wasip1/release/plugin.wasm"),
-                    PathBuf::from("~/.cargo/bin/plugin_wizened.wasm"),
-                    PathBuf::from("~/.cargo/bin/plugin.wasm"),
-                ];
-                candidates.iter().find(|p| p.exists()).cloned()
-            });
-
-        match plugin_path {
-            Some(path) => Plugin::new_from_path(&path).map_err(|e| {
-                OpenSkillError::BuildError(format!(
-                    "Failed to load javy plugin from {}: {}",
-                    path.display(), e
-                ))
-            })?,
-            None => {
-                return Err(OpenSkillError::BuildError(
-                    "javy plugin not found. javy-codegen requires a plugin.wasm file.\n\
-                    Options:\n  \
-                    1. Set JAVY_PLUGIN_PATH environment variable to point to plugin.wasm\n  \
-                    2. Place plugin_wizened.wasm in the current directory\n  \
-                    3. Run scripts/build_javy_plugin.sh (recommended)\n  \
-                    4. Build the plugin: git clone https://github.com/bytecodealliance/javy.git && \
-                       cd javy && cargo build --release --target wasm32-wasip1 -p javy-plugin".to_string(),
-                ));
-            }
-        }
-    };
-
-    // Create generator with default configuration
-    let mut generator = Generator::new(plugin);
-    generator
-        .source_embedding(SourceEmbedding::Compressed)
-        .linking(LinkingKind::Static);
-
-    // Generate WASM (synchronous operation)
-    let wasm = generator.generate(&js).map_err(|e| {
-        OpenSkillError::BuildError(format!(
-            "Failed to generate WASM from JavaScript: {}",
-            e
-        ))
-    })?;
-
-    // Write WASM to output file
-    std::fs::write(output_wasm, wasm).map_err(|e| {
-        OpenSkillError::BuildError(format!(
-            "Failed to write WASM output to {}: {}",
-            output_wasm.display(),
-            e
-        ))
-    })?;
-
-    Ok(())
-}
-
-/// Build a skill from source to WASM.
+/// Build a skill from source to WASM using the selected plugin.
 pub fn build_skill(config: BuildConfig) -> Result<PathBuf, OpenSkillError> {
     let skill_dir = config.skill_dir.canonicalize().map_err(|e| {
-        OpenSkillError::BuildError(format!(
-            "Failed to resolve skill directory: {}",
-            e
-        ))
+        OpenSkillError::BuildError(format!("Failed to resolve skill directory: {}", e))
     })?;
+    let file_config = BuildConfigFile::load(&skill_dir)?;
 
     // Detect source file
     let source_file = match config.source_file {
@@ -286,9 +192,9 @@ pub fn build_skill(config: BuildConfig) -> Result<PathBuf, OpenSkillError> {
     }
 
     // Determine output path
-    let output_wasm = config.output_file.unwrap_or_else(|| {
-        skill_dir.join("wasm/skill.wasm")
-    });
+    let output_wasm = config
+        .output_file
+        .unwrap_or_else(|| skill_dir.join("wasm/skill.wasm"));
 
     // Check if rebuild is needed
     if !config.force && output_wasm.exists() {
@@ -302,10 +208,7 @@ pub fn build_skill(config: BuildConfig) -> Result<PathBuf, OpenSkillError> {
         if let (Some(src), Some(out)) = (source_mtime, output_mtime) {
             if src <= out {
                 if config.verbose {
-                    eprintln!(
-                        "Skipping build: {} is up to date",
-                        output_wasm.display()
-                    );
+                    eprintln!("Skipping build: {} is up to date", output_wasm.display());
                 }
                 return Ok(output_wasm);
             }
@@ -327,16 +230,74 @@ pub fn build_skill(config: BuildConfig) -> Result<PathBuf, OpenSkillError> {
         source_file.clone()
     };
 
-    // Compile JS to WASM
-    if config.verbose {
-        eprintln!("Compiling to WASM: {}", output_wasm.display());
+    // Resolve build plugin
+    let registry = PluginRegistry::new();
+    let selected_plugin = match config.plugin.as_ref().or(file_config.plugin_ref()) {
+        Some(name) => registry.find(name).ok_or_else(|| {
+            let available = registry
+                .list()
+                .into_iter()
+                .map(|info| info.name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            OpenSkillError::BuildError(format!(
+                "Build plugin '{}' not found. Available: {}",
+                name,
+                if available.is_empty() { "(none)".to_string() } else { available }
+            ))
+        })?,
+        None => {
+            let ext = js_file
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("js");
+            let candidates = registry.find_by_extension(ext);
+            candidates
+                .into_iter()
+                .find(|plugin| plugin.is_available().unwrap_or(false))
+                .ok_or_else(|| {
+                    OpenSkillError::BuildError(format!(
+                        "No available build plugin found for .{} sources",
+                        ext
+                    ))
+                })?
+        }
+    };
+
+    if !selected_plugin.is_available()? {
+        let requirements = selected_plugin
+            .requirements()
+            .into_iter()
+            .map(|req| format!("  - {}", req))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(OpenSkillError::BuildError(format!(
+            "Build plugin '{}' is not available.\nRequirements:\n{}",
+            selected_plugin.name(),
+            requirements
+        )));
     }
-    #[cfg(feature = "build-tool")]
-    compile_js_to_wasm(&js_file, &output_wasm, config.verbose)?;
-    #[cfg(not(feature = "build-tool"))]
-    return Err(OpenSkillError::BuildError(
-        "Build tool functionality is not available. Enable the 'build-tool' feature.".to_string(),
-    ));
+
+    // Compile JS to WASM using plugin
+    if config.verbose {
+        eprintln!(
+            "Compiling to WASM with plugin '{}': {}",
+            selected_plugin.name(),
+            output_wasm.display()
+        );
+    }
+
+    let plugin_config = PluginConfig {
+        verbose: config.verbose,
+        force: config.force,
+        custom: {
+            let mut merged = file_config.plugin_options();
+            merged.extend(config.plugin_config.clone());
+            merged
+        },
+    };
+
+    selected_plugin.compile(&js_file, &output_wasm, &plugin_config)?;
 
     // Clean up temporary JS file if it was created from TS
     if source_file.extension().and_then(|s| s.to_str()) == Some("ts") {
@@ -367,8 +328,7 @@ mod tests {
 
         // Create src/index.ts
         std::fs::create_dir_all(skill_dir.join("src")).unwrap();
-        std::fs::write(skill_dir.join("src/index.ts"), "console.log('hello');")
-            .unwrap();
+        std::fs::write(skill_dir.join("src/index.ts"), "console.log('hello');").unwrap();
         assert!(detect_source_file(skill_dir).is_ok());
     }
 }
