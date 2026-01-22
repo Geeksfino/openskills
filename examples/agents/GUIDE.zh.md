@@ -12,7 +12,7 @@ OpenSkills：
 ### 集成模式
 
 #### 模式 A：单一工具（简单）
-暴露一个工具，可以按 ID 执行任何技能。这是 `langchain-python` 和 `simple` 中最小示例使用的模式。
+暴露一个工具，可以按 ID 执行任何技能。这是 `with_langchain-python` 和 `with_vercel-ai-sdk` 中最小示例使用的模式。
 
 **优点：** 代码更少，接线更快  
 **缺点：** 代理必须在工具调用中提供 `skill_id`
@@ -84,8 +84,8 @@ print(result.get("output", ""))
 ### LangChainJS 高级模式（每个技能一个工具）
 高级示例为每个技能构建一个工具，并将技能元数据注入系统提示：
 
-- 工具创建助手：`langchain-js/src/openskills-tool.ts`
-- 代理示例：`langchain-js/src/advanced-agent.ts`
+- 工具创建助手：`with_langchain-js/src/openskills-tool.ts`
+- 代理示例：`with_langchain-js/src/advanced-agent.ts`
 
 ### 最佳实践
 - 在启动时发现技能一次

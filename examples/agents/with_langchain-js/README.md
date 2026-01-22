@@ -5,7 +5,7 @@ call skills on demand.
 
 ### Setup
 ```bash
-cd examples/agents/langchain-js
+cd examples/agents/with_langchain-js
 npm install
 export OPENAI_API_KEY=...
 ```

@@ -3,9 +3,9 @@
 This folder shows how to wire the OpenSkills runtime into popular agent
 frameworks so both TypeScript and Python developers can reuse the same skills.
 
-### ⭐ Recommended: Simple Example
+### ⭐ Recommended: Vercel AI SDK Example
 
-The **`simple`** example demonstrates the **recommended approach** using pre-built tools:
+The **`with_vercel-ai-sdk`** example demonstrates the **recommended approach** using pre-built tools:
 
 - ✅ **~120 lines total** (vs ~470 lines manually)
 - ✅ **Pre-built tools**: Uses `createSkillTools()` from `@finogeek/openskills/tools`
@@ -23,7 +23,7 @@ const tools = createSkillTools(runtime, { workspaceDir: './output' });
 const systemPrompt = getAgentSystemPrompt(runtime);
 ```
 
-See [simple/README.md](simple/README.md) for details.
+See [with_vercel-ai-sdk/README.md](with_vercel-ai-sdk/README.md) for details.
 
 ### Prerequisites
 - Build or place skills under `examples/skills` (see `runtime/BUILD.md`)
@@ -32,9 +32,9 @@ See [simple/README.md](simple/README.md) for details.
   - Python: `pip install finclip-openskills`
 
 ### Examples
-- **`simple`** ⭐: **Recommended** - Vercel AI SDK with pre-built tools (~120 lines)
-- `langchain-js`: LangChainJS agent (manual tool definitions)
-- `langchain-python`: LangChain (Python) agent with pre-built tools
+- **`with_vercel-ai-sdk`** ⭐: **Recommended** - Vercel AI SDK with pre-built tools (~120 lines)
+- `with_langchain-js`: LangChainJS agent (manual tool definitions)
+- `with_langchain-python`: LangChain (Python) agent with pre-built tools
 
 ### Key Improvements
 
@@ -53,4 +53,4 @@ See [simple/README.md](simple/README.md) for details.
 ### Docs
 - `QUICKSTART.md`: 5-minute setup across frameworks
 - `GUIDE.md`: integration patterns and best practices
-- `simple/README.md`: Complete example using pre-built tools
+- `with_vercel-ai-sdk/README.md`: Complete example using pre-built tools

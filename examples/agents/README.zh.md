@@ -2,9 +2,9 @@
 
 本文件夹展示了如何将 OpenSkills 运行时集成到流行的代理框架中，使 TypeScript 和 Python 开发者都能够复用相同的技能。
 
-### ⭐ 推荐：简单示例
+### ⭐ 推荐：Vercel AI SDK 示例
 
-**`simple`** 示例展示了使用预构建工具的**推荐方案**：
+**`with_vercel-ai-sdk`** 示例展示了使用预构建工具的**推荐方案**：
 
 - ✅ **约120行代码**（相比手动方案的约470行）
 - ✅ **预构建工具**：使用 `@finogeek/openskills/tools` 中的 `createSkillTools()`
@@ -22,7 +22,7 @@ const tools = createSkillTools(runtime, { workspaceDir: './output' });
 const systemPrompt = getAgentSystemPrompt(runtime);
 ```
 
-详见 [simple/README.md](simple/README.md)。
+详见 [with_vercel-ai-sdk/README.md](with_vercel-ai-sdk/README.md)。
 
 ### 前置条件
 - 在 `examples/skills` 下构建或放置技能（参见 `runtime/BUILD.md`）
@@ -31,9 +31,9 @@ const systemPrompt = getAgentSystemPrompt(runtime);
   - Python: `pip install finclip-openskills`
 
 ### 示例
-- **`simple`** ⭐：**推荐** - Vercel AI SDK 和预构建工具（约120行）
-- `langchain-js`：LangChainJS 代理（手动工具定义）
-- `langchain-python`：LangChain（Python）代理和预构建工具
+- **`with_vercel-ai-sdk`** ⭐：**推荐** - Vercel AI SDK 和预构建工具（约120行）
+- `with_langchain-js`：LangChainJS 代理（手动工具定义）
+- `with_langchain-python`：LangChain（Python）代理和预构建工具
 
 ### 主要改进
 
@@ -52,4 +52,4 @@ const systemPrompt = getAgentSystemPrompt(runtime);
 ### 文档
 - `QUICKSTART.md`：5分钟跨框架设置
 - `GUIDE.md`：集成模式和最佳实践
-- `simple/README.md`：使用预构建工具的完整示例
+- `with_vercel-ai-sdk/README.md`：使用预构建工具的完整示例
