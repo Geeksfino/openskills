@@ -187,14 +187,14 @@ async function main() {
         console.log("\n" + "=".repeat(70));
         console.log(`📋 Tool Results Summary (${finalToolResults.length}):`);
         console.log("=".repeat(70));
-        for (const res of finalToolResults as Array<{ toolName: string; result: unknown }>) {
+        for (const res of finalToolResults as Array<{ toolName: string; toolCallId?: string; result: unknown }>) {
           // Calculate duration if we tracked this tool call
           let duration = 0;
-          for (const [toolCallId, toolCallInfo] of toolCalls.entries()) {
-            if (toolCallInfo.toolName === res.toolName) {
+          if (res.toolCallId) {
+            const toolCallInfo = toolCalls.get(res.toolCallId);
+            if (toolCallInfo) {
               // Approximate duration (we don't have exact end time)
               duration = Date.now() - toolCallInfo.startTime;
-              break;
             }
           }
           
@@ -214,7 +214,12 @@ async function main() {
               if (parsed && typeof parsed === 'object' && parsed !== null && 'output' in parsed) {
                 const output = typeof parsed.output === 'string' ? JSON.parse(parsed.output) : parsed.output;
                 if (output && typeof output === 'object' && output !== null && 'files' in output) {
-                  console.log(`\n    ✅ WASM module was used! Returned ${Object.keys(output.files).length} files.`);
+                  const files = output.files;
+                  if (files && typeof files === 'object' && files !== null && !Array.isArray(files)) {
+                    console.log(`\n    ✅ WASM module was used! Returned ${Object.keys(files).length} files.`);
+                  } else {
+                    console.log(`\n    ⚠️  WASM output contains 'files' but it's not a valid object - may not have used WASM module correctly.`);
+                  }
                 } else {
                   console.log(`\n    ⚠️  WASM output doesn't contain 'files' object - may not have used WASM module correctly.`);
                 }
