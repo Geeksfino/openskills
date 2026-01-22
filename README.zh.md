@@ -2,11 +2,11 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-一个支持**双重沙箱**的 **Claude Skills 兼容运行时**：基于 WASM 的跨平台安全沙箱，加上 **macOS seatbelt** 用于原生 Python 和 Shell 脚本执行。OpenSkills 实现了 [Claude Code Agent Skills 规范](https://code.claude.com/docs/en/skills)，为**任何智能体框架**提供安全、灵活的运行时来执行技能。
+一个支持**双沙箱方案**的 **Claude Skills 兼容运行时**：基于 WASM 的跨平台安全沙箱，加上 **macOS seatbelt** 用于原生 Python 和 Shell 脚本执行。OpenSkills 实现了 [Claude Code Agent Skills 规范](https://code.claude.com/docs/en/skills)，为**任何智能体框架**提供安全、灵活的运行时来执行技能。
 
 ## 设计理念
 
-OpenSkills 与 Claude Skills **100% 语法兼容**，这意味着任何遵循 Claude Skills 格式（带有 YAML 前置元数据的 SKILL.md）的技能都可以在 OpenSkills 上运行。OpenSkills 的独特之处在于其**双重沙箱架构**：
+OpenSkills 与 Claude Skills **100% 语法兼容**，这意味着任何遵循 Claude Skills 格式（带有 YAML 前置元数据的 SKILL.md）的技能都可以在 OpenSkills 上运行。OpenSkills 的独特之处在于其**双沙箱架构**：
 
 - **WASM/WASI 沙箱**：提供跨平台安全性和一致性
 - **macOS seatbelt 沙箱**：用于原生 Python 和 Shell 脚本执行
@@ -17,7 +17,7 @@ OpenSkills 与 Claude Skills **100% 语法兼容**，这意味着任何遵循 Cl
 
 1. **100% 语法兼容性**：OpenSkills 使用与 Claude Skills 完全相同的 SKILL.md 格式来读取和执行技能。技能可以在 Claude Code 和 OpenSkills 之间共享，无需修改。
 
-2. **双重沙箱架构**：OpenSkills 独特地结合了 **WASM/WASI 0.3**（组件模型）与 **macOS seatbelt** 沙箱：
+2. **双沙箱架构**：OpenSkills 独特地结合了 **WASM/WASI 0.3**（组件模型）与 **macOS seatbelt** 沙箱：
    - **WASM/WASI**：跨平台安全性、基于能力的权限、内存安全、确定性执行
    - **macOS Seatbelt**：原生 Python 和 Shell 脚本执行，具有操作系统级别的沙箱隔离
    - **自动检测**：运行时根据技能类型自动选择合适的沙箱
@@ -35,7 +35,7 @@ OpenSkills 专为需要 Claude 兼容技能的**任何智能体框架**而设计
 - **原生灵活性**：macOS seatbelt 允许在需要时使用原生 Python 和 Shell 脚本
 - **安全性和可审计性**：两种沙箱方法都提供强大的隔离和审计日志记录
 
-双重沙箱方法意味着您可以使用 WASM 实现跨平台技能，或在需要访问原生库或工具时在 macOS 上利用原生 Python/Shell。
+双沙箱方案意味着您可以使用 WASM 实现跨平台技能，或在需要访问原生库或工具时在 macOS 上利用原生 Python/Shell。
 
 ## 限制
 
@@ -77,7 +77,7 @@ OpenSkills 将在保持其 WASM 优先理念的同时不断发展以解决限制
 ## 特性
 
 - ✅ **100% Claude Skills 兼容**：完整支持 SKILL.md 格式
-- 🔒 **双重沙箱架构**：WASM/WASI 0.3 + macOS seatbelt（生态系统中的独特之处）
+- 🔒 **双沙箱架构**：WASM/WASI 0.3 + macOS seatbelt（生态系统中的独特之处）
 - 🧰 **原生脚本支持**：通过 seatbelt 在 macOS 上执行 Python 和 Shell 脚本
 - 🤖 **任何智能体框架**：与 LangChain、Vercel AI SDK 或自定义框架集成
 - 📊 **渐进式披露**：高效的分层加载（元数据 → 指令 → 资源）
