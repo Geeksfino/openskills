@@ -6,28 +6,28 @@ Get started with OpenSkills in your agent framework in under 5 minutes.
 
 #### Python Developer (LangChain)
 ```bash
-cd langchain-python
+cd with_langchain-python
 pip install -r requirements.txt
 python main.py
 ```
 
-#### TypeScript Developer (Simple Example - AI SDK)
+#### TypeScript Developer (Vercel AI SDK Example)
 ```bash
-cd simple
+cd with_vercel-ai-sdk
 npm install
 npm run start
 ```
 
 #### TypeScript Developer (Existing Project - LangChainJS)
 ```bash
-cd langchain-js
+cd with_langchain-js
 npm install
 npm run start
 ```
 
 #### Advanced Example (LangChainJS)
 ```bash
-cd langchain-js
+cd with_langchain-js
 npm run advanced
 ```
 
@@ -73,5 +73,5 @@ print(result.get("output", ""))
 
 ### Next Steps
 - Read the integration guide: `GUIDE.md`
-- Browse the examples: `langchain-js/`, `langchain-python/`, `simple/`
+- Browse the examples: `with_langchain-js/`, `with_langchain-python/`, `with_vercel-ai-sdk/`
 - Build your own skills under `examples/skills`

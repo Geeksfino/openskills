@@ -14,7 +14,7 @@ OpenSkills:
 
 #### Pattern A: Single Tool (Simple)
 Expose one tool that can execute any skill by ID. This is the pattern used by
-the minimal examples in `langchain-python` and `simple`.
+the minimal examples in `with_langchain-python` and `with_vercel-ai-sdk`.
 
 **Pros:** Less code, faster to wire up  
 **Cons:** Agent must supply `skill_id` in tool calls
@@ -89,8 +89,8 @@ print(result.get("output", ""))
 The advanced example builds a tool for each skill and injects skill metadata
 into the system prompt:
 
-- Tool creation helper: `langchain-js/src/openskills-tool.ts`
-- Agent example: `langchain-js/src/advanced-agent.ts`
+- Tool creation helper: `with_langchain-js/src/openskills-tool.ts`
+- Agent example: `with_langchain-js/src/advanced-agent.ts`
 
 ### Best Practices
 - Discover skills once at startup

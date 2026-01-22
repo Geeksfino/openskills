@@ -1,4 +1,4 @@
-## OpenSkills Simple Agent (Claude Skills Compatible)
+## OpenSkills Agent with Vercel AI SDK (Claude Skills Compatible)
 
 This example demonstrates the correct pattern for using Claude Skills:
 
@@ -62,7 +62,7 @@ npm start "Create a Word document with title 'Test'"
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Simple Agent (~120 lines)                │
+│              Vercel AI SDK Agent (~120 lines)              │
 │  - Imports pre-built tools from @finogeek/openskills/tools │
 │  - Uses runtime.getAgentSystemPrompt() for system prompt   │
 │  - No skill-specific knowledge                              │

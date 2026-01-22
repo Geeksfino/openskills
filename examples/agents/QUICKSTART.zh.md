@@ -6,28 +6,28 @@
 
 #### Python 开发者 (LangChain)
 ```bash
-cd langchain-python
+cd with_langchain-python
 pip install -r requirements.txt
 python main.py
 ```
 
-#### TypeScript 开发者（简单示例 - AI SDK）
+#### TypeScript 开发者（Vercel AI SDK 示例）
 ```bash
-cd simple
+cd with_vercel-ai-sdk
 npm install
 npm run start
 ```
 
 #### TypeScript 开发者（现有项目 - LangChainJS）
 ```bash
-cd langchain-js
+cd with_langchain-js
 npm install
 npm run start
 ```
 
 #### 高级示例 (LangChainJS)
 ```bash
-cd langchain-js
+cd with_langchain-js
 npm run advanced
 ```
 
@@ -73,5 +73,5 @@ print(result.get("output", ""))
 
 ### 下一步
 - 阅读集成指南：`GUIDE.md`
-- 浏览示例：`langchain-js/`、`langchain-python/`、`simple/`
+- 浏览示例：`with_langchain-js/`、`with_langchain-python/`、`with_vercel-ai-sdk/`
 - 在 `examples/skills` 下构建您自己的技能

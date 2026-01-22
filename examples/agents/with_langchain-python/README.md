@@ -5,7 +5,7 @@ invoke them on demand.
 
 ### Setup
 ```bash
-cd examples/agents/langchain-python
+cd examples/agents/with_langchain-python
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

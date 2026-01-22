@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { OpenSkillRuntime } from "@finogeek/openskills";
 import { createSkillTools, getAgentSystemPrompt } from "@finogeek/openskills/tools";
-import { generateText } from "ai";
+import { streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -116,52 +116,110 @@ async function main() {
         await new Promise(resolve => setTimeout(resolve, Math.min(1000 * Math.pow(2, attempt - 2), 10000)));
       }
 
-    const result = await generateText({
+      // Track progress
+      let stepCount = 0;
+      const toolCalls: Map<string, { toolName: string; startTime: number }> = new Map();
+      let accumulatedText = "";
+
+      const result = streamText({
         model,
-      system: systemPrompt,
-      prompt: userQuery,
+        system: systemPrompt,
+        prompt: userQuery,
         tools,
         maxSteps: config.maxSteps,
+        onStepFinish: (step) => {
+          stepCount++;
+          const timestamp = new Date().toLocaleTimeString();
+          console.log(`\n📊 Step ${stepCount}/${config.maxSteps} completed ${timestamp}`);
+        },
       });
 
+      // Stream the text output and track tool calls in real-time
       console.log("\n" + "=".repeat(70));
-      console.log("✅ Agent Response:");
+      console.log("💬 Agent Response (streaming):");
       console.log("=".repeat(70));
-    console.log(result.text);
-    
-    if (result.toolCalls && result.toolCalls.length > 0) {
+      
+      // Process the full stream to track tool calls
+      const streamPromise = (async () => {
+        for await (const delta of result.fullStream) {
+          if (delta.type === 'tool-call-streaming-start') {
+            const startTime = Date.now();
+            const toolCallId = delta.toolCallId;
+            toolCalls.set(toolCallId, {
+              toolName: delta.toolName,
+              startTime,
+            });
+            console.log(`\n🔧 Calling tool: ${delta.toolName}`);
+          } else if (delta.type === 'step-finish') {
+            // Tool results are available after step finishes
+            // We'll show them in the summary at the end
+          }
+        }
+      })();
+      
+      // Stream text output
+      for await (const textPart of result.textStream) {
+        process.stdout.write(textPart);
+        accumulatedText += textPart;
+      }
+      console.log("\n");
+
+      // Wait for stream processing to complete
+      await streamPromise;
+
+      // Get final result for tool calls/results summary
+      const finalResult = await result;
+      const finalToolCalls = await finalResult.toolCalls;
+      const finalToolResults = await finalResult.toolResults;
+
+      if (finalToolCalls && finalToolCalls.length > 0) {
         console.log("\n" + "=".repeat(70));
-        console.log(`🔧 Tool Calls (${result.toolCalls.length}):`);
+        console.log(`🔧 Tool Calls Summary (${finalToolCalls.length}):`);
         console.log("=".repeat(70));
-      for (const call of result.toolCalls) {
+        for (const call of finalToolCalls) {
           const argsPreview = JSON.stringify(call.args).slice(0, 150);
           console.log(`\n  ${call.toolName}:`);
           console.log(`    Args: ${argsPreview}${argsPreview.length >= 150 ? '...' : ''}`);
         }
       }
 
-    if (result.toolResults && result.toolResults.length > 0) {
+      if (finalToolResults && Array.isArray(finalToolResults) && finalToolResults.length > 0) {
         console.log("\n" + "=".repeat(70));
-        console.log(`📋 Tool Results (${result.toolResults.length}):`);
+        console.log(`📋 Tool Results Summary (${finalToolResults.length}):`);
         console.log("=".repeat(70));
-      for (const res of result.toolResults as Array<{ toolName: string; result: unknown }>) {
-        const fullResult = typeof res.result === 'string' 
+        for (const res of finalToolResults as Array<{ toolName: string; toolCallId?: string; result: unknown }>) {
+          // Calculate duration if we tracked this tool call
+          let duration = 0;
+          if (res.toolCallId) {
+            const toolCallInfo = toolCalls.get(res.toolCallId);
+            if (toolCallInfo) {
+              // Approximate duration (we don't have exact end time)
+              duration = Date.now() - toolCallInfo.startTime;
+            }
+          }
+          
+          console.log(`\n✅ Tool result: ${res.toolName}${duration > 0 ? ` (${duration}ms)` : ''}`);
+          const fullResult = typeof res.result === 'string' 
             ? res.result
             : JSON.stringify(res.result, null, 2);
-        const preview = fullResult.length > 500 
-            ? fullResult.slice(0, 500) + '\n    ... (truncated, see full output above)'
+          const preview = fullResult.length > 500 
+            ? fullResult.slice(0, 500) + '\n    ... (truncated)'
             : fullResult;
-          console.log(`\n  [${res.toolName}]:`);
-          console.log(`    ${preview}`);
+          console.log(`   Result: ${preview}`);
           
           // Special handling for run_skill_script to verify WASM usage
           if (res.toolName === 'run_skill_script') {
             try {
               const parsed = typeof res.result === 'string' ? JSON.parse(res.result) : res.result;
-              if (parsed.output) {
+              if (parsed && typeof parsed === 'object' && parsed !== null && 'output' in parsed) {
                 const output = typeof parsed.output === 'string' ? JSON.parse(parsed.output) : parsed.output;
-                if (output.files) {
-                  console.log(`\n    ✅ WASM module was used! Returned ${Object.keys(output.files).length} files.`);
+                if (output && typeof output === 'object' && output !== null && 'files' in output) {
+                  const files = output.files;
+                  if (files && typeof files === 'object' && files !== null && !Array.isArray(files)) {
+                    console.log(`\n    ✅ WASM module was used! Returned ${Object.keys(files).length} files.`);
+                  } else {
+                    console.log(`\n    ⚠️  WASM output contains 'files' but it's not a valid object - may not have used WASM module correctly.`);
+                  }
                 } else {
                   console.log(`\n    ⚠️  WASM output doesn't contain 'files' object - may not have used WASM module correctly.`);
                 }
@@ -175,6 +233,7 @@ async function main() {
 
       console.log("\n" + "=".repeat(70));
       console.log("✅ Agent execution completed successfully");
+      console.log(`📊 Total steps: ${stepCount}`);
       console.log("=".repeat(70) + "\n");
       
       // Success - break out of retry loop
