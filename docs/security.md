@@ -6,16 +6,22 @@ This document describes the security model, sandboxing mechanisms, and permissio
 
 OpenSkills Runtime implements a **defense-in-depth** security model with multiple layers:
 
-1. **WASM Sandbox** - Capability-based isolation for WASM modules (WASI 0.3)
-2. **Native Script Sandbox** - OS-level sandboxing (Seatbelt on macOS) for Python/Shell scripts
+1. **Native Script Sandbox** (Primary) - OS-level sandboxing (Seatbelt on macOS) for Python/Shell scripts - production-ready
+2. **WASM Sandbox** (Experimental) - Capability-based isolation for WASM modules (WASI 0.3) - available for specific use cases
 3. **Permission Enforcement** - Tool-based access control via `allowed-tools` and risky tool detection
 4. **Context Isolation** - Forked contexts prevent skill output pollution
 
+**Note**: Native scripts via seatbelt are the primary and recommended execution method. WASM sandboxing is experimental.
+
 ---
 
-## WASM Sandbox (WASI 0.3)
+## WASM Sandbox (WASI 0.3) - Experimental
 
-WASM modules execute in a capability-based sandbox using WASI 0.3 (WASIp3) with the component model.
+**Status**: Experimental feature. Native scripts are the primary execution method.
+
+WASM modules execute in a capability-based sandbox using WASI 0.3 (WASIp3) with the component model. This is available for specific use cases requiring determinism, but is not suitable for full Python ecosystem or native libraries.
+
+See [README.md](../README.md#wasm-support-long-term-vision) for detailed discussion of WASM's role and limitations.
 
 ### Filesystem Access
 
@@ -65,9 +71,11 @@ WASM modules execute in a capability-based sandbox using WASI 0.3 (WASIp3) with 
 
 ---
 
-## Native Script Sandbox (macOS Seatbelt)
+## Native Script Sandbox (macOS Seatbelt) - Primary
 
-Native Python and Shell scripts execute under macOS Seatbelt sandbox profiles following Claude Code's security model.
+**Status**: Production-ready, primary execution method.
+
+Native Python and Shell scripts execute under macOS Seatbelt sandbox profiles following Claude Code's security model. This is the recommended approach for most skills, providing full access to the Python ecosystem and native tools.
 
 ### Security Model
 
@@ -228,7 +236,7 @@ Skills with `context: fork` execute in isolated contexts:
 - Falls back to stdout if no explicit results recorded
 
 **Use Case:**
-- Instruction-only skills (no WASM/native script)
+- Instruction-only skills (no WASM module or native script)
 - Agent executes tools and records outputs
 - Final summary returned to parent agent
 
@@ -274,9 +282,10 @@ Audit records are sent to the configured audit sink (default: no-op sink).
 
 1. **Minimize `allowed-tools`** - Only request tools you actually need
 2. **Avoid risky tools** - Prefer `Read` over `Bash` when possible
-3. **Specify filesystem paths** - Use `wasm.filesystem.read/write` for minimal access
-4. **Restrict network** - Use `wasm.network.allow` with specific hosts, not `*`
-5. **Use `context: fork`** - For instruction-only skills to prevent context pollution
+3. **Use native scripts** - Recommended for most skills; full Python ecosystem access
+4. **Specify filesystem paths** - For WASM (experimental): use `wasm.filesystem.read/write` for minimal access
+5. **Restrict network** - For WASM (experimental): use `wasm.network.allow` with specific hosts, not `*`
+6. **Use `context: fork`** - For instruction-only skills to prevent context pollution
 
 ### For Runtime Users
 

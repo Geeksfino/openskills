@@ -260,13 +260,15 @@ Skip this step only if the skill being developed already exists, and iteration o
 
 When creating a new skill from scratch, execute the `init_skill` function via the WASM module. The function conveniently generates a new template skill directory that automatically includes everything a skill requires, making the skill creation process much more efficient and reliable.
 
-**IMPORTANT: You MUST use `run_skill_script` to execute the WASM module - do NOT manually create files.**
+**CRITICAL: You MUST use `run_skill_script` to execute the WASM module - do NOT manually create skill files or recreate the template structure. The WASM module provides the correct template structure with proper placeholders and organization.**
 
 Usage:
 
 ```
 run_skill_script("skill-creator", "wasm/skill.wasm", null, '{"action": "init_skill", "skill_name": "my-new-skill", "path": "skills/public"}')
 ```
+
+The WASM module will return JSON with file contents. You should then use `write_file()` to create the files as specified in the response. Do NOT manually create SKILL.md or other files - always use the WASM module output.
 
 The tool call returns JSON output with file contents that are automatically written to the workspace. Parse the output to see what was created.
 

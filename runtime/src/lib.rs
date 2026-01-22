@@ -560,9 +560,11 @@ When a user's request matches a skill's capabilities:
 3. **Follow the instructions exactly**: Execute the steps as described in SKILL.md
 4. **Use helper files if referenced**: Call `read_skill_file(skill_id, path)` to read referenced docs (e.g., `docx-js.md`)
 5. **Run scripts or WASM modules as instructed**: 
+   - **CRITICAL**: If a skill provides a WASM module or script to perform a task, you MUST use `run_skill_script()` to execute it. Do NOT manually recreate the functionality or create files manually.
    - For scripts/WASM in the skill directory: Call `run_skill_script(skill_id, path, args?, input?)`
      - The sandbox type is auto-detected from file extension: `.wasm` → WASM sandbox, `.py/.sh` → native sandbox
      - For WASM modules, pass JSON input: `run_skill_script("skill-id", "wasm/skill.wasm", null, '{"action": "..."}')`
+     - Example: If skill-creator has `wasm/skill.wasm` for creating skills, use: `run_skill_script("skill-creator", "wasm/skill.wasm", null, '{"action": "init_skill", "skill_name": "my-skill", "path": "skills/public"}')`
    - For scripts you generate in the workspace: Use `run_sandboxed_bash()` to execute them
 
 ## Important

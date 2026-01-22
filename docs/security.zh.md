@@ -6,16 +6,22 @@
 
 OpenSkills Runtime 实现了一个**纵深防御**安全模型，包括多个层次：
 
-1. **WASM 沙箱** - 针对 WASM 模块的基于能力的隔离（WASI 0.3）
-2. **本机脚本沙箱** - OS 级别的沙箱（macOS 上的 Seatbelt）用于 Python/Shell 脚本
+1. **本机脚本沙箱**（主要方式）- OS 级别的沙箱（macOS 上的 Seatbelt）用于 Python/Shell 脚本 - 生产就绪
+2. **WASM 沙箱**（实验性）- 针对 WASM 模块的基于能力的隔离（WASI 0.3）- 用于特定用例
 3. **权限执行** - 通过 `allowed-tools` 和风险工具检测进行的基于工具的访问控制
 4. **上下文隔离** - Forked 上下文防止技能输出污染
 
+**注意**：通过 seatbelt 的原生脚本是主要和推荐的执行方法。WASM 沙箱是实验性的。
+
 ---
 
-## WASM 沙箱（WASI 0.3）
+## WASM 沙箱（WASI 0.3）- 实验性
 
-WASM 模块在基于能力的沙箱中执行，使用 WASI 0.3（WASIp3）和组件模型。
+**状态**：实验性功能。原生脚本是主要的执行方法。
+
+WASM 模块在基于能力的沙箱中执行，使用 WASI 0.3（WASIp3）和组件模型。这可用于需要确定性的特定用例，但不适合完整的 Python 生态系统或原生库。
+
+查看 [README.md](../README.md#wasm-support-long-term-vision) 了解有关 WASM 角色和限制的详细讨论。
 
 ### 文件系统访问
 
@@ -65,9 +71,11 @@ WASM 模块在基于能力的沙箱中执行，使用 WASI 0.3（WASIp3）和组
 
 ---
 
-## 本机脚本沙箱（macOS Seatbelt）
+## 本机脚本沙箱（macOS Seatbelt）- 主要方式
 
-本机 Python 和 Shell 脚本在 macOS Seatbelt 沙箱配置文件下执行，遵循 Claude Code 的安全模型。
+**状态**：生产就绪，主要执行方法。
+
+本机 Python 和 Shell 脚本在 macOS Seatbelt 沙箱配置文件下执行，遵循 Claude Code 的安全模型。这是大多数技能的推荐方法，提供对完整 Python 生态系统和原生工具的访问。
 
 ### 安全模型
 
@@ -228,7 +236,7 @@ allowed-tools:
 - 如果未记录显式结果，则回退到 stdout
 
 **用例：**
-- 仅指令技能（无 WASM/本机脚本）
+- 仅指令技能（无 WASM 模块或本机脚本）
 - Agent 执行工具并记录输出
 - 最终摘要返回到父 agent
 
@@ -274,9 +282,10 @@ allowed-tools:
 
 1. **最小化 `allowed-tools`** - 仅请求你实际需要的工具
 2. **避免风险工具** - 如果可能，优先使用 `Read` 而非 `Bash`
-3. **指定文件系统路径** - 对最小访问使用 `wasm.filesystem.read/write`
-4. **限制网络** - 使用 `wasm.network.allow` 指定特定主机，而不是 `*`
-5. **使用 `context: fork`** - 对于仅指令技能以防止上下文污染
+3. **使用原生脚本** - 推荐用于大多数技能；完整 Python 生态系统访问
+4. **指定文件系统路径** - 对于 WASM（实验性）：使用 `wasm.filesystem.read/write` 进行最小访问
+5. **限制网络** - 对于 WASM（实验性）：使用 `wasm.network.allow` 指定特定主机，而不是 `*`
+6. **使用 `context: fork`** - 对于仅指令技能以防止上下文污染
 
 ### 对于 Runtime 用户
 

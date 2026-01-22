@@ -4,12 +4,14 @@ This document describes the internal architecture of OpenSkills Runtime.
 
 ## Overview
 
-OpenSkills is built with Rust as the core runtime, providing a WASM-based sandbox and a native seatbelt sandbox on macOS for executing Claude Skills. The architecture emphasizes:
+OpenSkills is built with Rust as the core runtime, providing a native seatbelt sandbox on macOS (primary) and an experimental WASM-based sandbox for executing Claude Skills. The architecture emphasizes:
 
-- **Security**: WASM sandboxing with capability-based permissions
+- **Security**: OS-level sandboxing (seatbelt) as primary, experimental WASM sandboxing with capability-based permissions
 - **Performance**: Efficient skill discovery and execution
 - **Compatibility**: 100% Claude Skills format compatibility
 - **Extensibility**: Language bindings for multiple ecosystems
+
+**Note**: WASM sandboxing is experimental and not the primary execution method. Most skills use native Python and shell scripts via seatbelt sandboxing.
 
 ## Core Components
 
@@ -39,7 +41,9 @@ Responsible for:
 - `ExecutionKind`: Execution type (Wasm/Http/Local)
 - `Permissions`: Permission configuration
 
-### 3. WASM Runner (`wasm_runner.rs`)
+### 3. WASM Runner (`wasm_runner.rs`) - Experimental
+
+**Status**: Experimental feature, not the primary execution method.
 
 Responsible for:
 - Loading WASM modules via Wasmtime
@@ -54,13 +58,19 @@ Responsible for:
 - Network allowlist enforcement
 - Deterministic execution support
 
-### 4. Native Runner (`native_runner.rs`)
+**Use Cases**: Deterministic logic, policy enforcement, orchestration. Not suitable for full Python ecosystem or native libraries.
+
+### 4. Native Runner (`native_runner.rs`) - Primary
+
+**Status**: Primary execution method, production-ready.
 
 Responsible for:
-- Executing native Python and shell scripts (macOS only)
+- Executing native Python and shell scripts (macOS only, Linux planned)
 - Building seatbelt profiles from permissions
 - Capturing stdout/stderr
 - Timeout enforcement
+
+**Use Cases**: Full Python ecosystem, native libraries, ML/quant code, legacy skills. This is the recommended approach for most skills.
 
 ### 5. Permission System (`permissions.rs`)
 
@@ -119,17 +129,17 @@ Responsible for:
    └─> Auto-detect execution mode
 
 2. Executor.execute()
-   ├─> For WASM:
-   │   ├─> Load WASM module
-   │   ├─> Configure WASI context
-   │   ├─> Set up permissions
-   │   ├─> Execute with timeout
+   ├─> For Native (macOS, primary):
+   │   ├─> Build seatbelt profile
+   │   ├─> Execute Python/shell script
+   │   ├─> Enforce filesystem/network permissions
    │   └─> Capture output
    │
-   └─> For Native (macOS):
-       ├─> Build seatbelt profile
-       ├─> Execute Python/shell script
-       ├─> Enforce filesystem/network permissions
+   └─> For WASM (experimental):
+       ├─> Load WASM module
+       ├─> Configure WASI context
+       ├─> Set up permissions
+       ├─> Execute with timeout
        └─> Capture output
 
 3. Post-execution
@@ -159,13 +169,25 @@ The runtime implements three-tier loading:
 
 ## Security Model
 
-### WASM Sandbox
+### Native Seatbelt Sandbox (macOS) - Primary
+
+**Status**: Production-ready, primary execution method.
+
+- **Isolation**: Script execution is restricted by seatbelt profile
+- **Filesystem**: Subpath read/write allowlists from `allowed-tools`
+- **Network**: Allowed only when `WebSearch`/`Fetch` are enabled
+- **Timeouts**: Epoch interruption for timeout enforcement
+- **Memory**: Configurable memory limits
+
+### WASM Sandbox - Experimental
+
+**Status**: Experimental feature, not the primary execution method.
 
 - **Isolation**: Each execution runs in isolated WASM instance
 - **Capabilities**: Filesystem access via WASI preopens
 - **Network**: Domain allowlist enforcement
 
-### Native Seatbelt Sandbox (macOS)
+**Limitations**: Cannot access full Python ecosystem, native libraries, or OS-native behaviors. Best for deterministic logic and policy enforcement.
 
 - **Isolation**: Script execution is restricted by seatbelt profile
 - **Filesystem**: Subpath read/write allowlists from `allowed-tools`
@@ -249,11 +271,14 @@ Bindings follow a common pattern:
 3. Handle errors appropriately
 4. Provide idiomatic API for target language
 
-## WASI Execution Model
+## WASI Execution Model (Experimental)
 
-OpenSkills executes **only WASI 0.3 (WASIp3) components** via Wasmtime's component model.
+**Status**: Experimental feature. Native scripts are the primary execution method.
+
+OpenSkills executes **only WASI 0.3 (WASIp3) components** via Wasmtime's component model when WASM modules are present.
 
 - Legacy "core module" WASM artifacts are **rejected**.
+- WASM execution is optional - most skills use native Python/shell scripts.
 
 ## Future Improvements
 

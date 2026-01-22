@@ -4,7 +4,9 @@ This guide is for developers who want to use OpenSkills Runtime in their applica
 
 ## Overview
 
-OpenSkills Runtime is a Claude Skills-compatible runtime that executes skills in a WASM-based sandbox. It provides a Rust core with TypeScript and Python bindings.
+OpenSkills Runtime is a Claude Skills-compatible runtime that executes skills primarily via native Python and shell scripts with OS-level sandboxing (seatbelt on macOS). Experimental WASM-based sandboxing is also available for specific use cases. It provides a Rust core with TypeScript and Python bindings.
+
+**Note**: WASM sandboxing is experimental. Most skills use native scripts, which is the recommended approach.
 
 ## Architecture
 
@@ -22,7 +24,7 @@ OpenSkills Runtime is a Claude Skills-compatible runtime that executes skills in
     └──────┬──────┘
            │
     ┌──────▼──────┐
-    │  Wasmtime   │  (WASM execution)
+    │ Execution   │  (Native scripts + experimental WASM)
     └─────────────┘
 ```
 
@@ -157,7 +159,7 @@ const tools = createSkillTools(runtime, {
 // - activate_skill: Load full SKILL.md instructions
 // - read_skill_file: Read helper files from skills
 // - list_skill_files: List files in skill directories
-// - run_skill_script: Execute sandboxed Python/shell scripts
+// - run_skill_script: Execute sandboxed scripts or WASM modules
 // - run_sandboxed_bash: Run sandboxed bash commands
 // - write_file: Write to workspace (with path validation)
 // - read_file: Read from workspace (with path validation)
@@ -411,7 +413,7 @@ let summary = fork.summarize();
 
 #### Instruction-Only Skills with `context: fork`
 
-When a skill is primarily instructional (no WASM/native script), the agent must
+When a skill is primarily instructional (no WASM module or native script), the agent must
 execute tool calls and record their outputs in a forked context. Use a skill
 session to capture tool calls and return summary-only results:
 
@@ -595,7 +597,7 @@ All operations return `Result<T, OpenSkillError>`. Error types:
 - `PermissionDenied`: Operation not allowed (user denied permission or strict mode)
 - `Timeout`: Execution exceeded time limit
 - `ExecutionFailure`: Skill execution failed
-- `WasmError`: WASM module loading or execution error
+- `WasmError`: WASM module loading or execution error (experimental feature)
 - `ValidationError`: Skill format validation failed
 
 ## Building Skills

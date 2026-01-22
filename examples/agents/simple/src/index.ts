@@ -145,11 +145,31 @@ async function main() {
         console.log(`📋 Tool Results (${result.toolResults.length}):`);
         console.log("=".repeat(70));
       for (const res of result.toolResults as Array<{ toolName: string; result: unknown }>) {
-        const preview = typeof res.result === 'string' 
-            ? res.result.slice(0, 200) + (res.result.length > 200 ? '...' : '')
-            : JSON.stringify(res.result).slice(0, 200);
+        const fullResult = typeof res.result === 'string' 
+            ? res.result
+            : JSON.stringify(res.result, null, 2);
+        const preview = fullResult.length > 500 
+            ? fullResult.slice(0, 500) + '\n    ... (truncated, see full output above)'
+            : fullResult;
           console.log(`\n  [${res.toolName}]:`);
           console.log(`    ${preview}`);
+          
+          // Special handling for run_skill_script to verify WASM usage
+          if (res.toolName === 'run_skill_script') {
+            try {
+              const parsed = typeof res.result === 'string' ? JSON.parse(res.result) : res.result;
+              if (parsed.output) {
+                const output = typeof parsed.output === 'string' ? JSON.parse(parsed.output) : parsed.output;
+                if (output.files) {
+                  console.log(`\n    ✅ WASM module was used! Returned ${Object.keys(output.files).length} files.`);
+                } else {
+                  console.log(`\n    ⚠️  WASM output doesn't contain 'files' object - may not have used WASM module correctly.`);
+                }
+              }
+            } catch (e) {
+              // Not JSON, ignore
+            }
+          }
         }
       }
 

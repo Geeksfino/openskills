@@ -213,6 +213,12 @@ def get_agent_system_prompt(runtime) -> str:
     Returns:
         A complete system prompt for skill-based agents
     """
+    if hasattr(runtime, "get_agent_system_prompt"):
+        try:
+            return runtime.get_agent_system_prompt()
+        except Exception:
+            pass
+
     skills = runtime.list_skills()
     
     if not skills:
@@ -236,7 +242,10 @@ When a user's request matches a skill's capabilities:
 2. **Read the instructions carefully**: The SKILL.md contains everything you need to know
 3. **Follow the instructions exactly**: Execute the steps as described in SKILL.md
 4. **Use helper files if referenced**: Call `read_skill_file(skill_id, path)` to read referenced docs
-5. **Run scripts as instructed**: Call `run_skill_script(skill_id, script_path, args)` when needed
+5. **Run scripts or WASM modules as instructed**:
+   - **CRITICAL**: If a skill provides a WASM module or script to perform a task, you MUST use `run_skill_script()` to execute it. Do NOT manually recreate the functionality or create files manually.
+   - For scripts/WASM in the skill directory: Call `run_skill_script(skill_id, path, args?, input?)`
+   - For WASM modules, pass JSON input: `run_skill_script("skill-id", "wasm/skill.wasm", None, {"action": "..."})`
 
 ## Important
 
@@ -305,7 +314,8 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
     class RunSkillScriptInput(BaseModel):
         skill_id: str = Field(description="The skill ID")
         script_path: str = Field(description="Path to the script relative to skill root")
-        args: List[str] = Field(default=[], description="Arguments to pass to the script")
+        args: List[str] = Field(default=[], description="Arguments to pass to native scripts (ignored for WASM)")
+        input: Optional[Any] = Field(default=None, description="JSON input to pass to the script or WASM module")
         timeout_ms: int = Field(default=30000, description="Timeout in milliseconds")
     
     class WriteFileInput(BaseModel):
@@ -355,12 +365,19 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
         except Exception as e:
             return f"Error listing files in skill {skill_id}: {e}"
     
-    def run_skill_script(skill_id: str, script_path: str, args: List[str] = None, timeout_ms: int = 30000) -> str:
+    def run_skill_script(
+        skill_id: str,
+        script_path: str,
+        args: Optional[List[str]] = None,
+        input: Optional[Any] = None,
+        timeout_ms: int = 30000,
+    ) -> str:
         try:
             result = runtime.run_skill_target(skill_id, {
-                "target_type": "script",
+                "target_type": "auto",
                 "path": script_path,
                 "args": args or [],
+                "input": input,
                 "timeout_ms": timeout_ms,
             })
             return json.dumps({
@@ -451,7 +468,7 @@ def create_langchain_tools(runtime, workspace_dir: Optional[str] = None) -> List
         StructuredTool.from_function(
             func=run_skill_script,
             name="run_skill_script",
-            description="Run a Python or Shell script from a skill directory in a sandbox.",
+            description="Run a script or WASM module from a skill directory in a sandbox.",
             args_schema=RunSkillScriptInput,
         ),
         StructuredTool.from_function(
@@ -518,6 +535,21 @@ def create_simple_tools(runtime, workspace_dir: Optional[str] = None) -> Dict[st
     def list_skill_files(skill_id: str, subdir: Optional[str] = None, recursive: bool = False) -> List[str]:
         return runtime.list_skill_files(skill_id, subdir, recursive)
     
+    def run_skill_script(
+        skill_id: str,
+        script_path: str,
+        args: Optional[List[str]] = None,
+        input: Optional[Any] = None,
+        timeout_ms: int = 30000,
+    ) -> Dict:
+        return runtime.run_skill_target(skill_id, {
+            "target_type": "auto",
+            "path": script_path,
+            "args": args or [],
+            "input": input,
+            "timeout_ms": timeout_ms,
+        })
+
     def write_file(path: str, content: str) -> str:
         # Security: ensure path is within workspace (prevents directory traversal)
         if not is_path_within_workspace(workspace, path):
@@ -557,6 +589,7 @@ def create_simple_tools(runtime, workspace_dir: Optional[str] = None) -> Dict[st
         "activate_skill": activate_skill,
         "read_skill_file": read_skill_file,
         "list_skill_files": list_skill_files,
+        "run_skill_script": run_skill_script,
         "write_file": write_file,
         "read_file": read_file,
         "list_workspace_files": list_workspace_files,

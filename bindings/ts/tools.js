@@ -526,7 +526,10 @@ When a user's request matches a skill's capabilities:
 2. **Read the instructions carefully**: The SKILL.md contains everything you need to know
 3. **Follow the instructions exactly**: Execute the steps as described in SKILL.md
 4. **Use helper files if referenced**: Call \`read_skill_file(skill_id, path)\` to read referenced docs
-5. **Run scripts as instructed**: Call \`run_skill_script(skill_id, script_path, args)\` when needed
+5. **Run scripts or WASM modules as instructed**:
+   - **CRITICAL**: If a skill provides a WASM module or script to perform a task, you MUST use \`run_skill_script()\` to execute it. Do NOT manually recreate the functionality or create files manually.
+   - For scripts/WASM in the skill directory: Call \`run_skill_script(skill_id, path, args?, input?)\`
+   - For WASM modules, pass JSON input: \`run_skill_script("skill-id", "wasm/skill.wasm", null, '{"action": "..."}')\`
 
 ## Important
 

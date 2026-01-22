@@ -98,6 +98,14 @@ tools = create_simple_tools(runtime, workspace_dir='./output')
 skills = tools['list_skills']()
 loaded = tools['activate_skill']('my-skill')
 tools['write_file']('output.txt', 'Hello, World!')
+
+# Run a WASM module from a skill (auto-detected by file extension)
+result = tools['run_skill_script'](
+    'skill-creator',
+    'wasm/skill.wasm',
+    input={'action': 'init_skill', 'skill_name': 'my-skill', 'path': 'skills/public'}
+)
+print(result['output'])
 ```
 
 **Available Tools:**
@@ -105,7 +113,7 @@ tools['write_file']('output.txt', 'Hello, World!')
 - `activate_skill` - Load full SKILL.md instructions
 - `read_skill_file` - Read helper files from skills
 - `list_skill_files` - List files in skill directories
-- `run_skill_script` - Execute sandboxed Python/shell scripts
+- `run_skill_script` - Execute sandboxed scripts or WASM modules
 - `write_file` - Write to workspace (with security validation)
 - `read_file` - Read from workspace (with security validation)
 - `list_workspace_files` - List files in workspace

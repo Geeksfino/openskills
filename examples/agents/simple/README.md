@@ -98,14 +98,14 @@ The `createSkillTools()` function provides these tools:
 | `activate_skill` | Load full SKILL.md instructions |
 | `read_skill_file` | Read helper files from a skill |
 | `list_skill_files` | List files in a skill directory |
-| `run_skill_script` | Run sandboxed Python/shell scripts |
+| `run_skill_script` | Run sandboxed scripts or WASM modules |
 | `run_sandboxed_bash` | Run sandboxed bash commands |
 | `write_file` | Write to workspace directory |
 | `read_file` | Read from workspace directory |
 
 ### Notes
 
-- Skills are loaded from `examples/claude-official-skills/skills`
+- Skills are loaded from `examples/skills`
 - The agent learns everything from SKILL.md - no prior knowledge needed
 - Output files go to the `output/` workspace directory
 - Uses DeepSeek API (OpenAI-compatible) by default

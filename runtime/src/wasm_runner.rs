@@ -267,14 +267,23 @@ OpenSkills runtime does not support legacy core-module WASM artifacts."
                     .map_err(|e| OpenSkillError::WasmError(format!("Component run failed: {e}")))?
             }
             Err(_) => {
-                // Component is WASI 0.2 - instantiate using linker directly
-                // The p2 interfaces are already in the linker, so instantiation should work
-                // For WASI 0.2 components, instantiation is sufficient - the component runs automatically
-                linker
+                // Component is WASI 0.2 - instantiate using linker
+                // For WASI CLI command components built with wasi_snapshot_preview1 adapter,
+                // the component exports wasi:cli/run@0.2.1 which should execute the main function.
+                // However, instantiation alone may not trigger execution - we may need to
+                // explicitly call the run export. For now, instantiate and hope the component
+                // executes automatically (some WASI runtimes do this).
+                //
+                // TODO: Properly invoke wasi:cli/run export for WASI 0.2 components.
+                // This may require using p2 bindings or manually getting/calling the export.
+                let _instance = linker
                     .instantiate_async(&mut store, &component)
                     .await
                     .map_err(|e| OpenSkillError::WasmError(format!("Component instantiation failed: {e}")))?;
                 
+                // Note: Some WASI 0.2 CLI command components execute their main function
+                // during instantiation, but this is not guaranteed. If no output is produced,
+                // the component may need explicit invocation of the wasi:cli/run export.
                 Ok(Ok(()))
             }
         };

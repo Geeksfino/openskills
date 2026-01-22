@@ -4,7 +4,9 @@
 
 ## 概述
 
-OpenSkills 运行时是一个与 Claude Skills 兼容的运行时，在基于 WASM 的沙箱中执行技能。它提供了一个 Rust 核心以及 TypeScript 和 Python 绑定。
+OpenSkills 运行时是一个与 Claude Skills 兼容的运行时，主要通过原生 Python 和 Shell 脚本与操作系统级沙箱（macOS 上的 seatbelt）执行技能。实验性的基于 WASM 的沙箱也可用于特定用例。它提供了一个 Rust 核心以及 TypeScript 和 Python 绑定。
+
+**注意**：WASM 沙箱是实验性的。大多数技能使用原生脚本，这是推荐的方法。
 
 ## 架构
 
@@ -22,7 +24,7 @@ OpenSkills 运行时是一个与 Claude Skills 兼容的运行时，在基于 WA
     └──────┬──────┘
            │
     ┌──────▼──────┐
-    │  Wasmtime   │  (WASM 执行)
+    │   执行层    │  (原生脚本 + 实验性 WASM)
     └─────────────┘
 ```
 
@@ -157,7 +159,7 @@ const tools = createSkillTools(runtime, {
 // - activate_skill: 加载完整的 SKILL.md 指令
 // - read_skill_file: 从技能读取辅助文件
 // - list_skill_files: 列出技能目录中的文件
-// - run_skill_script: 执行沙箱化的 Python/shell 脚本
+// - run_skill_script: 执行沙箱化脚本或 WASM 模块
 // - run_sandboxed_bash: 运行沙箱化的 bash 命令
 // - write_file: 写入工作区（带路径验证）
 // - read_file: 从工作区读取（带路径验证）
@@ -409,7 +411,7 @@ let summary = fork.summarize();
 
 #### 带有 `context: fork` 的纯指令技能
 
-当技能主要是指令性的（没有 WASM/原生脚本）时，智能体必须在分叉上下文中执行工具调用并记录它们的输出。使用技能会话来捕获工具调用并返回仅摘要结果：
+当技能主要是指令性的（没有 WASM 模块或原生脚本）时，智能体必须在分叉上下文中执行工具调用并记录它们的输出。使用技能会话来捕获工具调用并返回仅摘要结果：
 
 ```rust
 use openskills_runtime::{OpenSkillRuntime, ExecutionContext};
@@ -591,7 +593,7 @@ pub struct ExecutionResult {
 - `PermissionDenied`：操作不被允许（用户拒绝权限或严格模式）
 - `Timeout`：执行超过时间限制
 - `ExecutionFailure`：技能执行失败
-- `WasmError`：WASM 模块加载或执行错误
+- `WasmError`：WASM 模块加载或执行错误（实验性功能）
 - `ValidationError`：技能格式验证失败
 
 ## 构建技能

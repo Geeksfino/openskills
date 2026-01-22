@@ -85,7 +85,7 @@ const result = await generateText({
 - `activate_skill` - Load full SKILL.md instructions
 - `read_skill_file` - Read helper files from skills
 - `list_skill_files` - List files in skill directories
-- `run_skill_script` - Execute sandboxed Python/shell scripts
+- `run_skill_script` - Execute sandboxed scripts or WASM modules
 - `run_sandboxed_bash` - Run sandboxed bash commands
 - `write_file` - Write to workspace (with security validation)
 - `read_file` - Read from workspace (with security validation)

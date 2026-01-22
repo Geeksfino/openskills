@@ -2,28 +2,32 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A **Claude Skills compatible runtime** with **dual sandboxing**: WASM-based sandboxing for cross-platform security, plus **macOS seatbelt** for native Python and shell scripts. OpenSkills implements the [Claude Code Agent Skills specification](https://code.claude.com/docs/en/skills), providing a secure, flexible runtime for executing skills in **any agent framework**.
+A **Claude Skills compatible runtime** with **dual sandboxing**: **macOS seatbelt** for native Python and shell scripts (primary), plus **experimental WASM-based sandboxing** for cross-platform security. OpenSkills implements the [Claude Code Agent Skills specification](https://code.claude.com/docs/en/skills), providing a secure, flexible runtime for executing skills in **any agent framework**.
 
 ## Philosophy
 
 OpenSkills is **syntactically 100% compatible** with Claude Skills, meaning any skill that follows the Claude Skills format (SKILL.md with YAML frontmatter) will work with OpenSkills. What makes OpenSkills unique is its **dual sandboxing approach**:
 
-- **WASM/WASI sandboxing** for cross-platform security and consistency
-- **macOS seatbelt sandboxing** for native Python and shell scripts
+- **macOS seatbelt sandboxing** (primary) for native Python and shell scripts - production-ready, fully supported
+- **WASM/WASI sandboxing** (experimental) for cross-platform security and consistency - available for early adopters
 
-This combination provides the best of both worlds: the portability and security of WASM, plus the flexibility of native execution on macOS. OpenSkills can be integrated into **any agent framework** (LangChain, Vercel AI SDK, custom frameworks) to give agents access to Claude-compatible skills.
+**Primary execution model**: Native Python and shell scripts via macOS seatbelt (with Linux seccomp support planned). This is the recommended, production-ready approach that works with the full Python ecosystem and native tools.
+
+**Experimental WASM support**: WASM sandboxing is available for developers who want to explore cross-platform deterministic execution, but it is not required for using OpenSkills. Most skills work perfectly fine with native scripts.
+
+OpenSkills can be integrated into **any agent framework** (LangChain, Vercel AI SDK, custom frameworks) to give agents access to Claude-compatible skills.
 
 ### Core Design Principles
 
 1. **100% Syntactic Compatibility**: OpenSkills reads and executes skills using the exact same SKILL.md format as Claude Skills. Skills can be shared between Claude Code and OpenSkills without modification.
 
-2. **Dual Sandbox Architecture**: OpenSkills uniquely combines **WASM/WASI 0.3** (component model) with **macOS seatbelt** sandboxing:
-   - **WASM/WASI**: Cross-platform security, capability-based permissions, memory safety, deterministic execution
-   - **macOS Seatbelt**: Native Python and shell script execution with OS-level sandboxing
+2. **Dual Sandbox Architecture**: OpenSkills combines **macOS seatbelt** (primary) with **experimental WASM/WASI 0.3** sandboxing:
+   - **macOS Seatbelt** (primary): Native Python and shell script execution with OS-level sandboxing - production-ready, full ecosystem support
+   - **WASM/WASI** (experimental): Cross-platform security, capability-based permissions, memory safety, deterministic execution - available for early adopters
    - **Automatic Detection**: Runtime automatically chooses the appropriate sandbox based on skill type
-   - **Best of Both Worlds**: WASM for portability and security, seatbelt for native flexibility
+   - **Native-first**: Most skills use native scripts; WASM is optional for specific use cases
 
-3. **JavaScript/TypeScript First**: OpenSkills is optimized for JavaScript/TypeScript-based skills, which can be compiled to WASM components using `javy-codegen` (a Rust library that uses QuickJS). This allows skill writers to use familiar languages and ecosystems, with compilation happening programmatically via the library rather than requiring external CLI tools.
+3. **Native Scripts First**: OpenSkills prioritizes native Python and shell script execution, which provides full access to the Python ecosystem and native tools. WASM compilation is available as an experimental option for specific use cases requiring cross-platform determinism.
 
 ### Target Use Case
 
@@ -31,61 +35,51 @@ OpenSkills is designed for **any agent framework** that needs Claude-compatible 
 
 - **Agent Framework Integration**: Works with LangChain, Vercel AI SDK, custom frameworks, or any system that needs tool-like capabilities
 - **Enterprise Agents**: Internal skills developed by trusted developers
-- **Cross-Platform**: WASM execution works identically on macOS, Linux, Windows
-- **Native Flexibility**: macOS seatbelt allows native Python and shell scripts when needed
+- **Native Scripts**: Primary execution model using Python and shell scripts with OS-level sandboxing
+- **Cross-Platform Native**: macOS seatbelt (production), Linux seccomp (planned)
+- **Experimental WASM**: Optional WASM execution for specific use cases requiring determinism
 - **Security & Auditability**: Both sandboxing methods provide strong isolation and audit logging
 
-The dual sandbox approach means you can use WASM for cross-platform skills, or leverage native Python/Shell on macOS when you need access to native libraries or tools.
+**Recommended approach**: Use native Python and shell scripts for most skills. WASM is available for experimental use cases but is not required.
 
 ## Limitations
 
-OpenSkills' WASM-first approach has some limitations compared to native execution:
-
-### Not Supported (Currently)
+### Current Limitations
 
 1. **Native Scripts on Non-macOS**:
    - Native Python and shell scripts are supported only on macOS (seatbelt)
    - Linux seccomp support is planned
 
-2. **Build Workflow Required (for WASM)**:
-   - JavaScript/TypeScript skills must be compiled to WASM components before execution
-   - Developers need to run `openskills build` to compile source to `wasm/skill.wasm`
-   - This adds a build step compared to "drop-in" native scripts
+2. **WASM Support (Experimental)**:
+   - WASM sandboxing is experimental and not the primary execution method
+   - Build workflow required: JavaScript/TypeScript skills must be compiled to WASM components before execution
+   - Limited native library support: Native Python packages, shell tools, etc. don't work in WASM
+   - WASI compatibility required: Code must use WASI APIs, not native OS APIs
 
-### Why These Limitations Exist
-
-WASM provides strong security and cross-platform consistency, but it requires:
-- **Compilation step**: Source code must be compiled to WASM
-- **WASI compatibility**: Code must use WASI APIs, not native OS APIs
-- **Limited native libraries**: Native Python packages, shell tools, etc. don't work directly
-
-These limitations are acceptable for enterprise use cases where:
-- Developers control the skill development process
-- Build workflows are standard practice
-- Security and cross-platform consistency outweigh convenience
+**Recommendation**: Use native Python and shell scripts for production skills. WASM is available for experimental use cases but is not required.
 
 ## Roadmap
 
-OpenSkills will evolve to address limitations while maintaining its WASM-first philosophy:
+OpenSkills will evolve to address limitations while maintaining its native-first approach:
 
-1. **More WASM-Ready Scripts**: We'll provide an expanding library of pre-built WASM components and templates for common tasks, reducing the need for custom compilation.
+1. **Linux Native Scripting**: Linux seccomp support is planned to complete cross-platform native sandboxing (macOS seatbelt is already production-ready).
 
-2. **Native Scripting Support**: Native Python and shell scripts are supported on macOS via seatbelt. Linux seccomp support is planned to complete cross-platform native sandboxing.
+2. **WASM Improvements** (experimental): Continued development of WASM support for specific use cases requiring determinism and cross-platform consistency.
 
-3. **Improved Tooling**: Better build tools and templates to make WASM compilation more transparent for developers.
+3. **Enhanced Tooling**: Better development tools and templates for both native scripts and WASM compilation.
 
 ## Features
 
 - ✅ **100% Claude Skills Compatible**: Full SKILL.md format support
-- 🔒 **Dual Sandbox Architecture**: WASM/WASI 0.3 + macOS seatbelt (unique in the ecosystem)
-- 🧰 **Native Script Support**: Execute Python and shell scripts on macOS via seatbelt
+- 🔒 **Dual Sandbox Architecture**: macOS seatbelt (primary) + experimental WASM/WASI 0.3
+- 🧰 **Native Script Support**: Execute Python and shell scripts on macOS via seatbelt (production-ready)
 - 🤖 **Any Agent Framework**: Integrate with LangChain, Vercel AI SDK, or custom frameworks
 - 🚀 **Pre-built Tools**: Ready-to-use tool definitions for TS/Python (~200 lines less code)
 - 📊 **Progressive Disclosure**: Efficient tiered loading (metadata → instructions → resources)
 - 🔌 **Multi-Language Bindings**: Rust core with TypeScript and Python bindings
-- 🛡️ **Capability-Based Security**: Fine-grained permissions via WASI and seatbelt profiles
-- 🏗️ **Build Tool**: `openskills build` for compiling TS/JS to WASM components
-- 🌐 **Cross-Platform**: WASM execution is identical on macOS, Linux, Windows
+- 🛡️ **Capability-Based Security**: Fine-grained permissions via seatbelt profiles (and WASI for experimental WASM)
+- 🏗️ **Build Tool**: `openskills build` for compiling TS/JS to WASM components (experimental)
+- 🌐 **Cross-Platform Native**: macOS seatbelt (production), Linux seccomp (planned)
 - 📁 **Workspace Management**: Built-in sandboxed workspace for file I/O operations
 
 ## Quick Start
@@ -340,20 +334,166 @@ OpenSkills is the **only runtime** that combines:
 4. **Agent Framework Agnostic**: Works with any agent framework (LangChain, Vercel AI SDK, custom)
 
 This dual approach means you get:
-- **Portability**: WASM skills run identically on macOS, Linux, Windows
-- **Flexibility**: Native Python/Shell scripts on macOS when you need native libraries
+- **Native Flexibility**: Full Python ecosystem and native tools via seatbelt (primary)
+- **Experimental WASM**: Cross-platform determinism for specific use cases (optional)
 - **Security**: Both sandboxing methods provide strong isolation
 - **Compatibility**: 100% compatible with Claude Skills specification
+
+## WASM Support: Long-Term Vision
+
+> **Status**: WASM sandboxing is **experimental** and not the primary execution method. Most skills work perfectly with native Python and shell scripts.
+
+### Why We Support WASM (Long-Term)
+
+While native scripts are our primary execution model, we're investing in WASM support for specific use cases where it provides unique value. Here's our perspective on WASM's role:
+
+#### What WASM is Good At (Today)
+
+✅ **Determinism**: Same input → same output, critical for audit, replay, and compliance  
+✅ **Fast Startup**: Millisecond-level startup times, great for frequently-invoked agent skills  
+✅ **Strong Isolation by Design**: No syscalls unless explicitly exposed, capability-based access via WASI  
+✅ **Portability**: Identical execution on macOS, Linux, Windows  
+✅ **Narrow Attack Surface**: No shell, no fork bombs, no ptrace exploits  
+
+**Best for**: Policy logic, orchestration, validation, scoring, reasoning glue, and deterministic workflows.
+
+#### What WASM is Not Good At (And Won't Be Soon)
+
+❌ **Full Python Ecosystem**: NumPy, SciPy, pandas, PyTorch rely on native extensions, BLAS, CUDA  
+❌ **GPU & Hardware Acceleration**: Experimental, fragile, not regulator-friendly  
+❌ **OS-Native Behaviors**: File watchers, shared memory tricks, complex IPC  
+❌ **Legacy Skills**: Many assume Python + OS capabilities  
+
+**You cannot wish these away.** This is why we prioritize native scripts for production use.
+
+### The Right Mental Model
+
+**Docker is an OS boundary. WASM is a language boundary.**
+
+They are **complementary, not competing**:
+
+```
+┌─────────────────────────────┐
+│ Agent Runtime               │
+│                             │
+│  ┌───────────────────────┐ │
+│  │ WASM Skill Sandbox     │ │ ← Experimental: logic, policy, orchestration
+│  │  - deterministic       │ │
+│  │  - auditable           │ │
+│  │  - fast startup        │ │
+│  └───────────────────────┘ │
+│             │               │
+│     delegate call            │
+│             ▼               │
+│  ┌───────────────────────┐ │
+│  │ Native Skill Sandbox   │ │ ← Primary: Python, ML, quant, native tools
+│  │  - Python              │ │
+│  │  - ML / Quant          │ │
+│  │  - Seatbelt/seccomp    │ │
+│  └───────────────────────┘ │
+└─────────────────────────────┘
+```
+
+**WASM is:**
+- Always available (experimental)
+- Default for specific use cases requiring determinism
+- Trusted for logic and policy enforcement
+
+**Native is:**
+- Primary execution model
+- Required for full ecosystem access
+- Heavily controlled via OS sandboxes
+
+### Is WASM a Docker Replacement?
+
+**No. And it shouldn't be.**
+
+- **Docker** = process isolation, filesystem virtualization, networking namespaces, cgroups
+- **WASM** = instruction sandbox, capability runtime
+
+They solve different problems. Trying to replace Docker with WASM leads to complexity, disappointment, and hacks.
+
+### Security: Is WASM "Strong Enough" Alone?
+
+**WASM is a strong sandbox, but not a complete one.**
+
+**What WASM isolates well:**
+- ✅ Memory safety (no arbitrary memory access)
+- ✅ CPU instructions (no privileged ops)
+- ✅ No syscalls unless exposed
+- ✅ Deterministic execution
+
+**What WASM cannot fully control alone:**
+- ❌ Resource exhaustion (CPU time, memory growth, infinite loops) - needs host-enforced limits
+- ❌ Host bugs - if the WASM runtime has a vulnerability, no second line of defense
+- ❌ Native escapes via host functions - filesystem, networking, crypto functions run natively
+
+**Industry reality**: Even serious systems layer sandboxes:
+- Cloudflare Workers: WASM + OS isolation
+- Fastly Compute@Edge: WASM + VM
+- Wasmtime in production: WASM + seccomp
+- Deno: V8 + OS sandbox
+
+**Nobody serious runs WASM naked at high trust boundaries.**
+
+### Finance-Specific Perspective
+
+For finance agents, you care about:
+
+| Requirement | Native Scripts | WASM (Experimental) |
+|-------------|----------------|---------------------|
+| Auditability | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Determinism | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Policy enforcement | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Legacy quant code | ⭐⭐⭐⭐⭐ | ❌ |
+| ML ecosystem | ⭐⭐⭐⭐⭐ | ❌ |
+
+**The answer is not "WASM or not."**
+
+**The answer is: Native scripts first, WASM when necessary.**
+
+### Long-Term Viability (5–10 Year View)
+
+**WASM will:**
+- Get better WASI support
+- Get better language support
+- Become a standard control layer
+
+**WASM will not:**
+- Replace Python ML stacks
+- Replace OS-level sandboxes
+- Become "run anything"
+
+**Betting on it as a universal runtime is risky.**  
+**Betting on it as a core logic sandbox is smart.**
+
+### Our Recommendation
+
+✅ **Yes, support WASM/WASI long-term** - for specific use cases  
+❌ **No, do not rely on WASM alone** - native scripts are primary  
+✅ **Treat WASM as the control plane** - logic, policy, orchestration  
+✅ **Layer OS sandbox for native code** - full ecosystem access  
+❌ **Do not promise "Docker replacement"** - they solve different problems  
+
+**One sentence to anchor our architecture:**
+
+> "WASM gives us deterministic control; OS sandboxes give us practical power."
+
+This gives us:
+- **Credibility**: Honest about limitations
+- **Safety**: Defense in depth
+- **Flexibility**: Right tool for the job
+- **Future optionality**: Can evolve as WASM matures
 
 ## Comparison: OpenSkills vs Claude Code
 
 | Aspect | Claude Code | OpenSkills |
 |--------|-------------|------------|
 | **SKILL.md Format** | ✅ Full support | ✅ 100% compatible |
-| **Sandbox** | seatbelt/seccomp | **WASM/WASI 0.3 + seatbelt (macOS)** ⭐ |
-| **Cross-platform** | OS-specific | WASM identical, native macOS only |
-| **Script Execution** | Native (Python, shell) | WASM components + native (macOS) |
-| **Build Required** | No | No if Python/Shell scripts. Yes if WASM (TS/JS → WASM) |
+| **Sandbox** | seatbelt/seccomp | **seatbelt (macOS, primary) + WASM/WASI 0.3 (experimental)** ⭐ |
+| **Cross-platform** | OS-specific | Native macOS (production), Linux planned; WASM identical (experimental) |
+| **Script Execution** | Native (Python, shell) | Native (macOS, primary) + WASM components (experimental) |
+| **Build Required** | No | No for native scripts. Yes for WASM (experimental, TS/JS → WASM) |
 | **Native Python** | ✅ Supported | ✅ macOS (seatbelt) |
 | **Shell Scripts** | ✅ Supported | ✅ macOS (seatbelt) |
 | **Agent Framework** | Claude Desktop & Claude Agent SDK | **Any framework** ⭐ |
@@ -421,12 +561,12 @@ The `examples/claude-official-skills` directory is a git submodule pointing to [
 
 ## Status
 
-- ✅ **Rust Runtime**: Fully functional with WASI 0.3
+- ✅ **Rust Runtime**: Fully functional
 - ✅ **TypeScript Bindings**: Working
 - ✅ **Python Bindings**: Working (requires Python ≤3.13)
-- ✅ **WASM Execution**: WASI 0.3 component model fully supported
-- ✅ **Build Tool**: `openskills build` for TS/JS compilation
-- ✅ **Native Scripting**: Seatbelt sandbox (macOS)
+- ✅ **Native Scripting**: Seatbelt sandbox (macOS, production-ready)
+- 🧪 **WASM Execution**: WASI 0.3 component model (experimental)
+- 🧪 **Build Tool**: `openskills build` for TS/JS → WASM compilation (experimental)
 - 🚧 **Native Scripting (Linux)**: Seccomp support planned
 
 ## Related Projects

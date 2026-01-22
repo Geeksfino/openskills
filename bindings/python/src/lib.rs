@@ -157,6 +157,12 @@ impl OpenSkillRuntimeWrapper {
         Ok(list.into())
     }
 
+    /// Get a complete skill-agnostic system prompt for agents.
+    fn get_agent_system_prompt(&self) -> PyResult<String> {
+        let runtime = self.inner.lock().unwrap();
+        Ok(runtime.get_agent_system_prompt())
+    }
+
     /// Activate a skill (load full SKILL.md content)
     fn activate_skill(&self, py: Python, skill_id: String) -> PyResult<Py<PyAny>> {
         let runtime = self.inner.lock().unwrap();

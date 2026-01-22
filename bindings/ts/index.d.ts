@@ -121,6 +121,8 @@ export declare class OpenSkillRuntimeWrapper {
   loadFromDirectory(dir: string): Array<SkillDescriptorJs>
   /** List skills (progressive disclosure - descriptors only) */
   listSkills(): Array<SkillDescriptorJs>
+  /** Get a complete skill-agnostic system prompt for agents. */
+  getAgentSystemPrompt(): string
   /** Activate a skill (load full SKILL.md content) */
   activateSkill(skillId: string): LoadedSkillJs
   /** Execute a skill's WASM module */

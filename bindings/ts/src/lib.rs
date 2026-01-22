@@ -351,6 +351,13 @@ impl OpenSkillRuntimeWrapper {
             .collect())
     }
 
+    /// Get a complete skill-agnostic system prompt for agents.
+    #[napi]
+    pub fn get_agent_system_prompt(&self) -> String {
+        let runtime = self.inner.lock().unwrap();
+        runtime.get_agent_system_prompt()
+    }
+
     /// Activate a skill (load full SKILL.md content)
     #[napi]
     pub fn activate_skill(&self, skill_id: String) -> Result<LoadedSkillJs> {

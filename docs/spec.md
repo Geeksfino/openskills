@@ -1,7 +1,6 @@
 # OpenSkills Runtime Specification (v0.2)
 
-OpenSkills is a Claude Skills compatible runtime that uses WASM-based sandboxing
-instead of OS-level sandboxing (seatbelt on macOS, seccomp on Linux).
+OpenSkills is a Claude Skills compatible runtime that uses **OS-level sandboxing (seatbelt on macOS, seccomp on Linux) as the primary execution method**, with **experimental WASM-based sandboxing** available for specific use cases.
 
 ## Claude Skills Conformance
 
@@ -86,34 +85,48 @@ This allows agents to:
 2. **Activation**: When a Skill is triggered, full `SKILL.md` content is loaded.
 3. **Execution**: Supporting files and WASM modules are loaded on demand.
 
-## WASM Sandbox (OpenSkills Extension)
+## WASM Sandbox (OpenSkills Extension) - Experimental
 
-Unlike Claude Code's OS-level sandboxing, OpenSkills uses WASM/WASI for sandboxed execution.
+**Status**: Experimental feature. Native scripts via OS-level sandboxing (seatbelt/seccomp) are the primary execution method.
 
-### Why WASM?
+OpenSkills provides **experimental** WASM/WASI sandboxing as an optional execution method for specific use cases.
 
+### Why WASM? (Long-Term Vision)
+
+WASM support is provided for use cases requiring:
+- **Determinism**: Same input → same output, critical for audit and compliance
+- **Fast startup**: Millisecond-level startup times
 - **Cross-platform consistency**: Same sandbox behavior on macOS, Linux, Windows
 - **Capability-based security**: Fine-grained control via WASI capabilities
-- **Portability**: Skills can ship WASM modules that run anywhere
 - **Isolation**: Strong memory and execution isolation
 
-### WASM Execution Model
+**Best for**: Policy logic, orchestration, validation, scoring, reasoning glue.
 
-Skills may include WASM modules for sandboxed script execution:
+**Not suitable for**: Full Python ecosystem, ML libraries (NumPy, PyTorch), native libraries, OS-native behaviors.
+
+See [README.md](../README.md#wasm-support-long-term-vision) for detailed discussion of WASM's role and limitations.
+
+### WASM Execution Model (Experimental)
+
+**Note**: WASM execution is experimental. Most skills use native Python/shell scripts.
+
+Skills may optionally include WASM modules for sandboxed script execution:
 
 ```
 my-skill/
 ├── SKILL.md
 └── wasm/
-    └── skill.wasm     # WASI-compatible module
+    └── skill.wasm     # WASI-compatible module (optional)
 ```
 
-The runtime:
+If a WASM module is present, the runtime:
 1. Loads the WASM module using Wasmtime
 2. Configures WASI capabilities based on `allowed-tools`
 3. Preopens filesystem paths with appropriate permissions
 4. Executes with timeout and memory limits
 5. Captures stdout/stderr for audit
+
+**If no WASM module is present**, the runtime uses native Python/shell scripts via OS-level sandboxing (seatbelt on macOS).
 
 ### Capability Mapping
 

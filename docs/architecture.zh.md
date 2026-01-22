@@ -4,12 +4,14 @@
 
 ## 概述
 
-OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提供基于 WASM 的沙箱和 macOS 上的原生 seatbelt 沙箱。架构强调：
+OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提供 macOS 上的原生 seatbelt 沙箱（主要方式）和实验性的基于 WASM 的沙箱。架构强调：
 
-- **安全性**：基于能力权限的 WASM 沙箱
+- **安全性**：操作系统级沙箱（seatbelt）作为主要方式，实验性的基于能力权限的 WASM 沙箱
 - **性能**：高效的技能发现和执行
 - **兼容性**：100% 兼容 Claude Skills 格式
 - **可扩展性**：多个生态系统的语言绑定
+
+**注意**：WASM 沙箱是实验性的，不是主要的执行方法。大多数技能使用原生 Python 和 Shell 脚本通过 seatbelt 沙箱。
 
 ## 核心组件
 
@@ -39,7 +41,9 @@ OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提
 - `ExecutionKind`：执行类型（Wasm/Http/Local）
 - `Permissions`：权限配置
 
-### 3. WASM 运行器（`wasm_runner.rs`）
+### 3. WASM 运行器（`wasm_runner.rs`）- 实验性
+
+**状态**：实验性功能，不是主要的执行方法。
 
 负责：
 - 通过 Wasmtime 加载 WASM 模块
@@ -54,13 +58,19 @@ OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提
 - 网络白名单强制执行
 - 确定性执行支持
 
-### 4. 原生运行器（`native_runner.rs`）
+**用例**：确定性逻辑、策略执行、编排。不适合完整的 Python 生态系统或原生库。
+
+### 4. 原生运行器（`native_runner.rs`）- 主要方式
+
+**状态**：主要执行方法，生产就绪。
 
 负责：
-- 执行原生 Python 和 shell 脚本（仅 macOS）
+- 执行原生 Python 和 shell 脚本（仅 macOS，Linux 计划中）
 - 从权限构建 seatbelt 配置文件
 - 捕获 stdout/stderr
 - 超时强制执行
+
+**用例**：完整 Python 生态系统、原生库、ML/量化代码、传统技能。这是大多数技能的推荐方法。
 
 ### 5. 权限系统（`permissions.rs`）
 
@@ -119,17 +129,17 @@ OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提
    └─> 自动检测执行模式
 
 2. Executor.execute()
-   ├─> 对于 WASM：
-   │   ├─> 加载 WASM 模块
-   │   ├─> 配置 WASI 上下文
-   │   ├─> 设置权限
-   │   ├─> 执行并超时
+   ├─> 对于原生（macOS，主要方式）：
+   │   ├─> 构建 seatbelt 配置文件
+   │   ├─> 执行 Python/shell 脚本
+   │   ├─> 强制执行文件系统/网络权限
    │   └─> 捕获输出
    │
-   └─> 对于原生（macOS）：
-       ├─> 构建 seatbelt 配置文件
-       ├─> 执行 Python/shell 脚本
-       ├─> 强制执行文件系统/网络权限
+   └─> 对于 WASM（实验性）：
+       ├─> 加载 WASM 模块
+       ├─> 配置 WASI 上下文
+       ├─> 设置权限
+       ├─> 执行并超时
        └─> 捕获输出
 
 3. 执行后
@@ -159,19 +169,25 @@ OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提
 
 ## 安全模型
 
-### WASM 沙箱
+### 原生 Seatbelt 沙箱（macOS）- 主要方式
 
-- **隔离**：每次执行在隔离的 WASM 实例中运行
-- **能力**：通过 WASI 预开放进行文件系统访问
-- **网络**：域白名单强制执行
-
-### 原生 Seatbelt 沙箱（macOS）
+**状态**：生产就绪，主要执行方法。
 
 - **隔离**：脚本执行受 seatbelt 配置文件限制
 - **文件系统**：来自 `allowed-tools` 的子路径读/写白名单
 - **网络**：仅在启用 `WebSearch`/`Fetch` 时允许
 - **超时**：用于超时强制执行的 epoch 中断
 - **内存**：可配置的内存限制
+
+### WASM 沙箱 - 实验性
+
+**状态**：实验性功能，不是主要的执行方法。
+
+- **隔离**：每次执行在隔离的 WASM 实例中运行
+- **能力**：通过 WASI 预开放进行文件系统访问
+- **网络**：域白名单强制执行
+
+**限制**：无法访问完整的 Python 生态系统、原生库或操作系统原生行为。最适合确定性逻辑和策略执行。
 
 ### 权限强制执行
 
@@ -249,11 +265,14 @@ pub trait AuditSink: Send + Sync {
 3. 适当处理错误
 4. 为目标语言提供惯用 API
 
-## WASI 执行模型
+## WASI 执行模型（实验性）
 
-OpenSkills 通过 Wasmtime 的组件模型**仅执行 WASI 0.3 (WASIp3) 组件**。
+**状态**：实验性功能。原生脚本是主要的执行方法。
+
+OpenSkills 在存在 WASM 模块时通过 Wasmtime 的组件模型**仅执行 WASI 0.3 (WASIp3) 组件**。
 
 - 传统的"核心模块"WASM 工件被**拒绝**。
+- WASM 执行是可选的 - 大多数技能使用原生 Python/shell 脚本。
 
 ## 未来改进
 

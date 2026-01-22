@@ -1,7 +1,6 @@
 # OpenSkills Runtime 规范 (v0.2)
 
-OpenSkills 是一个 Claude Skills 兼容的运行时，它使用基于 WASM 的沙箱方案，
-而不是操作系统级别的沙箱（macOS 上的 seatbelt，Linux 上的 seccomp）。
+OpenSkills 是一个 Claude Skills 兼容的运行时，它使用**操作系统级别的沙箱（macOS 上的 seatbelt，Linux 上的 seccomp）作为主要执行方法**，并提供**实验性的基于 WASM 的沙箱**用于特定用例。
 
 ## Claude Skills 兼容性
 
@@ -86,34 +85,48 @@ Skills 从以下位置发现（按顺序，后面的覆盖前面的）：
 2. **激活**：当 Skill 被触发时，加载完整的 `SKILL.md` 内容。
 3. **执行**：支持文件和 WASM 模块按需加载。
 
-## WASM 沙箱（OpenSkills 扩展）
+## WASM 沙箱（OpenSkills 扩展）- 实验性
 
-与 Claude Code 的操作系统级沙箱不同，OpenSkills 使用 WASM/WASI 实现沙箱执行。
+**状态**：实验性功能。通过操作系统级沙箱（seatbelt/seccomp）的原生脚本是主要的执行方法。
 
-### 为什么选择 WASM？
+OpenSkills 提供**实验性的** WASM/WASI 沙箱作为特定用例的可选执行方法。
 
+### 为什么选择 WASM？（长期愿景）
+
+WASM 支持用于需要以下特性的用例：
+- **确定性**：相同输入 → 相同输出，对审计和合规性至关重要
+- **快速启动**：毫秒级启动时间
 - **跨平台一致性**：在 macOS、Linux、Windows 上的沙箱行为相同
 - **能力基安全**：通过 WASI 能力实现细粒度控制
-- **可移植性**：Skills 可以装载可在任何地方运行的 WASM 模块
 - **隔离**：强大的内存和执行隔离
 
-### WASM 执行模型
+**最适合**：策略逻辑、编排、验证、评分、推理粘合剂。
 
-Skills 可能包含用于沙箱脚本执行的 WASM 模块：
+**不适合**：完整 Python 生态系统、ML 库（NumPy、PyTorch）、原生库、操作系统原生行为。
+
+查看 [README.md](../README.md#wasm-support-long-term-vision) 了解有关 WASM 角色和限制的详细讨论。
+
+### WASM 执行模型（实验性）
+
+**注意**：WASM 执行是实验性的。大多数技能使用原生 Python/shell 脚本。
+
+Skills 可以可选地包含用于沙箱脚本执行的 WASM 模块：
 
 ```
 my-skill/
 ├── SKILL.md
 └── wasm/
-    └── skill.wasm     # 兼容 WASI 的模块
+    └── skill.wasm     # 兼容 WASI 的模块（可选）
 ```
 
-运行时：
+如果存在 WASM 模块，运行时：
 1. 使用 Wasmtime 加载 WASM 模块
 2. 根据 `allowed-tools` 配置 WASI 能力
 3. 以适当的权限预打开文件系统路径
 4. 以超时和内存限制执行
 5. 捕获 stdout/stderr 用于审计
+
+**如果不存在 WASM 模块**，运行时使用原生 Python/shell 脚本通过操作系统级沙箱（macOS 上的 seatbelt）。
 
 ### 能力映射
 

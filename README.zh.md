@@ -2,28 +2,32 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-一个支持**双沙箱方案**的 **Claude Skills 兼容运行时**：基于 WASM 的跨平台安全沙箱，加上 **macOS seatbelt** 用于原生 Python 和 Shell 脚本执行。OpenSkills 实现了 [Claude Code Agent Skills 规范](https://code.claude.com/docs/en/skills)，为**任何智能体框架**提供安全、灵活的运行时来执行技能。
+一个支持**双沙箱方案**的 **Claude Skills 兼容运行时**：**macOS seatbelt** 用于原生 Python 和 Shell 脚本执行（主要方式），加上**实验性的基于 WASM 的沙箱**用于跨平台安全。OpenSkills 实现了 [Claude Code Agent Skills 规范](https://code.claude.com/docs/en/skills)，为**任何智能体框架**提供安全、灵活的运行时来执行技能。
 
 ## 设计理念
 
 OpenSkills 与 Claude Skills **100% 语法兼容**，这意味着任何遵循 Claude Skills 格式（带有 YAML 前置元数据的 SKILL.md）的技能都可以在 OpenSkills 上运行。OpenSkills 的独特之处在于其**双沙箱架构**：
 
-- **WASM/WASI 沙箱**：提供跨平台安全性和一致性
-- **macOS seatbelt 沙箱**：用于原生 Python 和 Shell 脚本执行
+- **macOS seatbelt 沙箱**（主要方式）：用于原生 Python 和 Shell 脚本执行 - 生产就绪，完全支持
+- **WASM/WASI 沙箱**（实验性）：提供跨平台安全性和一致性 - 面向早期采用者
 
-这种组合提供了两全其美的方案：WASM 的可移植性和安全性，加上 macOS 上原生执行的灵活性。OpenSkills 可以集成到**任何智能体框架**（LangChain、Vercel AI SDK、自定义框架）中，为智能体提供 Claude 兼容的技能访问能力。
+**主要执行模型**：通过 macOS seatbelt 的原生 Python 和 Shell 脚本（计划支持 Linux seccomp）。这是推荐的生产就绪方法，可与完整的 Python 生态系统和原生工具配合使用。
+
+**实验性 WASM 支持**：WASM 沙箱可供希望探索跨平台确定性执行的开发者使用，但使用 OpenSkills 并不需要它。大多数技能使用原生脚本即可完美运行。
+
+OpenSkills 可以集成到**任何智能体框架**（LangChain、Vercel AI SDK、自定义框架）中，为智能体提供 Claude 兼容的技能访问能力。
 
 ### 核心设计原则
 
 1. **100% 语法兼容性**：OpenSkills 使用与 Claude Skills 完全相同的 SKILL.md 格式来读取和执行技能。技能可以在 Claude Code 和 OpenSkills 之间共享，无需修改。
 
-2. **双沙箱架构**：OpenSkills 独特地结合了 **WASM/WASI 0.3**（组件模型）与 **macOS seatbelt** 沙箱：
-   - **WASM/WASI**：跨平台安全性、基于能力的权限、内存安全、确定性执行
-   - **macOS Seatbelt**：原生 Python 和 Shell 脚本执行，具有操作系统级别的沙箱隔离
+2. **双沙箱架构**：OpenSkills 结合了 **macOS seatbelt**（主要方式）与**实验性的 WASM/WASI 0.3** 沙箱：
+   - **macOS Seatbelt**（主要方式）：原生 Python 和 Shell 脚本执行，具有操作系统级别的沙箱隔离 - 生产就绪，完整生态系统支持
+   - **WASM/WASI**（实验性）：跨平台安全性、基于能力的权限、内存安全、确定性执行 - 面向早期采用者
    - **自动检测**：运行时根据技能类型自动选择合适的沙箱
-   - **两全其美**：WASM 提供可移植性和安全性，seatbelt 提供原生灵活性
+   - **原生优先**：大多数技能使用原生脚本；WASM 是特定用例的可选方案
 
-3. **JavaScript/TypeScript 优先**：OpenSkills 针对基于 JavaScript/TypeScript 的技能进行了优化，可以使用 `javy-codegen`（一个使用 QuickJS 的 Rust 库）编译为 WASM 组件。这使得技能编写者可以使用熟悉的语言和生态系统，编译通过库以编程方式完成，而不需要外部 CLI 工具。
+3. **原生脚本优先**：OpenSkills 优先考虑原生 Python 和 Shell 脚本执行，这提供了对完整 Python 生态系统和原生工具的访问。WASM 编译作为实验性选项，适用于需要跨平台确定性的特定用例。
 
 ### 目标用例
 
@@ -31,60 +35,52 @@ OpenSkills 专为需要 Claude 兼容技能的**任何智能体框架**而设计
 
 - **智能体框架集成**：可与 LangChain、Vercel AI SDK、自定义框架或任何需要工具式功能的系统配合使用
 - **企业智能体**：由受信任的开发人员开发的内部技能
-- **跨平台**：WASM 执行在 macOS、Linux、Windows 上完全相同
-- **原生灵活性**：macOS seatbelt 允许在需要时使用原生 Python 和 Shell 脚本
+- **原生脚本**：使用 Python 和 Shell 脚本的主要执行模型，具有操作系统级别的沙箱
+- **跨平台原生**：macOS seatbelt（生产环境），Linux seccomp（计划中）
+- **实验性 WASM**：用于需要确定性的特定用例的可选 WASM 执行
 - **安全性和可审计性**：两种沙箱方法都提供强大的隔离和审计日志记录
 
-双沙箱方案意味着您可以使用 WASM 实现跨平台技能，或在需要访问原生库或工具时在 macOS 上利用原生 Python/Shell。
+**推荐方法**：大多数技能使用原生 Python 和 Shell 脚本。WASM 可用于实验性用例，但不是必需的。
 
 ## 限制
 
-OpenSkills 的 WASM 优先方法相比原生执行存在一些限制：
-
-### 当前不支持
+### 当前限制
 
 1. **非 macOS 平台上的原生脚本**：
    - 原生 Python 和 Shell 脚本仅在 macOS 上支持（seatbelt）
    - Linux seccomp 支持正在规划中
 
-2. **需要构建工作流（对于 WASM）**：
-   - JavaScript/TypeScript 技能必须在执行前编译为 WASM 组件
-   - 开发人员需要运行 `openskills build` 将源代码编译为 `wasm/skill.wasm`
-   - 这相比"即插即用"的原生脚本增加了一个构建步骤
+2. **WASM 支持（实验性）**：
+   - WASM 沙箱是实验性的，不是主要的执行方法
+   - 需要构建工作流：JavaScript/TypeScript 技能必须在执行前编译为 WASM 组件
+   - 有限的原生库支持：原生 Python 包、Shell 工具等在 WASM 中无法工作
+   - 需要 WASI 兼容性：代码必须使用 WASI API，而不是原生操作系统 API
 
-### 为什么存在这些限制
-
-WASM 提供了强大的安全性和跨平台一致性，但它需要：
-- **编译步骤**：源代码必须编译为 WASM
-- **WASI 兼容性**：代码必须使用 WASI API，而不是原生操作系统 API
-- **有限的原生库**：原生 Python 包、Shell 工具等不能直接使用
-
-这些限制对于企业用例是可以接受的，因为：
-- 开发人员控制技能开发过程
-- 构建工作流是标准实践
-- 安全性和跨平台一致性比便利性更重要
+**建议**：生产技能使用原生 Python 和 Shell 脚本。WASM 可用于实验性用例，但不是必需的。
 
 ## 路线图
 
-OpenSkills 将在保持其 WASM 优先理念的同时不断发展以解决限制：
+OpenSkills 将在保持其原生优先方法的同时不断发展以解决限制：
 
-1. **更多 WASM 就绪脚本**：我们将提供不断扩展的预构建 WASM 组件和模板库，用于常见任务，减少自定义编译的需要。
+1. **Linux 原生脚本**：计划支持 Linux seccomp 以完成跨平台原生沙箱（macOS seatbelt 已经生产就绪）。
 
-2. **原生脚本支持**：原生 Python 和 Shell 脚本在 macOS 上通过 seatbelt 支持。Linux seccomp 支持正在规划中，以完成跨平台原生沙箱。
+2. **WASM 改进**（实验性）：继续开发 WASM 支持，用于需要确定性和跨平台一致性的特定用例。
 
-3. **改进的工具**：更好的构建工具和模板，使 WASM 编译对开发人员更加透明。
+3. **增强的工具**：为原生脚本和 WASM 编译提供更好的开发工具和模板。
 
 ## 特性
 
 - ✅ **100% Claude Skills 兼容**：完整支持 SKILL.md 格式
-- 🔒 **双沙箱架构**：WASM/WASI 0.3 + macOS seatbelt（生态系统中的独特之处）
-- 🧰 **原生脚本支持**：通过 seatbelt 在 macOS 上执行 Python 和 Shell 脚本
+- 🔒 **双沙箱架构**：macOS seatbelt（主要方式）+ 实验性 WASM/WASI 0.3
+- 🧰 **原生脚本支持**：通过 seatbelt 在 macOS 上执行 Python 和 Shell 脚本（生产就绪）
 - 🤖 **任何智能体框架**：与 LangChain、Vercel AI SDK 或自定义框架集成
+- 🚀 **预构建工具**：为 TS/Python 提供即用型工具定义（减少约 200 行代码）
 - 📊 **渐进式披露**：高效的分层加载（元数据 → 指令 → 资源）
 - 🔌 **多语言绑定**：Rust 核心，提供 TypeScript 和 Python 绑定
-- 🛡️ **基于能力的安全性**：通过 WASI 和 seatbelt 配置文件实现细粒度权限
-- 🏗️ **构建工具**：`openskills build` 用于将 TS/JS 编译为 WASM 组件
-- 🌐 **跨平台**：WASM 执行在 macOS、Linux、Windows 上完全相同
+- 🛡️ **基于能力的安全性**：通过 seatbelt 配置文件实现细粒度权限（以及实验性 WASM 的 WASI）
+- 🏗️ **构建工具**：`openskills build` 用于将 TS/JS 编译为 WASM 组件（实验性）
+- 🌐 **跨平台原生**：macOS seatbelt（生产环境），Linux seccomp（计划中）
+- 📁 **工作空间管理**：内置沙箱化工作空间用于文件 I/O 操作
 
 ## 快速开始
 
@@ -297,20 +293,166 @@ OpenSkills 是**唯一**结合以下特性的运行时：
 4. **智能体框架无关**：可与任何智能体框架配合使用（LangChain、Vercel AI SDK、自定义）
 
 这种双重方法意味着您将获得：
-- **可移植性**：WASM 技能在 macOS、Linux、Windows 上运行完全相同
-- **灵活性**：在需要原生库时在 macOS 上使用原生 Python/Shell 脚本
+- **原生灵活性**：通过 seatbelt 获得完整的 Python 生态系统和原生工具（主要方式）
+- **实验性 WASM**：用于特定用例的跨平台确定性（可选）
 - **安全性**：两种沙箱方法都提供强大的隔离
 - **兼容性**：100% 兼容 Claude Skills 规范
+
+## WASM 支持：长期愿景
+
+> **状态**：WASM 沙箱是**实验性的**，不是主要的执行方法。大多数技能使用原生 Python 和 Shell 脚本即可完美运行。
+
+### 为什么我们支持 WASM（长期）
+
+虽然原生脚本是我们的主要执行模型，但我们正在为特定用例投资 WASM 支持，在这些用例中它提供独特的价值。以下是我们对 WASM 角色的观点：
+
+#### WASM 擅长什么（目前）
+
+✅ **确定性**：相同输入 → 相同输出，对审计、重放和合规性至关重要  
+✅ **快速启动**：毫秒级启动时间，非常适合频繁调用的智能体技能  
+✅ **设计上的强隔离**：除非明确暴露，否则无系统调用，通过 WASI 实现基于能力的访问  
+✅ **可移植性**：在 macOS、Linux、Windows 上执行完全相同  
+✅ **窄攻击面**：无 Shell，无 fork 炸弹，无 ptrace 漏洞利用  
+
+**最适合**：策略逻辑、编排、验证、评分、推理粘合剂和确定性工作流。
+
+#### WASM 不擅长什么（短期内也不会）
+
+❌ **完整 Python 生态系统**：NumPy、SciPy、pandas、PyTorch 依赖原生扩展、BLAS、CUDA  
+❌ **GPU 和硬件加速**：实验性、脆弱、不符合监管要求  
+❌ **操作系统原生行为**：文件监视器、共享内存技巧、复杂 IPC  
+❌ **传统技能**：许多假设 Python + 操作系统能力  
+
+**您无法回避这些限制。** 这就是为什么我们优先考虑生产环境使用原生脚本。
+
+### 正确的思维模型
+
+**Docker 是操作系统边界。WASM 是语言边界。**
+
+它们是**互补的，而非竞争的**：
+
+```
+┌─────────────────────────────┐
+│ 智能体运行时                │
+│                             │
+│  ┌───────────────────────┐ │
+│  │ WASM 技能沙箱         │ │ ← 实验性：逻辑、策略、编排
+│  │  - 确定性             │ │
+│  │  - 可审计             │ │
+│  │  - 快速启动           │ │
+│  └───────────────────────┘ │
+│             │               │
+│     委托调用                │
+│             ▼               │
+│  ┌───────────────────────┐ │
+│  │ 原生技能沙箱           │ │ ← 主要方式：Python、ML、量化、原生工具
+│  │  - Python              │ │
+│  │  - ML / 量化            │ │
+│  │  - Seatbelt/seccomp    │ │
+│  └───────────────────────┘ │
+└─────────────────────────────┘
+```
+
+**WASM 是：**
+- 始终可用（实验性）
+- 需要确定性的特定用例的默认选择
+- 值得信赖的逻辑和策略执行
+
+**原生是：**
+- 主要执行模型
+- 完整生态系统访问所必需
+- 通过操作系统沙箱严格控制
+
+### WASM 是 Docker 的替代品吗？
+
+**不是。也不应该是。**
+
+- **Docker** = 进程隔离、文件系统虚拟化、网络命名空间、cgroups
+- **WASM** = 指令沙箱、能力运行时
+
+它们解决不同的问题。试图用 WASM 替代 Docker 会导致复杂性、失望和变通方案。
+
+### 安全性：WASM 单独"足够强大"吗？
+
+**WASM 是一个强大的沙箱，但不是完整的沙箱。**
+
+**WASM 隔离良好的方面：**
+- ✅ 内存安全（无任意内存访问）
+- ✅ CPU 指令（无特权操作）
+- ✅ 除非暴露，否则无系统调用
+- ✅ 确定性执行
+
+**WASM 无法完全单独控制的方面：**
+- ❌ 资源耗尽（CPU 时间、内存增长、无限循环）- 需要主机强制限制
+- ❌ 主机漏洞 - 如果 WASM 运行时存在漏洞，没有第二道防线
+- ❌ 通过主机函数的原生逃逸 - 文件系统、网络、加密函数在原生环境中运行
+
+**行业现实**：即使是严肃的系统也分层使用沙箱：
+- Cloudflare Workers：WASM + 操作系统隔离
+- Fastly Compute@Edge：WASM + VM
+- 生产环境中的 Wasmtime：WASM + seccomp
+- Deno：V8 + 操作系统沙箱
+
+**没有人在高信任边界上裸运行 WASM。**
+
+### 金融特定视角
+
+对于金融智能体，您关心：
+
+| 需求 | 原生脚本 | WASM（实验性） |
+|------|----------|----------------|
+| 可审计性 | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| 确定性 | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| 策略执行 | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| 传统量化代码 | ⭐⭐⭐⭐⭐ | ❌ |
+| ML 生态系统 | ⭐⭐⭐⭐⭐ | ❌ |
+
+**答案不是"WASM 或否"。**
+
+**答案是：原生脚本优先，必要时使用 WASM。**
+
+### 长期可行性（5-10 年展望）
+
+**WASM 将：**
+- 获得更好的 WASI 支持
+- 获得更好的语言支持
+- 成为标准控制层
+
+**WASM 不会：**
+- 替代 Python ML 堆栈
+- 替代操作系统级沙箱
+- 成为"运行任何东西"
+
+**将其作为通用运行时下注是有风险的。**  
+**将其作为核心逻辑沙箱下注是明智的。**
+
+### 我们的建议
+
+✅ **是的，长期支持 WASM/WASI** - 用于特定用例  
+❌ **不，不要仅依赖 WASM** - 原生脚本是主要方式  
+✅ **将 WASM 视为控制平面** - 逻辑、策略、编排  
+✅ **为原生代码分层操作系统沙箱** - 完整生态系统访问  
+❌ **不要承诺"Docker 替代品"** - 它们解决不同问题  
+
+**一句话来锚定我们的架构：**
+
+> "WASM 给我们确定性控制；操作系统沙箱给我们实用能力。"
+
+这给我们带来：
+- **可信度**：对限制诚实
+- **安全性**：深度防御
+- **灵活性**：适合的工具
+- **未来可选性**：可以随着 WASM 成熟而发展
 
 ## 对比：OpenSkills vs Claude Code
 
 | 方面 | Claude Code | OpenSkills |
 |------|-------------|------------|
 | **SKILL.md 格式** | ✅ 完整支持 | ✅ 100% 兼容 |
-| **沙箱** | seatbelt/seccomp | **WASM/WASI 0.3 + seatbelt (macOS)** ⭐ |
-| **跨平台** | 操作系统特定 | WASM 相同，原生仅 macOS |
-| **脚本执行** | 原生（Python、shell） | WASM 组件 + 原生（macOS） |
-| **需要构建** | 否 | 否（Python/Shell脚本），是（TS/JS → WASM） |
+| **沙箱** | seatbelt/seccomp | **seatbelt (macOS, 主要方式) + WASM/WASI 0.3 (实验性)** ⭐ |
+| **跨平台** | 操作系统特定 | 原生 macOS（生产环境），Linux 计划中；WASM 相同（实验性） |
+| **脚本执行** | 原生（Python、shell） | 原生（macOS，主要方式）+ WASM 组件（实验性） |
+| **需要构建** | 否 | 原生脚本不需要。WASM 需要（实验性，TS/JS → WASM） |
 | **原生 Python** | ✅ 支持 | ✅ macOS (seatbelt) |
 | **Shell 脚本** | ✅ 支持 | ✅ macOS (seatbelt) |
 | **智能体框架** | Claude Desktop/Claude Agent SDK | **任何框架** ⭐ |
@@ -376,12 +518,12 @@ cargo build --release
 
 ## 状态
 
-- ✅ **Rust 运行时**：完全支持 WASI 0.3
+- ✅ **Rust 运行时**：完全功能
 - ✅ **TypeScript 绑定**：正常工作
 - ✅ **Python 绑定**：正常工作（需要 Python ≤3.13）
-- ✅ **WASM 执行**：完全支持 WASI 0.3 组件模型
-- ✅ **构建工具**：`openskills build` 用于 TS/JS 编译
-- ✅ **原生脚本**：Seatbelt 沙箱（macOS）
+- ✅ **原生脚本**：Seatbelt 沙箱（macOS，生产就绪）
+- 🧪 **WASM 执行**：WASI 0.3 组件模型（实验性）
+- 🧪 **构建工具**：`openskills build` 用于 TS/JS → WASM 编译（实验性）
 - 🚧 **原生脚本（Linux）**：规划中的 Seccomp 支持
 
 ## 相关项目
