@@ -45,10 +45,62 @@ pub fn execute_wasm(
     // Legacy "core module" artifacts are not supported and must be treated as invalid.
     let stdout_buf = Arc::new(Mutex::new(Vec::new()));
     let stderr_buf = Arc::new(Mutex::new(Vec::new()));
+    // Create stdin buffer with input JSON for WASM modules that read from stdin
+    let stdin_buf = Arc::new(Mutex::new(std::io::Cursor::new(input_json.clone().into_bytes())));
 
     // Preopen filesystem paths with appropriate permissions
     let read_paths = enforcer.filesystem_read_paths();
     let write_paths = enforcer.filesystem_write_paths();
+
+    // Minimal in-memory stdin stream implementation for passing input.
+    #[derive(Clone)]
+    struct SharedVecStdin {
+        data: Arc<Mutex<std::io::Cursor<Vec<u8>>>>,
+    }
+
+    impl wasmtime_wasi::cli::IsTerminal for SharedVecStdin {
+        fn is_terminal(&self) -> bool {
+            false
+        }
+    }
+
+    struct SharedVecReader {
+        data: Arc<Mutex<std::io::Cursor<Vec<u8>>>>,
+    }
+
+    impl tokio::io::AsyncRead for SharedVecReader {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            use std::io::Read;
+            match self.data.lock() {
+                Ok(mut cursor) => {
+                    let unfilled = buf.initialize_unfilled();
+                    match cursor.read(unfilled) {
+                        Ok(n) => {
+                            buf.advance(n);
+                            Poll::Ready(Ok(()))
+                        }
+                        Err(e) => Poll::Ready(Err(e)),
+                    }
+                }
+                Err(_) => Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "stdin lock poisoned",
+                ))),
+            }
+        }
+    }
+
+    impl wasmtime_wasi::cli::StdinStream for SharedVecStdin {
+        fn async_stream(&self) -> Box<dyn tokio::io::AsyncRead + Send + Sync> {
+            Box::new(SharedVecReader {
+                data: self.data.clone(),
+            })
+        }
+    }
 
     // Minimal in-memory stdout/stderr capture stream implementation.
     #[derive(Clone)]
@@ -100,6 +152,8 @@ pub fn execute_wasm(
     }
 
     let configure_wasi_builder = |builder: &mut WasiCtxBuilder| {
+        // Provide stdin with input JSON for WASM modules that read from stdin
+        builder.stdin(SharedVecStdin { data: stdin_buf.clone() });
         // Capture stdout/stderr for audit (default is "empty" sinks in wasmtime-wasi).
         builder.stdout(SharedVecStdout(stdout_buf.clone()));
         builder.stderr(SharedVecStdout(stderr_buf.clone()));

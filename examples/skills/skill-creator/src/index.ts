@@ -1,10 +1,10 @@
 /**
  * Main entry point for skill-creator WASM module
- * 
- * Reads input from SKILL_INPUT environment variable and routes to appropriate function
+ *
+ * Reads input from stdin (primary) or SKILL_INPUT environment variable (fallback)
  * Outputs JSON result to stdout
- * 
- * Note: In javy/QuickJS environment, environment variables are accessed via std.env
+ *
+ * Note: In WASI/javy environment, stdin is the preferred input method
  */
 
 import { initSkill } from './init_skill';
@@ -16,7 +16,60 @@ interface SkillInput {
   [key: string]: any;
 }
 
-// Helper to get environment variable (works in both Node.js and QuickJS/javy)
+// Helper to read all input from stdin (works in javy WASI environment)
+function readStdin(): string {
+  try {
+    // @ts-ignore - Javy global is available in javy-compiled WASM
+    if (typeof Javy !== 'undefined' && Javy.IO && Javy.IO.readSync) {
+      // Read stdin using Javy.IO.readSync(fd, buffer) where fd=0 is stdin
+      const chunks: Uint8Array[] = [];
+      const chunkSize = 1024;
+      let totalBytes = 0;
+
+      while (true) {
+        const buffer = new Uint8Array(chunkSize);
+        // @ts-ignore
+        const bytesRead = Javy.IO.readSync(0, buffer);
+        if (bytesRead === 0) break;
+        chunks.push(buffer.subarray(0, bytesRead));
+        totalBytes += bytesRead;
+      }
+
+      if (totalBytes > 0) {
+        // Combine all chunks
+        const result = new Uint8Array(totalBytes);
+        let offset = 0;
+        for (const chunk of chunks) {
+          result.set(chunk, offset);
+          offset += chunk.length;
+        }
+        // Decode as UTF-8
+        const decoder = new TextDecoder();
+        return decoder.decode(result).trim();
+      }
+    }
+  } catch (e) {
+    // Javy.IO not available, continue
+  }
+
+  // Fallback: try QuickJS std.in
+  try {
+    // @ts-ignore - std module might be available in some QuickJS environments
+    const std = require('std');
+    if (std && std.in) {
+      const input = std.in.readAsString();
+      if (input && input.trim()) {
+        return input.trim();
+      }
+    }
+  } catch (e) {
+    // std module not available, continue
+  }
+
+  return '';
+}
+
+// Helper to get environment variable (fallback for testing)
 function getEnv(name: string): string | undefined {
   // Try Node.js style first (for development/testing)
   if (typeof process !== 'undefined' && process.env) {
@@ -26,8 +79,8 @@ function getEnv(name: string): string | undefined {
   try {
     // @ts-ignore - std module may not be in TypeScript definitions
     const std = require('std');
-    if (std && std.env) {
-      return std.env[name];
+    if (std && std.getenv) {
+      return std.getenv(name);
     }
   } catch (e) {
     // std module not available, continue
@@ -37,8 +90,11 @@ function getEnv(name: string): string | undefined {
 
 function main() {
   try {
-    // Read input from environment variable (set by OpenSkills runtime)
-    const skillInput = getEnv('SKILL_INPUT') || '{}';
+    // Try stdin first (preferred for WASI), then fall back to env var
+    let skillInput = readStdin();
+    if (!skillInput) {
+      skillInput = getEnv('SKILL_INPUT') || '{}';
+    }
     const input: SkillInput = JSON.parse(skillInput);
 
     if (!input.action) {
