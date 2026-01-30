@@ -96,6 +96,7 @@ mod macos {
         enforcer: &PermissionEnforcer,
         allowed_tools: &[String],
         workspace_dir: Option<&Path>,
+        script_args: &[String],
     ) -> Result<ExecutionArtifacts, OpenSkillError> {
         if !script_path.exists() {
             return Err(OpenSkillError::NativeExecutionError(format!(
@@ -184,6 +185,10 @@ mod macos {
         let profile_path = write_profile(&profile)?;
         let mut cmd = Command::new("sandbox-exec");
         cmd.arg("-f").arg(&profile_path).arg("--").arg(program).args(args);
+        // Append user-provided script arguments (e.g., "my-test" for init-artifact.sh)
+        if !script_args.is_empty() {
+            cmd.args(script_args);
+        }
         cmd.current_dir(&skill_root);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
@@ -564,6 +569,7 @@ pub fn execute_native(
     _enforcer: &PermissionEnforcer,
     _allowed_tools: &[String],
     _workspace_dir: Option<&Path>,
+    _script_args: &[String],
 ) -> Result<ExecutionArtifacts, OpenSkillError> {
     Err(OpenSkillError::UnsupportedPlatform(
         "Native execution requires macOS (seatbelt)".to_string(),
