@@ -320,25 +320,34 @@ OpenSkills runtime does not support legacy core-module WASM artifacts."
                     .await
                     .map_err(|e| OpenSkillError::WasmError(format!("Component run failed: {e}")))?
             }
-            Err(_) => {
-                // Component is WASI 0.2 - instantiate using linker
+            Err(e) => {
+                // Log the actual error for debugging
+                if std::env::var("DEBUG_WASM").is_ok() {
+                    eprintln!("[DEBUG_WASM] WASI 0.3 instantiation failed: {e}");
+                    eprintln!("[DEBUG_WASM] Trying WASI 0.2 (p2) bindings...");
+                }
+                // Component is WASI 0.2 - use p2 bindings to instantiate and call run
                 // For WASI CLI command components built with wasi_snapshot_preview1 adapter,
-                // the component exports wasi:cli/run@0.2.1 which should execute the main function.
-                // However, instantiation alone may not trigger execution - we may need to
-                // explicitly call the run export. For now, instantiate and hope the component
-                // executes automatically (some WASI runtimes do this).
-                //
-                // TODO: Properly invoke wasi:cli/run export for WASI 0.2 components.
-                // This may require using p2 bindings or manually getting/calling the export.
-                let _instance = linker
-                    .instantiate_async(&mut store, &component)
+                // the component exports wasi:cli/run@0.2.x which we need to explicitly invoke.
+                let command = wasmtime_wasi::p2::bindings::Command::instantiate_async(
+                    &mut store,
+                    &component,
+                    &linker,
+                )
+                .await
+                .map_err(|e| OpenSkillError::WasmError(format!("WASI 0.2 component instantiation failed: {e}")))?;
+
+                if std::env::var("DEBUG_WASM").is_ok() {
+                    eprintln!("[DEBUG_WASM] WASI 0.2 instantiation succeeded, calling run...");
+                }
+
+                // Call the wasi:cli/run export
+                let run_result: Result<(), ()> = command
+                    .wasi_cli_run()
+                    .call_run(&mut store)
                     .await
-                    .map_err(|e| OpenSkillError::WasmError(format!("Component instantiation failed: {e}")))?;
-                
-                // Note: Some WASI 0.2 CLI command components execute their main function
-                // during instantiation, but this is not guaranteed. If no output is produced,
-                // the component may need explicit invocation of the wasi:cli/run export.
-                Ok(Ok(()))
+                    .map_err(|e| OpenSkillError::WasmError(format!("WASI 0.2 run failed: {e}")))?;
+                Ok(run_result)
             }
         };
 
