@@ -189,7 +189,11 @@ mod macos {
         if !script_args.is_empty() {
             cmd.args(script_args);
         }
-        cmd.current_dir(&skill_root);
+        // Use workspace_dir as cwd if provided, otherwise fall back to skill_root.
+        // This ensures scripts that create output files write to the workspace directory.
+        // Scripts can still access skill resources via SKILL_ROOT env var.
+        let working_directory = workspace_dir.unwrap_or(&skill_root);
+        cmd.current_dir(working_directory);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());

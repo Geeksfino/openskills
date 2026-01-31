@@ -53,6 +53,8 @@ pub struct TargetExecutionOptionsJs {
     pub timeout_ms: Option<i64>,
     /// Input data (JSON string)
     pub input: Option<String>,
+    /// Workspace directory for script output (overrides runtime default)
+    pub workspace_dir: Option<String>,
 }
 
 /// Permissions for sandboxed command execution.
@@ -554,7 +556,7 @@ impl OpenSkillRuntimeWrapper {
     ) -> Result<ExecutionResult> {
         let mut runtime = self.inner.lock().unwrap();
 
-        let (target, timeout_ms, input) = if let Some(opts) = options {
+        let (target, timeout_ms, input, workspace_dir) = if let Some(opts) = options {
             let target = match opts.target_type.as_deref() {
                 Some("script") => {
                     let path = opts.path.ok_or_else(|| {
@@ -587,13 +589,14 @@ impl OpenSkillRuntimeWrapper {
             };
             let timeout = safe_timeout_ms(opts.timeout_ms);
             let input = opts.input.and_then(|s| serde_json::from_str(&s).ok());
-            (target, timeout, input)
+            let workspace = opts.workspace_dir.map(std::path::PathBuf::from);
+            (target, timeout, input, workspace)
         } else {
-            (ExecutionTarget::Auto, None, None)
+            (ExecutionTarget::Auto, None, None, None)
         };
 
         let result = runtime
-            .run_skill_target(&skill_id, target, timeout_ms, input)
+            .run_skill_target(&skill_id, target, timeout_ms, input, workspace_dir)
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
         let output_json = serde_json::to_string(&result.output)

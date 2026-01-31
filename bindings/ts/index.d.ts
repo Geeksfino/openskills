@@ -38,6 +38,8 @@ export interface TargetExecutionOptionsJs {
   timeoutMs?: number
   /** Input data (JSON string) */
   input?: string
+  /** Workspace directory for script output (overrides runtime default) */
+  workspaceDir?: string
 }
 /** Permissions for sandboxed command execution. */
 export interface CommandPermissionsJs {
