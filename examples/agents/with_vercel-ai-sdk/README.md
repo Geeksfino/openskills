@@ -51,7 +51,7 @@ npm run build
 ### Usage
 
 ```bash
-# Run with a query
+# Run with a query (uses default skills directory: examples/skills)
 npm start "What skills are available?"
 
 # Run with a task
@@ -105,7 +105,7 @@ The `createSkillTools()` function provides these tools:
 
 ### Notes
 
-- Skills are loaded from `examples/skills`
+- Skills are loaded from `examples/skills` by default (configurable via `--skills-dir`)
 - The agent learns everything from SKILL.md - no prior knowledge needed
 - Output files go to the `output/` workspace directory
 - Uses DeepSeek API (OpenAI-compatible) by default
