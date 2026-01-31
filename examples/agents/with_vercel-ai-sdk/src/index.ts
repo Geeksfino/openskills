@@ -168,26 +168,41 @@ async function main() {
       await streamPromise;
 
       // Get final result for tool calls/results summary
+      // Use 'steps' to get ALL tool calls from ALL steps (not just the last step)
       const finalResult = await result;
-      const finalToolCalls = await finalResult.toolCalls;
-      const finalToolResults = await finalResult.toolResults;
+      const allSteps = await finalResult.steps;
 
-      if (finalToolCalls && finalToolCalls.length > 0) {
+      // Collect all tool calls and results from all steps
+      const allToolCalls: Array<{ toolName: string; args: unknown }> = [];
+      const allToolResults: Array<{ toolName: string; toolCallId?: string; result: unknown }> = [];
+
+      if (allSteps && Array.isArray(allSteps)) {
+        for (const step of allSteps) {
+          if (step.toolCalls && Array.isArray(step.toolCalls)) {
+            allToolCalls.push(...step.toolCalls);
+          }
+          if (step.toolResults && Array.isArray(step.toolResults)) {
+            allToolResults.push(...step.toolResults);
+          }
+        }
+      }
+
+      if (allToolCalls.length > 0) {
         console.log("\n" + "=".repeat(70));
-        console.log(`🔧 Tool Calls Summary (${finalToolCalls.length}):`);
+        console.log(`🔧 Tool Calls Summary (${allToolCalls.length} across ${allSteps?.length || 0} steps):`);
         console.log("=".repeat(70));
-        for (const call of finalToolCalls) {
+        for (const call of allToolCalls) {
           const argsPreview = JSON.stringify(call.args).slice(0, 150);
           console.log(`\n  ${call.toolName}:`);
           console.log(`    Args: ${argsPreview}${argsPreview.length >= 150 ? '...' : ''}`);
         }
       }
 
-      if (finalToolResults && Array.isArray(finalToolResults) && finalToolResults.length > 0) {
+      if (allToolResults.length > 0) {
         console.log("\n" + "=".repeat(70));
-        console.log(`📋 Tool Results Summary (${finalToolResults.length}):`);
+        console.log(`📋 Tool Results Summary (${allToolResults.length} across ${allSteps?.length || 0} steps):`);
         console.log("=".repeat(70));
-        for (const res of finalToolResults as Array<{ toolName: string; toolCallId?: string; result: unknown }>) {
+        for (const res of allToolResults as Array<{ toolName: string; toolCallId?: string; result: unknown }>) {
           // Calculate duration if we tracked this tool call
           let duration = 0;
           if (res.toolCallId) {
@@ -197,16 +212,16 @@ async function main() {
               duration = Date.now() - toolCallInfo.startTime;
             }
           }
-          
+
           console.log(`\n✅ Tool result: ${res.toolName}${duration > 0 ? ` (${duration}ms)` : ''}`);
-          const fullResult = typeof res.result === 'string' 
+          const fullResult = typeof res.result === 'string'
             ? res.result
             : JSON.stringify(res.result, null, 2);
-          const preview = fullResult.length > 500 
+          const preview = fullResult.length > 500
             ? fullResult.slice(0, 500) + '\n    ... (truncated)'
             : fullResult;
           console.log(`   Result: ${preview}`);
-          
+
           // Special handling for run_skill_script to verify WASM usage
           if (res.toolName === 'run_skill_script') {
             try {
