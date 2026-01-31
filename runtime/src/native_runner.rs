@@ -331,6 +331,16 @@ mod macos {
         });
         cmd.env("PATH", path);
 
+        // Disable corepack's auto-pin feature to prevent it from traversing up
+        // the directory tree and trying to add a `packageManager` field to
+        // package.json files outside the sandbox's allowed write paths.
+        cmd.env("COREPACK_ENABLE_AUTO_PIN", "0");
+
+        // Set CI=true to signal non-interactive mode to tools like npm, pnpm,
+        // create-vite, etc. This prevents them from prompting for input which
+        // would cause issues since stdin may contain JSON input data.
+        cmd.env("CI", "true");
+
         if let Ok(lang) = std::env::var("LANG") {
             cmd.env("LANG", lang);
         }
