@@ -170,6 +170,7 @@ pub fn execute_skill(
             &enforcer,
             &allowed_tools,
             options.workspace_dir.as_deref(),
+            &[], // No user-provided args for auto-detected scripts
         ),
     }
 }
@@ -263,6 +264,7 @@ pub fn run_skill_target(
                     &enforcer,
                     &allowed_tools,
                     options.workspace_dir.as_deref(),
+                    &[], // No user-provided args for auto-detected scripts
                 ),
             }
         }
@@ -311,6 +313,7 @@ pub fn run_skill_target(
             } else {
                 // Execute as native script (seatbelt on macOS, seccomp on Linux when available)
                 let script_type = detect_script_type(&full_path)?;
+                // Keep args in input JSON for scripts that read from SKILL_INPUT
                 let input_with_args = if args.is_empty() {
                     input
                 } else {
@@ -332,6 +335,7 @@ pub fn run_skill_target(
                     &enforcer,
                     &allowed_tools,
                     options.workspace_dir.as_deref(),
+                    &args, // Pass args as command-line arguments too
                 )
             }
         }
@@ -366,7 +370,7 @@ pub fn run_skill_target(
 
             let script_type = detect_script_type(&script_path)?;
 
-            // Add args to input
+            // Add args to input JSON for scripts that read from SKILL_INPUT
             let input_with_args = if args.is_empty() {
                 input
             } else {
@@ -389,6 +393,7 @@ pub fn run_skill_target(
                 &enforcer,
                 &allowed_tools,
                 options.workspace_dir.as_deref(),
+                &args, // Pass args as command-line arguments too
             )
         }
         ExecutionTarget::Wasm { path } => {

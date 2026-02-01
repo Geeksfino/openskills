@@ -1040,6 +1040,7 @@ Example response:
         target: ExecutionTarget,
         timeout_ms: Option<u64>,
         input: Option<Value>,
+        workspace_dir: Option<PathBuf>,
     ) -> Result<ExecutionResult, OpenSkillError> {
         // Ensure registry is loaded
         if self.registry.is_empty() {
@@ -1085,7 +1086,7 @@ Example response:
             target,
             timeout_ms,
             input,
-            workspace_dir: self.get_workspace_dir().ok(),
+            workspace_dir: workspace_dir.or_else(|| self.get_workspace_dir().ok()),
             ..Default::default()
         };
 

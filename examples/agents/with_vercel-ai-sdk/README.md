@@ -51,11 +51,31 @@ npm run build
 ### Usage
 
 ```bash
-# Run with a query
+# Run with a query (uses default skills directory: examples/skills)
 npm start "What skills are available?"
 
 # Run with a task
 npm start "Create a Word document with title 'Test'"
+```
+
+### CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `--skills-dir <path>` | Path to skills directory (default: `examples/skills`) |
+
+### Testing
+
+See [TESTING.md](./TESTING.md) for detailed test documentation.
+
+#### Quick Test Commands
+
+```bash
+# Test with Claude official skills (3P update)
+npm run start:official -- "What skills are available?"
+
+# Test with custom WASM skills (skill creation)
+npm start "Create a new skill called 'note-taker'"
 ```
 
 ### Architecture
@@ -105,7 +125,7 @@ The `createSkillTools()` function provides these tools:
 
 ### Notes
 
-- Skills are loaded from `examples/skills`
+- Skills are loaded from `examples/skills` by default (configurable via `--skills-dir`)
 - The agent learns everything from SKILL.md - no prior knowledge needed
 - Output files go to the `output/` workspace directory
 - Uses DeepSeek API (OpenAI-compatible) by default

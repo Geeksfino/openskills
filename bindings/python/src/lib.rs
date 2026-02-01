@@ -434,7 +434,7 @@ impl OpenSkillRuntimeWrapper {
         let mut runtime = self.inner.lock().unwrap();
 
         // Parse options from Python dict
-        let (target, timeout_ms, input_val) = if let Some(opts) = options {
+        let (target, timeout_ms, input_val, workspace_dir) = if let Some(opts) = options {
             let target_type: Option<String> = opts.get_item("target_type")?
                 .and_then(|v| v.extract().ok());
             
@@ -488,13 +488,17 @@ impl OpenSkillRuntimeWrapper {
                     serde_json::from_str(&json_str).ok()
                 });
 
-            (target, timeout, input_val)
+            let workspace_dir: Option<std::path::PathBuf> = opts.get_item("workspace_dir")?
+                .and_then(|v| v.extract::<String>().ok())
+                .map(std::path::PathBuf::from);
+
+            (target, timeout, input_val, workspace_dir)
         } else {
-            (ExecutionTarget::Auto, None, None)
+            (ExecutionTarget::Auto, None, None, None)
         };
 
         let result = runtime
-            .run_skill_target(&skill_id, target, timeout_ms, input_val)
+            .run_skill_target(&skill_id, target, timeout_ms, input_val, workspace_dir)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         // Convert Value to JSON string, then parse to Python object

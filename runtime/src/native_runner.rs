@@ -96,6 +96,7 @@ mod macos {
         enforcer: &PermissionEnforcer,
         allowed_tools: &[String],
         workspace_dir: Option<&Path>,
+        script_args: &[String],
     ) -> Result<ExecutionArtifacts, OpenSkillError> {
         if !script_path.exists() {
             return Err(OpenSkillError::NativeExecutionError(format!(
@@ -184,7 +185,15 @@ mod macos {
         let profile_path = write_profile(&profile)?;
         let mut cmd = Command::new("sandbox-exec");
         cmd.arg("-f").arg(&profile_path).arg("--").arg(program).args(args);
-        cmd.current_dir(&skill_root);
+        // Append user-provided script arguments (e.g., "my-test" for init-artifact.sh)
+        if !script_args.is_empty() {
+            cmd.args(script_args);
+        }
+        // Use workspace_dir as cwd if provided, otherwise fall back to skill_root.
+        // This ensures scripts that create output files write to the workspace directory.
+        // Scripts can still access skill resources via SKILL_ROOT env var.
+        let working_directory = workspace_dir.unwrap_or(&skill_root);
+        cmd.current_dir(working_directory);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -321,6 +330,16 @@ mod macos {
             "/usr/bin:/bin:/usr/sbin:/sbin".to_string()
         });
         cmd.env("PATH", path);
+
+        // Disable corepack's auto-pin feature to prevent it from traversing up
+        // the directory tree and trying to add a `packageManager` field to
+        // package.json files outside the sandbox's allowed write paths.
+        cmd.env("COREPACK_ENABLE_AUTO_PIN", "0");
+
+        // Set CI=true to signal non-interactive mode to tools like npm, pnpm,
+        // create-vite, etc. This prevents them from prompting for input which
+        // would cause issues since stdin may contain JSON input data.
+        cmd.env("CI", "true");
 
         if let Ok(lang) = std::env::var("LANG") {
             cmd.env("LANG", lang);
@@ -564,6 +583,7 @@ pub fn execute_native(
     _enforcer: &PermissionEnforcer,
     _allowed_tools: &[String],
     _workspace_dir: Option<&Path>,
+    _script_args: &[String],
 ) -> Result<ExecutionArtifacts, OpenSkillError> {
     Err(OpenSkillError::UnsupportedPlatform(
         "Native execution requires macOS (seatbelt)".to_string(),

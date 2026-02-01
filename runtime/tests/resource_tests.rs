@@ -220,6 +220,7 @@ fn test_run_skill_target_script() {
         },
         Some(5000),
         None,
+        None,
     );
 
     // Python might not be available, so we accept either success or appropriate error
@@ -254,6 +255,7 @@ fn test_run_skill_target_skill_not_found() {
             path: "script.py".to_string(),
             args: vec![],
         },
+        None,
         None,
         None,
     );

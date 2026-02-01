@@ -343,6 +343,8 @@ This dual approach means you get:
 
 > **Status**: WASM sandboxing is **experimental** and not the primary execution method. Most skills work perfectly with native Python and shell scripts.
 
+> **Developer Note on WASI Versions**: The documentation refers to "WASI 0.3" as our target, but the current build toolchain (using the `wasi_snapshot_preview1` adapter) produces **WASI 0.2 components**. The runtime supports both WASI 0.2 and 0.3 - it attempts 0.3 instantiation first, then falls back to 0.2. Native WASI 0.3 toolchains (e.g., Rust's `wasm32-wasip3` target) are expected to mature in 2026, at which point components can be built natively for WASI 0.3 without the adapter.
+
 ### Why We Support WASM (Long-Term)
 
 While native scripts are our primary execution model, we're investing in WASM support for specific use cases where it provides unique value. Here's our perspective on WASM's role:
