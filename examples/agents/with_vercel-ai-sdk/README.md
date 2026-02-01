@@ -58,6 +58,26 @@ npm start "What skills are available?"
 npm start "Create a Word document with title 'Test'"
 ```
 
+### CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `--skills-dir <path>` | Path to skills directory (default: `examples/skills`) |
+
+### Testing
+
+See [TESTING.md](./TESTING.md) for detailed test documentation.
+
+#### Quick Test Commands
+
+```bash
+# Test with Claude official skills (3P update)
+npm run start:official -- "What skills are available?"
+
+# Test with custom WASM skills (skill creation)
+npm start "Create a new skill called 'note-taker'"
+```
+
 ### Architecture
 
 ```
