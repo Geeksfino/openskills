@@ -742,8 +742,8 @@ Example response:
         let audit = AuditRecord {
             skill_id: session.skill().id.clone(),
             version: "1.0".to_string(),
-            input_hash: audit::hash_json(session.input()),
-            output_hash: audit::hash_json(&output),
+            input_hash: audit::hash_json_value(session.input()),
+            output_hash: audit::hash_json_value(&output),
             start_time_ms: session.start_epoch_ms(),
             duration_ms,
             permissions_used: session.permissions_used().to_vec(),
@@ -952,8 +952,8 @@ Example response:
         let audit = AuditRecord {
             skill_id: skill.id.clone(),
             version: "1.0".to_string(), // Claude Skills don't have version in manifest
-            input_hash: audit::hash_json(&options.input.clone().unwrap_or(Value::Null)),
-            output_hash: audit::hash_json(&execution.output),
+            input_hash: audit::hash_json_value(&options.input.clone().unwrap_or(Value::Null)),
+            output_hash: audit::hash_json_value(&execution.output),
             start_time_ms: start_epoch,
             duration_ms,
             permissions_used: execution.permissions_used.clone(),
@@ -1097,7 +1097,7 @@ Example response:
             skill_id: skill.id.clone(),
             version: "1.0".to_string(),
             input_hash: "".to_string(),
-            output_hash: audit::hash_json(&execution.output),
+            output_hash: audit::hash_json_value(&execution.output),
             start_time_ms: start_epoch,
             duration_ms,
             permissions_used: execution.permissions_used.clone(),

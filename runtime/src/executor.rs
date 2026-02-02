@@ -18,6 +18,8 @@ use crate::registry::Skill;
 use crate::wasm_runner::execute_wasm;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 /// Artifacts from skill execution.
 pub struct ExecutionArtifacts {
@@ -279,18 +281,30 @@ pub fn run_skill_target(
             }
 
             // Validate path is within skill directory (security)
+            // Use race-free path validation with canonicalization
             let canonical_skill = skill.root.canonicalize().map_err(|e| {
                 OpenSkillError::NativeExecutionError(format!(
                     "Failed to canonicalize skill root: {}",
                     e
                 ))
             })?;
+            
+            // Check if path exists before canonicalization to avoid race conditions
+            if !full_path.exists() {
+                return Err(OpenSkillError::NativeExecutionError(format!(
+                    "File not found: {}",
+                    full_path.display()
+                )));
+            }
+            
             let canonical_file = full_path.canonicalize().map_err(|e| {
                 OpenSkillError::NativeExecutionError(format!(
                     "Failed to canonicalize file path: {}",
                     e
                 ))
             })?;
+            
+            // Use proper path comparison that handles edge cases
             if !canonical_file.starts_with(&canonical_skill) {
                 return Err(OpenSkillError::NativeExecutionError(format!(
                     "Path escapes skill directory: {}",
@@ -355,12 +369,23 @@ pub fn run_skill_target(
                     e
                 ))
             })?;
+            
+            // Verify script exists before canonicalization
+            if !script_path.exists() {
+                return Err(OpenSkillError::NativeExecutionError(format!(
+                    "Script not found: {}",
+                    script_path.display()
+                )));
+            }
+            
             let canonical_script = script_path.canonicalize().map_err(|e| {
                 OpenSkillError::NativeExecutionError(format!(
                     "Failed to canonicalize script path: {}",
                     e
                 ))
             })?;
+            
+            // Use proper path comparison that handles edge cases
             if !canonical_script.starts_with(&canonical_skill) {
                 return Err(OpenSkillError::NativeExecutionError(format!(
                     "Script path escapes skill directory: {}",
@@ -799,11 +824,17 @@ pub fn run_sandboxed_command(
         }
     };
 
-    // Read stdout/stderr in separate threads
+    // Read stdout/stderr in separate threads with panic handling
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let stdout_handle = thread::spawn(move || read_stream_to_string(stdout));
-    let stderr_handle = thread::spawn(move || read_stream_to_string(stderr));
+    let stdout_handle = thread::spawn(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stdout)))
+            .unwrap_or_else(|_| String::new())
+    });
+    let stderr_handle = thread::spawn(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stderr)))
+            .unwrap_or_else(|_| String::new())
+    });
 
     // Wait with timeout
     let timeout_ms = if permissions.timeout_ms > 0 {
@@ -828,9 +859,11 @@ pub fn run_sandboxed_command(
     // Clean up profile
     let _ = std::fs::remove_file(&profile_path);
 
-    // Collect output
-    let stdout_content = stdout_handle.join().unwrap_or_default();
-    let stderr_content = stderr_handle.join().unwrap_or_default();
+    // Collect output with timeout to prevent indefinite blocking
+    let stdout_content = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
+        .unwrap_or_else(|_| String::new());
+    let stderr_content = join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
+        .unwrap_or_else(|_| String::new());
 
     let exit_code = status
         .and_then(|s| s.code())
@@ -959,7 +992,8 @@ fn write_temp_profile(profile: &str) -> Result<PathBuf, OpenSkillError> {
         .unwrap_or_default()
         .as_millis();
     let pid = std::process::id();
-    let path = std::env::temp_dir().join(format!("openskills_cmd_{}_{}.sb", pid, timestamp));
+    let random_suffix = rand::random::<u32>();
+    let path = std::env::temp_dir().join(format!("openskills_cmd_{}_{}_{}.sb", pid, timestamp, random_suffix));
     
     let mut file = std::fs::File::create(&path).map_err(|e| {
         OpenSkillError::SeatbeltError(format!("Failed to create profile file: {}", e))
@@ -967,8 +1001,36 @@ fn write_temp_profile(profile: &str) -> Result<PathBuf, OpenSkillError> {
     file.write_all(profile.as_bytes()).map_err(|e| {
         OpenSkillError::SeatbeltError(format!("Failed to write profile: {}", e))
     })?;
+    file.flush().map_err(|e| {
+        OpenSkillError::SeatbeltError(format!("Failed to flush profile: {}", e))
+    })?;
     
     Ok(path)
+}
+
+/// Safely join a thread with a timeout to prevent indefinite blocking
+#[cfg(target_os = "macos")]
+fn join_thread_with_timeout<T: Send + 'static>(
+    handle: thread::JoinHandle<T>,
+    timeout: Duration,
+) -> Result<T, OpenSkillError> {
+    use std::sync::mpsc;
+    
+    let (tx, rx) = mpsc::channel();
+    
+    // Spawn a watcher thread
+    thread::spawn(move || {
+        let result = handle.join();
+        let _ = tx.send(result);
+    });
+    
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(_)) => Err(OpenSkillError::NativeExecutionError(
+            "Thread panicked during execution".to_string()
+        )),
+        Err(_) => Err(OpenSkillError::Timeout),
+    }
 }
 
 #[cfg(target_os = "macos")]

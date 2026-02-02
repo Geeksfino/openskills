@@ -39,6 +39,12 @@ glob = "0.3"
 # URL parsing for network permissions
 url = "2.5"
 
+# Random number generation for secure temp file names
+rand = "0.8"
+
+# Secure temporary file creation
+tempfile = "3.10"
+
 # WASM runtime
 # Using latest wasmtime (40+) for WASI 0.3.0 preview support
 # WASI 0.3.0 final release expected February 2026

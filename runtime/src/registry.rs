@@ -85,6 +85,8 @@ pub struct SkillRegistry {
     skills: HashMap<String, SkillMetadata>,
     /// Project root for relative path resolution.
     project_root: Option<PathBuf>,
+    /// Loading errors encountered during discovery (skill_id -> error message)
+    loading_errors: HashMap<String, String>,
 }
 
 impl SkillRegistry {
@@ -93,7 +95,13 @@ impl SkillRegistry {
         Self {
             skills: HashMap::new(),
             project_root: None,
+            loading_errors: HashMap::new(),
         }
+    }
+    
+    /// Get loading errors encountered during discovery
+    pub fn get_loading_errors(&self) -> &HashMap<String, String> {
+        &self.loading_errors
     }
 
     /// Set the project root for relative path resolution.
@@ -209,8 +217,15 @@ impl SkillRegistry {
                     self.skills.insert(id, metadata);
                 }
                 Err(e) => {
-                    // Log warning but continue scanning
-                    eprintln!("Warning: failed to load skill '{}': {}", id, e);
+                    // Log warning with structured format for better observability
+                    eprintln!(
+                        "Warning: Failed to load skill '{}' from {}: {}",
+                        id,
+                        skill_md_path.display(),
+                        e
+                    );
+                    // Store error in registry for later retrieval
+                    self.loading_errors.insert(id.clone(), e.to_string());
                 }
             }
         }

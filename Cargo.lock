@@ -1928,6 +1928,7 @@ dependencies = [
  "glob",
  "hex",
  "javy-codegen",
+ "rand",
  "serde",
  "serde_json",
  "serde_yaml",

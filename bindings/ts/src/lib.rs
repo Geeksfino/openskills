@@ -112,23 +112,55 @@ pub struct ExecutionResult {
     pub audit: AuditRecord,
 }
 
+// Helper functions used in impl blocks - must be defined before use
+fn parse_output_type(value: &str) -> Result<OutputType> {
+    match value.to_ascii_lowercase().as_str() {
+        "stdout" => Ok(OutputType::Stdout),
+        "stderr" => Ok(OutputType::Stderr),
+        "toolcall" | "tool_call" | "tool" => Ok(OutputType::ToolCall),
+        "result" => Ok(OutputType::Result),
+        _ => Err(Error::from_reason(format!(
+            "Invalid output_type: {}",
+            value
+        ))),
+    }
+}
+
+fn parse_execution_status(status: Option<String>) -> openskills_runtime::RuntimeExecutionStatus {
+    match status.as_deref() {
+        Some("timeout") => openskills_runtime::RuntimeExecutionStatus::Timeout,
+        Some("permission_denied") => openskills_runtime::RuntimeExecutionStatus::PermissionDenied,
+        Some(s) if s.starts_with("failed:") => {
+            openskills_runtime::RuntimeExecutionStatus::Failed(
+                s.trim_start_matches("failed:").to_string(),
+            )
+        }
+        _ => openskills_runtime::RuntimeExecutionStatus::Success,
+    }
+}
+
+/// Safely convert i64 timeout to u64, clamping negative values to 0.
+/// This prevents two's complement wrapping where negative values become
+/// extremely large unsigned values (e.g., -1 becomes ~18 quintillion ms).
+/// Also handles potential overflow from very large i64 values.
+fn safe_timeout_ms(timeout: Option<i64>) -> Option<u64> {
+    timeout.and_then(|t| {
+        if t < 0 {
+            Some(0)
+        } else {
+            // Use try_from to safely convert, handling overflow
+            u64::try_from(t).ok()
+        }
+    })
+}
+
 // Define all #[napi] structs before their impl blocks (required for NAPI macro expansion)
+// Each impl block MUST immediately follow its struct definition for NAPI-RS macro expansion
 #[napi]
 pub struct SkillExecutionSessionWrapper {
     inner: Mutex<SkillExecutionSession>,
 }
 
-#[napi]
-pub struct ExecutionContextWrapper {
-    inner: Mutex<ExecutionContext>,
-}
-
-#[napi]
-pub struct OpenSkillRuntimeWrapper {
-    inner: Mutex<OpenSkillRuntime>,
-}
-
-// Now define all impl blocks
 #[napi]
 impl SkillExecutionSessionWrapper {
     #[napi]
@@ -175,6 +207,11 @@ impl SkillExecutionSessionWrapper {
     pub fn summarize(&self) -> String {
         self.inner.lock().unwrap().summarize_fork()
     }
+}
+
+#[napi]
+pub struct ExecutionContextWrapper {
+    inner: Mutex<ExecutionContext>,
 }
 
 #[napi]
@@ -236,6 +273,11 @@ impl ExecutionContextWrapper {
     pub fn summarize(&self) -> String {
         self.inner.lock().unwrap().summarize()
     }
+}
+
+#[napi]
+pub struct OpenSkillRuntimeWrapper {
+    inner: Mutex<OpenSkillRuntime>,
 }
 
 #[napi]
@@ -665,39 +707,6 @@ impl OpenSkillRuntimeWrapper {
             .map_err(|e| Error::from_reason(e.to_string()))?;
         Ok(path.to_string_lossy().to_string())
     }
-}
-
-fn parse_output_type(value: &str) -> Result<OutputType> {
-    match value.to_ascii_lowercase().as_str() {
-        "stdout" => Ok(OutputType::Stdout),
-        "stderr" => Ok(OutputType::Stderr),
-        "toolcall" | "tool_call" | "tool" => Ok(OutputType::ToolCall),
-        "result" => Ok(OutputType::Result),
-        _ => Err(Error::from_reason(format!(
-            "Invalid output_type: {}",
-            value
-        ))),
-    }
-}
-
-fn parse_execution_status(status: Option<String>) -> openskills_runtime::RuntimeExecutionStatus {
-    match status.as_deref() {
-        Some("timeout") => openskills_runtime::RuntimeExecutionStatus::Timeout,
-        Some("permission_denied") => openskills_runtime::RuntimeExecutionStatus::PermissionDenied,
-        Some(s) if s.starts_with("failed:") => {
-            openskills_runtime::RuntimeExecutionStatus::Failed(
-                s.trim_start_matches("failed:").to_string(),
-            )
-        }
-        _ => openskills_runtime::RuntimeExecutionStatus::Success,
-    }
-}
-
-/// Safely convert i64 timeout to u64, clamping negative values to 0.
-/// This prevents two's complement wrapping where negative values become
-/// extremely large unsigned values (e.g., -1 becomes ~18 quintillion ms).
-fn safe_timeout_ms(timeout: Option<i64>) -> Option<u64> {
-    timeout.map(|t| if t < 0 { 0 } else { t as u64 })
 }
 
 // ============================================================================

@@ -360,15 +360,25 @@ OpenSkills runtime does not support legacy core-module WASM artifacts."
     done.store(true, Ordering::Relaxed);
     let _ = timeout_handle.join();
 
-    // Collect stdout/stderr
-    let stdout = String::from_utf8_lossy(
-        &stdout_buf.lock().unwrap_or_else(|e| e.into_inner()),
-    )
-    .to_string();
-    let stderr = String::from_utf8_lossy(
-        &stderr_buf.lock().unwrap_or_else(|e| e.into_inner()),
-    )
-    .to_string();
+    // Collect stdout/stderr with proper mutex poisoning handling
+    let stdout_bytes: Vec<u8> = match stdout_buf.lock() {
+        Ok(guard) => (*guard).clone(),
+        Err(poisoned) => {
+            // Log the poisoning but still get the data
+            eprintln!("Warning: stdout mutex was poisoned, attempting recovery");
+            poisoned.into_inner().clone()
+        }
+    };
+    let stderr_bytes: Vec<u8> = match stderr_buf.lock() {
+        Ok(guard) => (*guard).clone(),
+        Err(poisoned) => {
+            eprintln!("Warning: stderr mutex was poisoned, attempting recovery");
+            poisoned.into_inner().clone()
+        }
+    };
+    
+    let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
 
     // Determine exit status and output
     let (exit_status, output) = match run_result {

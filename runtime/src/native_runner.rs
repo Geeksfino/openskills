@@ -219,8 +219,16 @@ mod macos {
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        let stdout_handle = thread::spawn(move || read_stream(stdout));
-        let stderr_handle = thread::spawn(move || read_stream(stderr));
+        
+        // Use panic-safe thread spawning with catch_unwind
+        let stdout_handle = thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stdout)))
+                .unwrap_or_else(|_| Vec::new())
+        });
+        let stderr_handle = thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stderr)))
+                .unwrap_or_else(|_| Vec::new())
+        });
 
         let start = Instant::now();
         let mut timed_out = false;
@@ -236,8 +244,11 @@ mod macos {
             thread::sleep(Duration::from_millis(10));
         };
 
-        let stdout_bytes = stdout_handle.join().unwrap_or_default();
-        let stderr_bytes = stderr_handle.join().unwrap_or_default();
+        // Safely join threads with timeout to prevent indefinite blocking
+        let stdout_bytes = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
+            .unwrap_or_else(|_| Vec::new());
+        let stderr_bytes = join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
+            .unwrap_or_else(|_| Vec::new());
         let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
         let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
 
@@ -442,7 +453,26 @@ mod macos {
 
         // Deny sensitive credential and config paths FIRST (before allow-all)
         // Seatbelt uses first-match-wins, so deny rules must come before allow rules
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string());
+        // Validate HOME environment variable for security
+        let home = std::env::var("HOME")
+            .ok()
+            .and_then(|h| {
+                let path = Path::new(&h);
+                // Validate: must be absolute, not empty, and not just "/"
+                if path.is_absolute() && h.len() > 1 && h != "/" {
+                    Some(h)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                // Fallback to system-appropriate default
+                if cfg!(target_os = "macos") {
+                    "/Users".to_string()
+                } else {
+                    "/home".to_string()
+                }
+            });
         for sensitive_path in SENSITIVE_DENY_PATHS {
             let expanded = sensitive_path.replace('~', &home);
             profile.push_str(&format!(
@@ -528,36 +558,57 @@ mod macos {
     }
 
     fn write_profile(profile: &str) -> Result<PathBuf, OpenSkillError> {
-        let mut attempt = 0;
+        use rand::Rng;
+        
         let temp_dir = std::env::temp_dir();
-
-        loop {
-            let filename = format!(
-                "openskills-seatbelt-{}-{}.sb",
-                std::process::id(),
-                attempt
-            );
-            let path = temp_dir.join(filename);
-            let file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path);
-
-            match file {
-                Ok(mut file) => {
-                    file.write_all(profile.as_bytes()).map_err(OpenSkillError::Io)?;
-                    return Ok(path);
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    attempt += 1;
-                    if attempt > 100 {
-                        return Err(OpenSkillError::SeatbeltError(
-                            "Failed to create seatbelt profile file".to_string(),
-                        ));
-                    }
-                }
-                Err(e) => return Err(OpenSkillError::Io(e)),
-            }
+        let pid = std::process::id();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let random_suffix: u32 = rand::thread_rng().gen();
+        
+        let filename = format!(
+            "openskills-seatbelt-{}-{}-{}.sb",
+            pid, timestamp, random_suffix
+        );
+        let path = temp_dir.join(filename);
+        
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| OpenSkillError::SeatbeltError(format!(
+                "Failed to create seatbelt profile file: {}", e
+            )))?;
+        
+        file.write_all(profile.as_bytes()).map_err(OpenSkillError::Io)?;
+        file.flush().map_err(OpenSkillError::Io)?;
+        
+        Ok(path)
+    }
+    
+    /// Safely join a thread with a timeout to prevent indefinite blocking
+    fn join_thread_with_timeout<T: Send + 'static>(
+        handle: thread::JoinHandle<T>,
+        timeout: Duration,
+    ) -> Result<T, OpenSkillError> {
+        use std::sync::mpsc;
+        
+        let (tx, rx) = mpsc::channel();
+        
+        // Spawn a watcher thread
+        thread::spawn(move || {
+            let result = handle.join();
+            let _ = tx.send(result);
+        });
+        
+        match rx.recv_timeout(timeout) {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(_)) => Err(OpenSkillError::NativeExecutionError(
+                "Thread panicked during execution".to_string()
+            )),
+            Err(_) => Err(OpenSkillError::Timeout),
         }
     }
 
