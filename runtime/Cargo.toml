@@ -45,6 +45,16 @@ rand = "0.8"
 # Secure temporary file creation
 tempfile = "3.10"
 
+# Linux sandboxing (Landlock + seccomp)
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+# seccompiler is the high-level Firecracker/AWS seccomp library
+seccompiler = "0.4"
+# nix provides low-level Unix/Linux APIs (prctl, clone, namespaces)
+nix = { version = "0.29", features = ["process", "signal", "fs", "user"] }
+# libc for raw syscall numbers and constants
+libc = "0.2"
+
 # WASM runtime
 # Using latest wasmtime (40+) for WASI 0.3.0 preview support
 # WASI 0.3.0 final release expected February 2026

@@ -724,7 +724,9 @@ pub struct CommandResult {
 /// Run a shell command in a sandboxed environment.
 ///
 /// This provides Claude Code-like sandboxed bash execution for agents.
-/// On macOS, uses Seatbelt sandbox-exec. On other platforms, returns an error.
+/// - On macOS, uses Seatbelt sandbox-exec
+/// - On Linux, uses Landlock LSM (kernel 5.13+) with NO_NEW_PRIVS fallback
+/// - On other platforms, returns an error
 ///
 /// # Arguments
 ///
@@ -1043,14 +1045,416 @@ fn read_stream_to_string<R: std::io::Read>(stream: Option<R>) -> String {
     buf
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Linux implementation of sandboxed command execution using Landlock.
+#[cfg(target_os = "linux")]
+pub fn run_sandboxed_command(
+    command: &str,
+    working_dir: &Path,
+    permissions: CommandPermissions,
+) -> Result<CommandResult, OpenSkillError> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    // Validate working directory exists
+    if !working_dir.exists() {
+        return Err(OpenSkillError::NativeExecutionError(format!(
+            "Working directory does not exist: {}",
+            working_dir.display()
+        )));
+    }
+
+    let canonical_working_dir = working_dir.canonicalize().map_err(|e| {
+        OpenSkillError::NativeExecutionError(format!(
+            "Failed to canonicalize working directory: {}",
+            e
+        ))
+    })?;
+
+    // Build Landlock wrapper script
+    let wrapper_script = build_linux_command_wrapper(
+        command,
+        &canonical_working_dir,
+        &permissions,
+    )?;
+
+    // Write wrapper to temp file
+    let wrapper_path = write_linux_wrapper(&wrapper_script)?;
+
+    // Make wrapper executable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&wrapper_path)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&wrapper_path, perms)?;
+    }
+
+    // Execute the wrapper
+    let mut cmd = Command::new("/bin/bash");
+    cmd.arg(&wrapper_path);
+    cmd.current_dir(&canonical_working_dir);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    // Set up minimal environment
+    cmd.env_clear();
+    if let Ok(path) = std::env::var("PATH") {
+        cmd.env("PATH", path);
+    } else {
+        cmd.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin");
+    }
+    if let Ok(lang) = std::env::var("LANG") {
+        cmd.env("LANG", lang);
+    }
+    cmd.env("TMPDIR", "/tmp");
+
+    // Pass through user-specified environment variables
+    for (key, value) in &permissions.env_vars {
+        cmd.env(key, value);
+    }
+
+    // Spawn the process
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            let _ = std::fs::remove_file(&wrapper_path);
+            return Err(OpenSkillError::LinuxSandboxError(format!(
+                "Failed to execute command with sandbox: {}",
+                e
+            )));
+        }
+    };
+
+    // Read stdout/stderr in separate threads
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdout_handle = thread::spawn(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            linux_read_stream_to_string(stdout)
+        }))
+        .unwrap_or_else(|_| String::new())
+    });
+    let stderr_handle = thread::spawn(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            linux_read_stream_to_string(stderr)
+        }))
+        .unwrap_or_else(|_| String::new())
+    });
+
+    // Wait with timeout
+    let timeout_ms = if permissions.timeout_ms > 0 {
+        permissions.timeout_ms
+    } else {
+        30000 // 30 second default
+    };
+    let start = Instant::now();
+    let mut timed_out = false;
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(OpenSkillError::Io)? {
+            break Some(status);
+        }
+        if start.elapsed() >= Duration::from_millis(timeout_ms) {
+            timed_out = true;
+            let _ = child.kill();
+            break child.wait().ok();
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    // Clean up wrapper
+    let _ = std::fs::remove_file(&wrapper_path);
+
+    // Collect output with timeout
+    let stdout_content = linux_join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
+        .unwrap_or_else(|_| String::new());
+    let stderr_content = linux_join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
+        .unwrap_or_else(|_| String::new());
+
+    let exit_code = status
+        .and_then(|s| s.code())
+        .unwrap_or(if timed_out { -1 } else { 1 });
+
+    Ok(CommandResult {
+        exit_code,
+        stdout: stdout_content,
+        stderr: stderr_content,
+        timed_out,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn build_linux_command_wrapper(
+    command: &str,
+    working_dir: &Path,
+    permissions: &CommandPermissions,
+) -> Result<String, OpenSkillError> {
+    // System paths needed for basic command execution
+    let system_ro_paths = vec![
+        "/usr/lib",
+        "/usr/lib64", 
+        "/usr/libexec",
+        "/usr/bin",
+        "/usr/sbin",
+        "/usr/share",
+        "/usr/local",
+        "/bin",
+        "/sbin",
+        "/lib",
+        "/lib64",
+        "/etc",
+        "/proc/self",
+        "/dev/null",
+        "/dev/urandom",
+        "/dev/zero",
+    ];
+
+    // Collect read paths
+    let mut ro_paths: Vec<String> = system_ro_paths
+        .iter()
+        .filter(|p| PathBuf::from(p).exists())
+        .map(|s| s.to_string())
+        .collect();
+    
+    // Add working directory
+    ro_paths.push(working_dir.to_string_lossy().to_string());
+    
+    // Add user-specified read paths
+    for p in &permissions.read_paths {
+        if p.exists() {
+            ro_paths.push(p.to_string_lossy().to_string());
+        }
+    }
+
+    // Collect write paths
+    let mut rw_paths: Vec<String> = vec!["/tmp".to_string(), "/var/tmp".to_string()];
+    
+    // Add user-specified write paths
+    for p in &permissions.write_paths {
+        let path_str = p.to_string_lossy().to_string();
+        if !rw_paths.contains(&path_str) {
+            rw_paths.push(path_str);
+        }
+    }
+
+    // Shell-escape the command
+    let escaped_command = command.replace('\\', "\\\\").replace('"', "\\\"");
+
+    let script = format!(r##"#!/bin/bash
+set -e
+
+# OpenSkills Linux Sandbox Command Wrapper
+
+# Check for Landlock support
+LANDLOCK_SUPPORTED=0
+if [ -f /sys/kernel/security/lsm ]; then
+    if grep -q landlock /sys/kernel/security/lsm 2>/dev/null; then
+        LANDLOCK_SUPPORTED=1
+    fi
+fi
+
+KERNEL_VERSION=$(uname -r | cut -d. -f1-2)
+KERNEL_MAJOR=$(echo "$KERNEL_VERSION" | cut -d. -f1)
+KERNEL_MINOR=$(echo "$KERNEL_VERSION" | cut -d. -f2)
+
+if [ "$KERNEL_MAJOR" -lt 5 ] || ([ "$KERNEL_MAJOR" -eq 5 ] && [ "$KERNEL_MINOR" -lt 13 ]); then
+    LANDLOCK_SUPPORTED=0
+fi
+
+apply_landlock_python() {{
+    python3 << 'PYTHON_EOF'
+import os
+import sys
+import ctypes
+import ctypes.util
+
+# Landlock constants
+LANDLOCK_ACCESS_FS_EXECUTE = 1 << 0
+LANDLOCK_ACCESS_FS_WRITE_FILE = 1 << 1
+LANDLOCK_ACCESS_FS_READ_FILE = 1 << 2
+LANDLOCK_ACCESS_FS_READ_DIR = 1 << 3
+LANDLOCK_ACCESS_FS_REMOVE_DIR = 1 << 4
+LANDLOCK_ACCESS_FS_REMOVE_FILE = 1 << 5
+LANDLOCK_ACCESS_FS_MAKE_CHAR = 1 << 6
+LANDLOCK_ACCESS_FS_MAKE_DIR = 1 << 7
+LANDLOCK_ACCESS_FS_MAKE_REG = 1 << 8
+LANDLOCK_ACCESS_FS_MAKE_SOCK = 1 << 9
+LANDLOCK_ACCESS_FS_MAKE_FIFO = 1 << 10
+LANDLOCK_ACCESS_FS_MAKE_BLOCK = 1 << 11
+LANDLOCK_ACCESS_FS_MAKE_SYM = 1 << 12
+
+LANDLOCK_ACCESS_FS_READ = LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR
+LANDLOCK_ACCESS_FS_WRITE = (LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_REMOVE_DIR |
+                            LANDLOCK_ACCESS_FS_REMOVE_FILE | LANDLOCK_ACCESS_FS_MAKE_CHAR |
+                            LANDLOCK_ACCESS_FS_MAKE_DIR | LANDLOCK_ACCESS_FS_MAKE_REG |
+                            LANDLOCK_ACCESS_FS_MAKE_SOCK | LANDLOCK_ACCESS_FS_MAKE_FIFO |
+                            LANDLOCK_ACCESS_FS_MAKE_BLOCK | LANDLOCK_ACCESS_FS_MAKE_SYM)
+LANDLOCK_ACCESS_FS_ALL = LANDLOCK_ACCESS_FS_READ | LANDLOCK_ACCESS_FS_WRITE
+
+SYS_landlock_create_ruleset = 444
+SYS_landlock_add_rule = 445
+SYS_landlock_restrict_self = 446
+LANDLOCK_RULE_PATH_BENEATH = 1
+PR_SET_NO_NEW_PRIVS = 38
+
+class LandlockRulesetAttr(ctypes.Structure):
+    _fields_ = [("handled_access_fs", ctypes.c_uint64)]
+
+class LandlockPathBeneathAttr(ctypes.Structure):
+    _fields_ = [("allowed_access", ctypes.c_uint64), ("parent_fd", ctypes.c_int)]
+
+def syscall(number, *args):
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    libc.syscall.argtypes = [ctypes.c_long] + [ctypes.c_long] * len(args)
+    result = libc.syscall(number, *args)
+    if result < 0:
+        errno = ctypes.get_errno()
+        raise OSError(errno, os.strerror(errno))
+    return result
+
+def prctl(option, arg2=0, arg3=0, arg4=0, arg5=0):
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    libc.prctl.restype = ctypes.c_int
+    result = libc.prctl(option, arg2, arg3, arg4, arg5)
+    if result < 0:
+        errno = ctypes.get_errno()
+        raise OSError(errno, os.strerror(errno))
+    return result
+
+def apply_landlock():
+    ro_paths = {ro_paths_json}
+    rw_paths = {rw_paths_json}
+
+    try:
+        ruleset_attr = LandlockRulesetAttr()
+        ruleset_attr.handled_access_fs = LANDLOCK_ACCESS_FS_ALL
+        
+        ruleset_fd = syscall(SYS_landlock_create_ruleset, ctypes.addressof(ruleset_attr), ctypes.sizeof(ruleset_attr), 0)
+        
+        def add_rule(path, access):
+            if not os.path.exists(path):
+                return
+            try:
+                fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
+                try:
+                    rule = LandlockPathBeneathAttr()
+                    rule.allowed_access = access
+                    rule.parent_fd = fd
+                    syscall(SYS_landlock_add_rule, ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, ctypes.addressof(rule), 0)
+                finally:
+                    os.close(fd)
+            except (OSError, IOError):
+                pass
+        
+        for path in ro_paths:
+            add_rule(path, LANDLOCK_ACCESS_FS_READ)
+        
+        for path in rw_paths:
+            add_rule(path, LANDLOCK_ACCESS_FS_ALL)
+        
+        prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        syscall(SYS_landlock_restrict_self, ruleset_fd, 0)
+        os.close(ruleset_fd)
+        
+    except OSError:
+        try:
+            prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+        except:
+            pass
+
+if __name__ == "__main__":
+    apply_landlock()
+PYTHON_EOF
+}}
+
+if [ "$LANDLOCK_SUPPORTED" = "1" ]; then
+    apply_landlock_python 2>/dev/null || true
+else
+    python3 -c "
+import ctypes
+import ctypes.util
+libc = ctypes.CDLL(ctypes.util.find_library('c'))
+libc.prctl(38, 1, 0, 0, 0)
+" 2>/dev/null || true
+fi
+
+exec /bin/bash -c "{escaped_command}"
+"##,
+        ro_paths_json = serde_json::to_string(&ro_paths).unwrap_or_else(|_| "[]".to_string()),
+        rw_paths_json = serde_json::to_string(&rw_paths).unwrap_or_else(|_| "[]".to_string()),
+        escaped_command = escaped_command,
+    );
+
+    Ok(script)
+}
+
+#[cfg(target_os = "linux")]
+fn write_linux_wrapper(script: &str) -> Result<PathBuf, OpenSkillError> {
+    use std::io::Write;
+    
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let pid = std::process::id();
+    let random_suffix = rand::random::<u32>();
+    let path = std::env::temp_dir().join(format!("openskills_cmd_{}_{}_{}.sh", pid, timestamp, random_suffix));
+    
+    let mut file = std::fs::File::create(&path).map_err(|e| {
+        OpenSkillError::LinuxSandboxError(format!("Failed to create wrapper file: {}", e))
+    })?;
+    file.write_all(script.as_bytes()).map_err(|e| {
+        OpenSkillError::LinuxSandboxError(format!("Failed to write wrapper: {}", e))
+    })?;
+    file.flush().map_err(|e| {
+        OpenSkillError::LinuxSandboxError(format!("Failed to flush wrapper: {}", e))
+    })?;
+    
+    Ok(path)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_join_thread_with_timeout<T: Send + 'static>(
+    handle: thread::JoinHandle<T>,
+    timeout: Duration,
+) -> Result<T, OpenSkillError> {
+    use std::sync::mpsc;
+    
+    let (tx, rx) = mpsc::channel();
+    
+    thread::spawn(move || {
+        let result = handle.join();
+        let _ = tx.send(result);
+    });
+    
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(_)) => Err(OpenSkillError::NativeExecutionError(
+            "Thread panicked during execution".to_string()
+        )),
+        Err(_) => Err(OpenSkillError::Timeout),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_read_stream_to_string<R: std::io::Read>(stream: Option<R>) -> String {
+    let Some(mut stream) = stream else {
+        return String::new();
+    };
+    let mut buf = String::new();
+    let _ = stream.read_to_string(&mut buf);
+    buf
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn run_sandboxed_command(
     _command: &str,
     _working_dir: &Path,
     _permissions: CommandPermissions,
 ) -> Result<CommandResult, OpenSkillError> {
     Err(OpenSkillError::UnsupportedPlatform(
-        "Sandboxed command execution requires macOS (seatbelt)".to_string(),
+        "Sandboxed command execution requires macOS (seatbelt) or Linux (Landlock)".to_string(),
     ))
 }
 

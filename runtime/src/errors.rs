@@ -33,9 +33,13 @@ pub enum OpenSkillError {
     #[error("native execution failed: {0}")]
     NativeExecutionError(String),
 
-    /// Seatbelt sandbox error.
+    /// Seatbelt sandbox error (macOS).
     #[error("seatbelt error: {0}")]
     SeatbeltError(String),
+
+    /// Linux sandbox error (Landlock/seccomp).
+    #[error("linux sandbox error: {0}")]
+    LinuxSandboxError(String),
 
     /// Unsupported platform for native execution.
     #[error("unsupported platform: {0}")]
