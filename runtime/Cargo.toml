@@ -42,12 +42,6 @@ url = "2.5"
 # Random number generation for secure temp file names
 rand = "0.8"
 
-# Linux sandboxing (Landlock LSM)
-[target.'cfg(target_os = "linux")'.dependencies]
-landlock = "0.4"
-# libc for prctl/signal constants in pre_exec sandbox setup
-libc = "0.2"
-
 # WASM runtime
 # Using latest wasmtime (40+) for WASI 0.3.0 preview support
 # WASI 0.3.0 final release expected February 2026
@@ -58,6 +52,12 @@ wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 cap-std = "2.0"
 tokio = { version = "1", features = ["io-util", "rt-multi-thread"] }
+
+# Linux sandboxing (Landlock LSM)
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+# libc for prctl/signal constants in pre_exec sandbox setup
+libc = "0.2"
 
 # JavaScript to WASM compilation (plugin-based)
 # Only include when building the binary (build tool), not when building as a library
