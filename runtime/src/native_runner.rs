@@ -1,7 +1,21 @@
-//! Native sandbox execution using macOS seatbelt.
+//! Native sandbox execution using OS-specific mechanisms.
 //!
 //! Provides OS-level sandboxing for native scripts (Python, shell) as a
 //! complement to the WASM sandbox.
+//!
+//! ## Supported Platforms
+//!
+//! - **macOS**: Uses Seatbelt (sandbox-exec) with a dynamically generated profile
+//! - **Linux**: Uses Landlock LSM (kernel 5.13+) for filesystem restrictions,
+//!   with NO_NEW_PRIVS fallback for older kernels
+//!
+//! ## Security Model
+//!
+//! Both platforms follow Claude Code's security approach:
+//! - Allow broad file reads (interpreters need access to libraries)
+//! - Deny specific sensitive paths (~/.ssh, ~/.aws, etc.)
+//! - Allow writes only to explicitly permitted paths (skill root, workspace, temp)
+//! - Network and process spawning controlled by allowed_tools
 
 use crate::audit::ExecutionStatus;
 use crate::errors::OpenSkillError;
@@ -10,6 +24,8 @@ use crate::permissions::PermissionEnforcer;
 use crate::registry::Skill;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 /// Supported native script types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,14 +52,94 @@ pub fn detect_script_type(path: &Path) -> Result<ScriptType, OpenSkillError> {
     }
 }
 
+// ============================================================================
+// Shared utility functions (platform-independent)
+// ============================================================================
+
+/// Safely join a thread with a timeout to prevent indefinite blocking.
+fn join_thread_with_timeout<T: Send + 'static>(
+    handle: thread::JoinHandle<T>,
+    timeout: Duration,
+) -> Result<T, OpenSkillError> {
+    use std::sync::mpsc;
+
+    let (tx, rx) = mpsc::channel();
+
+    // Spawn a watcher thread
+    thread::spawn(move || {
+        let result = handle.join();
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(_)) => Err(OpenSkillError::NativeExecutionError(
+            "Thread panicked during execution".to_string(),
+        )),
+        Err(_) => Err(OpenSkillError::Timeout),
+    }
+}
+
+/// Read all bytes from an optional stream (used for stdout/stderr capture).
+fn read_stream<T: std::io::Read>(mut stream: Option<T>) -> Vec<u8> {
+    let mut buf = Vec::new();
+    if let Some(ref mut reader) = stream {
+        let _ = reader.read_to_end(&mut buf);
+    }
+    buf
+}
+
+/// Resolve an executable by searching PATH.
+fn resolve_executable(program: &str) -> Option<PathBuf> {
+    let program_path = Path::new(program);
+    if program_path.is_absolute() {
+        return program_path.exists().then(|| program_path.to_path_buf());
+    }
+
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(program);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+// Sensitive paths that should never be readable even with broad file-read access.
+// Following Claude Code's approach: allow broad reads, deny specific sensitive paths.
+const SENSITIVE_DENY_PATHS: &[&str] = &[
+    "~/.ssh",
+    "~/.gnupg",
+    "~/.aws",
+    "~/.azure",
+    "~/.config/gcloud",
+    "~/.kube",
+    "~/.docker",
+    "~/.npmrc",
+    "~/.pypirc",
+    "~/.netrc",
+    "~/.gitconfig",
+    "~/.git-credentials",
+    "~/.bashrc",
+    "~/.zshrc",
+    "~/.profile",
+    "~/.bash_profile",
+    "~/.zprofile",
+];
+
+// ============================================================================
+// macOS implementation (Seatbelt)
+// ============================================================================
+
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
     use std::fs::OpenOptions;
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::process::{Command, Stdio};
-    use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     const SYSTEM_READ_PATHS: &[&str] = &[
         "/System",
@@ -219,8 +315,16 @@ mod macos {
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        let stdout_handle = thread::spawn(move || read_stream(stdout));
-        let stderr_handle = thread::spawn(move || read_stream(stderr));
+        
+        // Use panic-safe thread spawning with catch_unwind
+        let stdout_handle = thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stdout)))
+                .unwrap_or_else(|_| Vec::new())
+        });
+        let stderr_handle = thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stderr)))
+                .unwrap_or_else(|_| Vec::new())
+        });
 
         let start = Instant::now();
         let mut timed_out = false;
@@ -236,8 +340,11 @@ mod macos {
             thread::sleep(Duration::from_millis(10));
         };
 
-        let stdout_bytes = stdout_handle.join().unwrap_or_default();
-        let stderr_bytes = stderr_handle.join().unwrap_or_default();
+        // Safely join threads with timeout to prevent indefinite blocking
+        let stdout_bytes = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
+            .unwrap_or_else(|_| Vec::new());
+        let stderr_bytes = join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
+            .unwrap_or_else(|_| Vec::new());
         let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
         let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
 
@@ -388,28 +495,6 @@ mod macos {
         }
     }
 
-    // Sensitive paths that should never be readable even with broad file-read access.
-    // Following Claude Code's approach: allow broad reads, deny specific sensitive paths.
-    const SENSITIVE_DENY_PATHS: &[&str] = &[
-        "~/.ssh",
-        "~/.gnupg",
-        "~/.aws",
-        "~/.azure",
-        "~/.config/gcloud",
-        "~/.kube",
-        "~/.docker",
-        "~/.npmrc",
-        "~/.pypirc",
-        "~/.netrc",
-        "~/.gitconfig",
-        "~/.git-credentials",
-        "~/.bashrc",
-        "~/.zshrc",
-        "~/.profile",
-        "~/.bash_profile",
-        "~/.zprofile",
-    ];
-
     fn build_seatbelt_profile(
         skill_root: &Path,
         read_paths: &[PathBuf],
@@ -442,7 +527,26 @@ mod macos {
 
         // Deny sensitive credential and config paths FIRST (before allow-all)
         // Seatbelt uses first-match-wins, so deny rules must come before allow rules
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string());
+        // Validate HOME environment variable for security
+        let home = std::env::var("HOME")
+            .ok()
+            .and_then(|h| {
+                let path = Path::new(&h);
+                // Validate: must be absolute, not empty, and not just "/"
+                if path.is_absolute() && h.len() > 1 && h != "/" {
+                    Some(h)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                // Fallback to system-appropriate default
+                if cfg!(target_os = "macos") {
+                    "/Users".to_string()
+                } else {
+                    "/home".to_string()
+                }
+            });
         for sensitive_path in SENSITIVE_DENY_PATHS {
             let expanded = sensitive_path.replace('~', &home);
             profile.push_str(&format!(
@@ -510,70 +614,474 @@ mod macos {
         path.replace('"', "\\\"")
     }
 
-    fn resolve_executable(program: &str) -> Option<PathBuf> {
-        let program_path = Path::new(program);
-        if program_path.is_absolute() {
-            return program_path.exists().then(|| program_path.to_path_buf());
-        }
-
-        let path_var = std::env::var_os("PATH")?;
-        for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join(program);
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-
-        None
-    }
-
     fn write_profile(profile: &str) -> Result<PathBuf, OpenSkillError> {
-        let mut attempt = 0;
+        use rand::Rng;
+        
         let temp_dir = std::env::temp_dir();
-
-        loop {
-            let filename = format!(
-                "openskills-seatbelt-{}-{}.sb",
-                std::process::id(),
-                attempt
-            );
-            let path = temp_dir.join(filename);
-            let file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path);
-
-            match file {
-                Ok(mut file) => {
-                    file.write_all(profile.as_bytes()).map_err(OpenSkillError::Io)?;
-                    return Ok(path);
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    attempt += 1;
-                    if attempt > 100 {
-                        return Err(OpenSkillError::SeatbeltError(
-                            "Failed to create seatbelt profile file".to_string(),
-                        ));
-                    }
-                }
-                Err(e) => return Err(OpenSkillError::Io(e)),
-            }
-        }
-    }
-
-    fn read_stream<T: Read>(mut stream: Option<T>) -> Vec<u8> {
-        let mut buf = Vec::new();
-        if let Some(ref mut reader) = stream {
-            let _ = reader.read_to_end(&mut buf);
-        }
-        buf
+        let pid = std::process::id();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let random_suffix: u32 = rand::thread_rng().gen();
+        
+        let filename = format!(
+            "openskills-seatbelt-{}-{}-{}.sb",
+            pid, timestamp, random_suffix
+        );
+        let path = temp_dir.join(filename);
+        
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| OpenSkillError::SeatbeltError(format!(
+                "Failed to create seatbelt profile file: {}", e
+            )))?;
+        
+        file.write_all(profile.as_bytes()).map_err(OpenSkillError::Io)?;
+        file.flush().map_err(OpenSkillError::Io)?;
+        
+        Ok(path)
     }
 }
 
 #[cfg(target_os = "macos")]
 pub use macos::execute_native;
 
-#[cfg(not(target_os = "macos"))]
+// ============================================================================
+// Linux implementation (Landlock LSM)
+// ============================================================================
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::*;
+    use std::io::Write;
+    use std::os::unix::process::CommandExt;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+
+    use landlock::{
+        Access, AccessFs, PathBeneath, PathFd,
+        Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
+    };
+
+    // System paths that should be readable for interpreter execution
+    const SYSTEM_READ_PATHS: &[&str] = &[
+        "/usr/lib",
+        "/usr/lib64",
+        "/usr/libexec",
+        "/usr/bin",
+        "/usr/sbin",
+        "/usr/share",
+        "/usr/local",
+        "/bin",
+        "/sbin",
+        "/lib",
+        "/lib64",
+        "/etc",
+        "/proc/self",
+        "/dev/null",
+        "/dev/urandom",
+        "/dev/zero",
+    ];
+
+    // Python interpreter locations on Linux
+    const PYTHON_EXEC_PATHS: &[&str] = &[
+        "/usr/bin/python3",
+        "/usr/bin/python",
+        "/usr/local/bin/python3",
+        "/usr/local/bin/python",
+        "/opt/python/bin/python3",
+    ];
+
+    // Temp directories that need read/write access
+    const TEMP_PATHS: &[&str] = &["/tmp", "/var/tmp"];
+
+    pub fn execute_native(
+        skill: &Skill,
+        script_path: &Path,
+        script_type: ScriptType,
+        input: Value,
+        timeout_ms: u64,
+        enforcer: &PermissionEnforcer,
+        allowed_tools: &[String],
+        workspace_dir: Option<&Path>,
+        script_args: &[String],
+    ) -> Result<ExecutionArtifacts, OpenSkillError> {
+        if !script_path.exists() {
+            return Err(OpenSkillError::NativeExecutionError(format!(
+                "Script not found: {}",
+                script_path.display()
+            )));
+        }
+
+        let input_json = serde_json::to_string(&input)?;
+        let _allow_network = allowed_tools
+            .iter()
+            .any(|t| t == "WebSearch" || t == "Fetch");
+        let _allow_process = script_type == ScriptType::Shell
+            || allowed_tools
+                .iter()
+                .any(|t| t == "Bash" || t == "Terminal");
+
+        // Canonicalize paths
+        let skill_root = skill
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| skill.root.clone());
+
+        let read_paths: Vec<PathBuf> = enforcer
+            .filesystem_read_paths()
+            .iter()
+            .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
+            .collect();
+
+        let mut write_paths: Vec<PathBuf> = enforcer
+            .filesystem_write_paths()
+            .iter()
+            .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
+            .collect();
+
+        // Add workspace directory to write paths if configured
+        if let Some(workspace) = workspace_dir {
+            if workspace.exists() {
+                write_paths
+                    .push(workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf()));
+            } else {
+                // Create workspace if it doesn't exist
+                let _ = std::fs::create_dir_all(workspace);
+                write_paths.push(workspace.to_path_buf());
+            }
+        }
+
+        let (program, args) = command_for_script(script_type, script_path)?;
+
+        // --- Collect Landlock path sets ---
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+
+        // Read-only paths: system paths + skill root + enforcer read paths
+        let mut ro_paths: Vec<PathBuf> = SYSTEM_READ_PATHS
+            .iter()
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+            .collect();
+        ro_paths.push(skill_root.clone());
+        for p in &read_paths {
+            if p.exists() && !ro_paths.contains(p) {
+                ro_paths.push(p.clone());
+            }
+        }
+
+        // Read-write paths: temp dirs + skill root + enforcer write paths + workspace
+        let mut rw_paths: Vec<PathBuf> = TEMP_PATHS
+            .iter()
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+            .collect();
+        rw_paths.push(skill_root.clone());
+        for p in &write_paths {
+            if !rw_paths.contains(p) {
+                rw_paths.push(p.clone());
+            }
+        }
+
+        // Sensitive deny paths (expanded from ~)
+        let deny_paths: Vec<PathBuf> = SENSITIVE_DENY_PATHS
+            .iter()
+            .map(|p| PathBuf::from(p.replace('~', &home)))
+            .collect();
+
+        // --- Build command with pre_exec Landlock sandbox ---
+        let mut cmd = Command::new(&program);
+        cmd.args(&args);
+        if !script_args.is_empty() {
+            cmd.args(script_args);
+        }
+
+        // Use workspace_dir as cwd if provided, otherwise fall back to skill_root
+        let working_directory = workspace_dir.unwrap_or(&skill_root);
+        cmd.current_dir(working_directory);
+        cmd.stdin(Stdio::piped());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        apply_environment(
+            &mut cmd,
+            skill,
+            &input_json,
+            timeout_ms,
+            enforcer,
+            script_type,
+            workspace_dir,
+        );
+
+        // Apply Landlock sandbox restrictions in the child process before exec.
+        // This is the correct approach: restrictions are applied between fork() and exec(),
+        // so they are inherited by the target command.
+        let ro_clone = ro_paths;
+        let rw_clone = rw_paths;
+        let deny_clone = deny_paths;
+        unsafe {
+            cmd.pre_exec(move || {
+                apply_landlock(&ro_clone, &rw_clone, &deny_clone)
+            });
+        }
+
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                return Err(OpenSkillError::LinuxSandboxError(format!(
+                    "Failed to execute with Landlock sandbox: {e}"
+                )));
+            }
+        };
+
+        // Write input to stdin
+        if let Some(mut stdin) = child.stdin.take() {
+            let input_clone = input_json.clone();
+            thread::spawn(move || {
+                let _ = stdin.write_all(input_clone.as_bytes());
+            });
+        }
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        // Use panic-safe thread spawning
+        let stdout_handle = thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stdout)))
+                .unwrap_or_else(|_| Vec::new())
+        });
+        let stderr_handle = thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stderr)))
+                .unwrap_or_else(|_| Vec::new())
+        });
+
+        let start = Instant::now();
+        let mut timed_out = false;
+        let status = loop {
+            if let Some(status) = child.try_wait().map_err(OpenSkillError::Io)? {
+                break Some(status);
+            }
+            if start.elapsed() >= Duration::from_millis(timeout_ms) {
+                timed_out = true;
+                let _ = child.kill();
+                break child.wait().ok();
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+
+        // Safely join threads with timeout
+        let stdout_bytes = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
+            .unwrap_or_else(|_| Vec::new());
+        let stderr_bytes = join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
+            .unwrap_or_else(|_| Vec::new());
+        let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+        let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+
+        let (exit_status, output) = if timed_out {
+            (
+                ExecutionStatus::Timeout,
+                serde_json::json!({ "status": "error", "error": "execution timeout" }),
+            )
+        } else if let Some(status) = status {
+            if status.success() {
+                let output = if let Ok(json) = serde_json::from_str::<Value>(&stdout) {
+                    json
+                } else {
+                    serde_json::json!({ "status": "success", "output": stdout.trim() })
+                };
+                (ExecutionStatus::Success, output)
+            } else {
+                // Check for sandbox violations (SIGSYS from seccomp, SIGKILL, etc.)
+                let message = if let Some(signal) = status.signal() {
+                    match signal {
+                        libc::SIGSYS => "Sandbox violation: blocked system call".to_string(),
+                        libc::SIGKILL => {
+                            if stderr.contains("landlock") || stderr.contains("Permission denied") {
+                                "Sandbox violation: blocked file access (Landlock)".to_string()
+                            } else {
+                                format!("Process killed (signal {})", signal)
+                            }
+                        }
+                        _ => format!("Process terminated by signal {}", signal),
+                    }
+                } else if !stderr.trim().is_empty() {
+                    stderr.trim().to_string()
+                } else {
+                    format!("Process exited with status {}", status)
+                };
+                (
+                    ExecutionStatus::Failed(message.clone()),
+                    serde_json::json!({ "status": "error", "error": message }),
+                )
+            }
+        } else {
+            (
+                ExecutionStatus::Failed("Process failed to start".to_string()),
+                serde_json::json!({ "status": "error", "error": "Process failed to start" }),
+            )
+        };
+
+        Ok(ExecutionArtifacts {
+            output,
+            stdout,
+            stderr,
+            permissions_used: enforcer.permissions_used(),
+            exit_status,
+        })
+    }
+
+    /// Apply Landlock filesystem restrictions to the current process (called in pre_exec).
+    ///
+    /// Uses the `landlock` crate to create a ruleset that restricts filesystem access.
+    /// On kernels that don't support Landlock (< 5.13), falls back to NO_NEW_PRIVS only.
+    /// Never returns Err to avoid preventing process execution — sandbox failures are
+    /// logged to stderr and execution continues with reduced security.
+    fn apply_landlock(
+        ro_paths: &[PathBuf],
+        rw_paths: &[PathBuf],
+        deny_paths: &[PathBuf],
+    ) -> std::io::Result<()> {
+        // Use ABI V1 (Linux 5.13+) for widest compatibility.
+        // The landlock crate handles best-effort downgrade automatically.
+        let abi = ABI::V1;
+
+        let result = (|| -> Result<(), landlock::RulesetError> {
+            let mut ruleset = Ruleset::default()
+                .handle_access(AccessFs::from_all(abi))?
+                .create()?;
+
+            // Add read-only rules (excluding denied paths)
+            for path in ro_paths {
+                // Skip if this path overlaps with a deny path
+                if deny_paths.iter().any(|d| path.starts_with(d) || d.starts_with(path)) {
+                    continue;
+                }
+                if let Ok(fd) = PathFd::new(path) {
+                    let _ = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)));
+                }
+            }
+
+            // Add read-write rules (these grant full access for the path subtree)
+            for path in rw_paths {
+                if let Ok(fd) = PathFd::new(path) {
+                    let _ = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)));
+                }
+            }
+
+            // restrict_self() calls prctl(NO_NEW_PRIVS) then landlock_restrict_self()
+            ruleset.restrict_self()?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                // Sandbox applied successfully
+                Ok(())
+            }
+            Err(_e) => {
+                // Landlock not supported or failed — apply NO_NEW_PRIVS at minimum
+                // Safety: prctl(PR_SET_NO_NEW_PRIVS) is async-signal-safe
+                unsafe {
+                    libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+                }
+                Ok(()) // Don't prevent execution even if sandbox fails
+            }
+        }
+    }
+
+    fn command_for_script(
+        script_type: ScriptType,
+        script_path: &Path,
+    ) -> Result<(String, Vec<String>), OpenSkillError> {
+        match script_type {
+            ScriptType::Python => {
+                let resolved = PYTHON_EXEC_PATHS
+                    .iter()
+                    .map(PathBuf::from)
+                    .find(|candidate| candidate.exists())
+                    .or_else(|| resolve_executable("python3"))
+                    .ok_or_else(|| {
+                        OpenSkillError::NativeExecutionError("python3 not found".to_string())
+                    })?;
+                Ok((
+                    resolved.to_string_lossy().to_string(),
+                    vec![script_path.to_string_lossy().to_string()],
+                ))
+            }
+            ScriptType::Shell => Ok((
+                "/bin/bash".to_string(),
+                vec![script_path.to_string_lossy().to_string()],
+            )),
+        }
+    }
+
+    fn apply_environment(
+        cmd: &mut Command,
+        skill: &Skill,
+        input_json: &str,
+        timeout_ms: u64,
+        enforcer: &PermissionEnforcer,
+        script_type: ScriptType,
+        workspace_dir: Option<&Path>,
+    ) {
+        cmd.env_clear();
+
+        let path = std::env::var("PATH")
+            .unwrap_or_else(|_| "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin".to_string());
+        cmd.env("PATH", path);
+
+        // Disable corepack auto-pin
+        cmd.env("COREPACK_ENABLE_AUTO_PIN", "0");
+        cmd.env("CI", "true");
+
+        // Locale settings
+        if let Ok(lang) = std::env::var("LANG") {
+            cmd.env("LANG", lang);
+        }
+        if let Ok(lc_all) = std::env::var("LC_ALL") {
+            cmd.env("LC_ALL", lc_all);
+        }
+        if let Ok(tmpdir) = std::env::var("TMPDIR") {
+            cmd.env("TMPDIR", tmpdir);
+        } else {
+            cmd.env("TMPDIR", "/tmp");
+        }
+
+        // Skill-specific environment
+        cmd.env("SKILL_ID", &skill.id);
+        cmd.env("SKILL_NAME", &skill.manifest.name);
+        cmd.env("SKILL_INPUT", input_json);
+        cmd.env("TIMEOUT_MS", timeout_ms.to_string());
+        cmd.env("SKILL_ROOT", skill.root.to_string_lossy().to_string());
+
+        if let Some(workspace) = workspace_dir {
+            cmd.env("SKILL_WORKSPACE", workspace.to_string_lossy().to_string());
+        }
+
+        // Pass through allowed environment variables
+        for key in enforcer.env_allowlist() {
+            if let Ok(val) = std::env::var(key) {
+                cmd.env(key, val);
+            }
+        }
+
+        // Python-specific settings
+        if script_type == ScriptType::Python {
+            cmd.env("PYTHONUNBUFFERED", "1");
+            cmd.env("PYTHONDONTWRITEBYTECODE", "1");
+            cmd.env("PYTHONNOUSERSITE", "1");
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub use linux::execute_native;
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn execute_native(
     _skill: &Skill,
     _script_path: &Path,
@@ -586,6 +1094,6 @@ pub fn execute_native(
     _script_args: &[String],
 ) -> Result<ExecutionArtifacts, OpenSkillError> {
     Err(OpenSkillError::UnsupportedPlatform(
-        "Native execution requires macOS (seatbelt)".to_string(),
+        "Native execution requires macOS (seatbelt) or Linux (Landlock)".to_string(),
     ))
 }

@@ -2,7 +2,7 @@
 name = "openskills_ts"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 description = "OpenSkill Runtime TS bindings (napi-rs)"
 
 [lib]

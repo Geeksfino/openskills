@@ -2,7 +2,7 @@
   "name": "@finogeek/openskills",
   "version": "0.2.0",
   "description": "OpenSkill Runtime TypeScript bindings (napi-rs)",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "main": "index.js",
   "types": "index.d.ts",
   "exports": {

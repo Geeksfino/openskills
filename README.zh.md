@@ -532,6 +532,6 @@ cargo build --release
 
 ## 许可证
 
-MIT
+Apache-2.0
 
 [English](LICENSE) | [中文](LICENSE.zh.md)

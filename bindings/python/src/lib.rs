@@ -11,8 +11,16 @@ use std::sync::Mutex;
 
 /// Safely convert timeout from i64 to u64, clamping negative values to 0.
 /// This matches the behavior of TypeScript's safe_timeout_ms function.
+/// Also handles potential overflow from very large i64 values.
 fn safe_timeout_ms(timeout: Option<i64>) -> Option<u64> {
-    timeout.map(|t| if t < 0 { 0 } else { t as u64 })
+    timeout.and_then(|t| {
+        if t < 0 {
+            Some(0)
+        } else {
+            // Use try_from to safely convert, handling overflow
+            u64::try_from(t).ok()
+        }
+    })
 }
 
 #[pyclass]

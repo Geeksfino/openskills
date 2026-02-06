@@ -86,6 +86,22 @@ pub fn transpile_typescript(
     output_js: &Path,
     verbose: bool,
 ) -> Result<(), OpenSkillError> {
+    // Validate input paths to prevent command injection
+    if !ts_file.exists() {
+        return Err(OpenSkillError::BuildError(format!(
+            "TypeScript file not found: {}",
+            ts_file.display()
+        )));
+    }
+    
+    // Sanitize paths for command line use
+    let ts_file_str = ts_file.to_str().ok_or_else(|| {
+        OpenSkillError::BuildError("Invalid TypeScript file path encoding".to_string())
+    })?;
+    let output_js_str = output_js.to_str().ok_or_else(|| {
+        OpenSkillError::BuildError("Invalid output file path encoding".to_string())
+    })?;
+
     // Try esbuild first (faster)
     if Command::new("npx")
         .args(["-y", "esbuild", "--version"])
@@ -96,16 +112,15 @@ pub fn transpile_typescript(
             eprintln!("Using esbuild for TypeScript transpilation");
         }
 
+        // Use Command with separate arguments instead of shell string to prevent injection
         let status = Command::new("npx")
-            .args([
-                "-y",
-                "esbuild",
-                &ts_file.to_string_lossy().to_string(),
-                "--bundle",
-                "--format=esm",
-                "--target=es2020",
-                &format!("--outfile={}", output_js.display()),
-            ])
+            .arg("-y")
+            .arg("esbuild")
+            .arg(ts_file_str)
+            .arg("--bundle")
+            .arg("--format=esm")
+            .arg("--target=es2020")
+            .arg(format!("--outfile={}", output_js_str))
             .status()
             .map_err(|e| OpenSkillError::BuildError(format!("Failed to run esbuild: {}", e)))?;
 
