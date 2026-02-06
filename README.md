@@ -577,6 +577,6 @@ The `examples/claude-official-skills` directory is a git submodule pointing to [
 
 ## License
 
-MIT
+Apache-2.0
 
 [English](LICENSE) | [中文](LICENSE.zh.md)

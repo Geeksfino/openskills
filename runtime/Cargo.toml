@@ -2,7 +2,7 @@
 name = "openskills-runtime"
 version = "0.2.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 description = "Claude Skills compatible runtime with WASM sandbox"
 repository = "https://github.com/finogeeks/openskills"
 keywords = ["claude", "skills", "wasm", "sandbox", "agent"]

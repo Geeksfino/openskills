@@ -49,7 +49,7 @@ pub struct SkillManifest {
     #[serde(default)]
     pub user_invocable: Option<bool>,
 
-    /// SPDX license identifier (e.g., "MIT", "Apache-2.0").
+    /// SPDX license identifier (e.g., "Apache-2.0", "MIT").
     #[serde(default)]
     pub license: Option<String>,
 
