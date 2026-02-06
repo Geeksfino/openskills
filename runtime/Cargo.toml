@@ -42,17 +42,10 @@ url = "2.5"
 # Random number generation for secure temp file names
 rand = "0.8"
 
-# Secure temporary file creation
-tempfile = "3.10"
-
-# Linux sandboxing (Landlock + seccomp)
+# Linux sandboxing (Landlock LSM)
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
-# seccompiler is the high-level Firecracker/AWS seccomp library
-seccompiler = "0.4"
-# nix provides low-level Unix/Linux APIs (prctl, clone, namespaces)
-nix = { version = "0.29", features = ["process", "signal", "fs", "user"] }
-# libc for raw syscall numbers and constants
+# libc for prctl/signal constants in pre_exec sandbox setup
 libc = "0.2"
 
 # WASM runtime

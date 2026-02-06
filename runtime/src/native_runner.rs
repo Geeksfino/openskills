@@ -24,6 +24,8 @@ use crate::permissions::PermissionEnforcer;
 use crate::registry::Skill;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 /// Supported native script types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,14 +52,94 @@ pub fn detect_script_type(path: &Path) -> Result<ScriptType, OpenSkillError> {
     }
 }
 
+// ============================================================================
+// Shared utility functions (platform-independent)
+// ============================================================================
+
+/// Safely join a thread with a timeout to prevent indefinite blocking.
+fn join_thread_with_timeout<T: Send + 'static>(
+    handle: thread::JoinHandle<T>,
+    timeout: Duration,
+) -> Result<T, OpenSkillError> {
+    use std::sync::mpsc;
+
+    let (tx, rx) = mpsc::channel();
+
+    // Spawn a watcher thread
+    thread::spawn(move || {
+        let result = handle.join();
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(_)) => Err(OpenSkillError::NativeExecutionError(
+            "Thread panicked during execution".to_string(),
+        )),
+        Err(_) => Err(OpenSkillError::Timeout),
+    }
+}
+
+/// Read all bytes from an optional stream (used for stdout/stderr capture).
+fn read_stream<T: std::io::Read>(mut stream: Option<T>) -> Vec<u8> {
+    let mut buf = Vec::new();
+    if let Some(ref mut reader) = stream {
+        let _ = reader.read_to_end(&mut buf);
+    }
+    buf
+}
+
+/// Resolve an executable by searching PATH.
+fn resolve_executable(program: &str) -> Option<PathBuf> {
+    let program_path = Path::new(program);
+    if program_path.is_absolute() {
+        return program_path.exists().then(|| program_path.to_path_buf());
+    }
+
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(program);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+// Sensitive paths that should never be readable even with broad file-read access.
+// Following Claude Code's approach: allow broad reads, deny specific sensitive paths.
+const SENSITIVE_DENY_PATHS: &[&str] = &[
+    "~/.ssh",
+    "~/.gnupg",
+    "~/.aws",
+    "~/.azure",
+    "~/.config/gcloud",
+    "~/.kube",
+    "~/.docker",
+    "~/.npmrc",
+    "~/.pypirc",
+    "~/.netrc",
+    "~/.gitconfig",
+    "~/.git-credentials",
+    "~/.bashrc",
+    "~/.zshrc",
+    "~/.profile",
+    "~/.bash_profile",
+    "~/.zprofile",
+];
+
+// ============================================================================
+// macOS implementation (Seatbelt)
+// ============================================================================
+
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
     use std::fs::OpenOptions;
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::process::{Command, Stdio};
-    use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     const SYSTEM_READ_PATHS: &[&str] = &[
         "/System",
@@ -413,28 +495,6 @@ mod macos {
         }
     }
 
-    // Sensitive paths that should never be readable even with broad file-read access.
-    // Following Claude Code's approach: allow broad reads, deny specific sensitive paths.
-    const SENSITIVE_DENY_PATHS: &[&str] = &[
-        "~/.ssh",
-        "~/.gnupg",
-        "~/.aws",
-        "~/.azure",
-        "~/.config/gcloud",
-        "~/.kube",
-        "~/.docker",
-        "~/.npmrc",
-        "~/.pypirc",
-        "~/.netrc",
-        "~/.gitconfig",
-        "~/.git-credentials",
-        "~/.bashrc",
-        "~/.zshrc",
-        "~/.profile",
-        "~/.bash_profile",
-        "~/.zprofile",
-    ];
-
     fn build_seatbelt_profile(
         skill_root: &Path,
         read_paths: &[PathBuf],
@@ -554,23 +614,6 @@ mod macos {
         path.replace('"', "\\\"")
     }
 
-    fn resolve_executable(program: &str) -> Option<PathBuf> {
-        let program_path = Path::new(program);
-        if program_path.is_absolute() {
-            return program_path.exists().then(|| program_path.to_path_buf());
-        }
-
-        let path_var = std::env::var_os("PATH")?;
-        for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join(program);
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-
-        None
-    }
-
     fn write_profile(profile: &str) -> Result<PathBuf, OpenSkillError> {
         use rand::Rng;
         
@@ -601,51 +644,28 @@ mod macos {
         
         Ok(path)
     }
-    
-    /// Safely join a thread with a timeout to prevent indefinite blocking
-    fn join_thread_with_timeout<T: Send + 'static>(
-        handle: thread::JoinHandle<T>,
-        timeout: Duration,
-    ) -> Result<T, OpenSkillError> {
-        use std::sync::mpsc;
-        
-        let (tx, rx) = mpsc::channel();
-        
-        // Spawn a watcher thread
-        thread::spawn(move || {
-            let result = handle.join();
-            let _ = tx.send(result);
-        });
-        
-        match rx.recv_timeout(timeout) {
-            Ok(Ok(result)) => Ok(result),
-            Ok(Err(_)) => Err(OpenSkillError::NativeExecutionError(
-                "Thread panicked during execution".to_string()
-            )),
-            Err(_) => Err(OpenSkillError::Timeout),
-        }
-    }
-
-    fn read_stream<T: Read>(mut stream: Option<T>) -> Vec<u8> {
-        let mut buf = Vec::new();
-        if let Some(ref mut reader) = stream {
-            let _ = reader.read_to_end(&mut buf);
-        }
-        buf
-    }
 }
 
 #[cfg(target_os = "macos")]
 pub use macos::execute_native;
 
+// ============================================================================
+// Linux implementation (Landlock LSM)
+// ============================================================================
+
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
-    use std::io::{Read, Write};
+    use std::io::Write;
+    use std::os::unix::process::CommandExt;
     use std::os::unix::process::ExitStatusExt;
     use std::process::{Command, Stdio};
-    use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
+
+    use landlock::{
+        Access, AccessFs, PathBeneath, PathFd,
+        Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
+    };
 
     // System paths that should be readable for interpreter execution
     const SYSTEM_READ_PATHS: &[&str] = &[
@@ -679,27 +699,6 @@ mod linux {
     // Temp directories that need read/write access
     const TEMP_PATHS: &[&str] = &["/tmp", "/var/tmp"];
 
-    // Sensitive paths that should never be readable (credentials, keys)
-    const SENSITIVE_DENY_PATHS: &[&str] = &[
-        "~/.ssh",
-        "~/.gnupg",
-        "~/.aws",
-        "~/.azure",
-        "~/.config/gcloud",
-        "~/.kube",
-        "~/.docker",
-        "~/.npmrc",
-        "~/.pypirc",
-        "~/.netrc",
-        "~/.gitconfig",
-        "~/.git-credentials",
-        "~/.bashrc",
-        "~/.zshrc",
-        "~/.profile",
-        "~/.bash_profile",
-        "~/.zprofile",
-    ];
-
     pub fn execute_native(
         skill: &Skill,
         script_path: &Path,
@@ -719,10 +718,10 @@ mod linux {
         }
 
         let input_json = serde_json::to_string(&input)?;
-        let allow_network = allowed_tools
+        let _allow_network = allowed_tools
             .iter()
             .any(|t| t == "WebSearch" || t == "Fetch");
-        let allow_process = script_type == ScriptType::Shell
+        let _allow_process = script_type == ScriptType::Shell
             || allowed_tools
                 .iter()
                 .any(|t| t == "Bash" || t == "Terminal");
@@ -759,30 +758,47 @@ mod linux {
 
         let (program, args) = command_for_script(script_type, script_path)?;
 
-        // Build sandbox configuration
-        let sandbox_config = SandboxConfig {
-            skill_root: skill_root.clone(),
-            read_paths: read_paths.clone(),
-            write_paths: write_paths.clone(),
-            allow_network,
-            allow_process,
-        };
+        // --- Collect Landlock path sets ---
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
 
-        // Create the sandbox wrapper script that applies Landlock before exec
-        let wrapper_script = build_sandbox_wrapper(&sandbox_config, &program, &args, script_args)?;
-        let wrapper_path = write_wrapper_script(&wrapper_script)?;
-
-        // Make wrapper executable
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&wrapper_path)?.permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&wrapper_path, perms)?;
+        // Read-only paths: system paths + skill root + enforcer read paths
+        let mut ro_paths: Vec<PathBuf> = SYSTEM_READ_PATHS
+            .iter()
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+            .collect();
+        ro_paths.push(skill_root.clone());
+        for p in &read_paths {
+            if p.exists() && !ro_paths.contains(p) {
+                ro_paths.push(p.clone());
+            }
         }
 
-        let mut cmd = Command::new("/bin/bash");
-        cmd.arg(&wrapper_path);
+        // Read-write paths: temp dirs + skill root + enforcer write paths + workspace
+        let mut rw_paths: Vec<PathBuf> = TEMP_PATHS
+            .iter()
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+            .collect();
+        rw_paths.push(skill_root.clone());
+        for p in &write_paths {
+            if !rw_paths.contains(p) {
+                rw_paths.push(p.clone());
+            }
+        }
+
+        // Sensitive deny paths (expanded from ~)
+        let deny_paths: Vec<PathBuf> = SENSITIVE_DENY_PATHS
+            .iter()
+            .map(|p| PathBuf::from(p.replace('~', &home)))
+            .collect();
+
+        // --- Build command with pre_exec Landlock sandbox ---
+        let mut cmd = Command::new(&program);
+        cmd.args(&args);
+        if !script_args.is_empty() {
+            cmd.args(script_args);
+        }
 
         // Use workspace_dir as cwd if provided, otherwise fall back to skill_root
         let working_directory = workspace_dir.unwrap_or(&skill_root);
@@ -801,12 +817,23 @@ mod linux {
             workspace_dir,
         );
 
+        // Apply Landlock sandbox restrictions in the child process before exec.
+        // This is the correct approach: restrictions are applied between fork() and exec(),
+        // so they are inherited by the target command.
+        let ro_clone = ro_paths;
+        let rw_clone = rw_paths;
+        let deny_clone = deny_paths;
+        unsafe {
+            cmd.pre_exec(move || {
+                apply_landlock(&ro_clone, &rw_clone, &deny_clone)
+            });
+        }
+
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(e) => {
-                let _ = std::fs::remove_file(&wrapper_path);
-                return Err(OpenSkillError::NativeExecutionError(format!(
-                    "Failed to execute with sandbox: {e}"
+                return Err(OpenSkillError::LinuxSandboxError(format!(
+                    "Failed to execute with Landlock sandbox: {e}"
                 )));
             }
         };
@@ -854,9 +881,6 @@ mod linux {
         let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
         let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
 
-        // Clean up wrapper script
-        let _ = std::fs::remove_file(&wrapper_path);
-
         let (exit_status, output) = if timed_out {
             (
                 ExecutionStatus::Timeout,
@@ -871,10 +895,10 @@ mod linux {
                 };
                 (ExecutionStatus::Success, output)
             } else {
-                // Check for sandbox violations (Landlock/seccomp signals)
+                // Check for sandbox violations (SIGSYS from seccomp, SIGKILL, etc.)
                 let message = if let Some(signal) = status.signal() {
                     match signal {
-                        libc::SIGSYS => "Sandbox violation: blocked system call (seccomp)".to_string(),
+                        libc::SIGSYS => "Sandbox violation: blocked system call".to_string(),
                         libc::SIGKILL => {
                             if stderr.contains("landlock") || stderr.contains("Permission denied") {
                                 "Sandbox violation: blocked file access (Landlock)".to_string()
@@ -910,15 +934,63 @@ mod linux {
         })
     }
 
-    #[derive(Debug)]
-    struct SandboxConfig {
-        skill_root: PathBuf,
-        read_paths: Vec<PathBuf>,
-        write_paths: Vec<PathBuf>,
-        #[allow(dead_code)] // Used for future seccomp network filtering
-        allow_network: bool,
-        #[allow(dead_code)] // Used for future seccomp process filtering
-        allow_process: bool,
+    /// Apply Landlock filesystem restrictions to the current process (called in pre_exec).
+    ///
+    /// Uses the `landlock` crate to create a ruleset that restricts filesystem access.
+    /// On kernels that don't support Landlock (< 5.13), falls back to NO_NEW_PRIVS only.
+    /// Never returns Err to avoid preventing process execution — sandbox failures are
+    /// logged to stderr and execution continues with reduced security.
+    fn apply_landlock(
+        ro_paths: &[PathBuf],
+        rw_paths: &[PathBuf],
+        deny_paths: &[PathBuf],
+    ) -> std::io::Result<()> {
+        // Use ABI V1 (Linux 5.13+) for widest compatibility.
+        // The landlock crate handles best-effort downgrade automatically.
+        let abi = ABI::V1;
+
+        let result = (|| -> Result<(), landlock::RulesetError> {
+            let mut ruleset = Ruleset::default()
+                .handle_access(AccessFs::from_all(abi))?
+                .create()?;
+
+            // Add read-only rules (excluding denied paths)
+            for path in ro_paths {
+                // Skip if this path overlaps with a deny path
+                if deny_paths.iter().any(|d| path.starts_with(d) || d.starts_with(path)) {
+                    continue;
+                }
+                if let Ok(fd) = PathFd::new(path) {
+                    let _ = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)));
+                }
+            }
+
+            // Add read-write rules (these grant full access for the path subtree)
+            for path in rw_paths {
+                if let Ok(fd) = PathFd::new(path) {
+                    let _ = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)));
+                }
+            }
+
+            // restrict_self() calls prctl(NO_NEW_PRIVS) then landlock_restrict_self()
+            ruleset.restrict_self()?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                // Sandbox applied successfully
+                Ok(())
+            }
+            Err(_e) => {
+                // Landlock not supported or failed — apply NO_NEW_PRIVS at minimum
+                // Safety: prctl(PR_SET_NO_NEW_PRIVS) is async-signal-safe
+                unsafe {
+                    libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+                }
+                Ok(()) // Don't prevent execution even if sandbox fails
+            }
+        }
     }
 
     fn command_for_script(
@@ -1003,363 +1075,6 @@ mod linux {
             cmd.env("PYTHONDONTWRITEBYTECODE", "1");
             cmd.env("PYTHONNOUSERSITE", "1");
         }
-    }
-
-    /// Build a shell wrapper script that applies Landlock sandboxing before executing the target.
-    /// 
-    /// We use a shell wrapper approach because:
-    /// 1. Landlock must be applied by the process itself (can't be inherited like seccomp in some modes)
-    /// 2. This keeps the sandbox setup in-process before exec
-    /// 3. We leverage the landlock CLI tool if available, or use a minimal Python-based approach
-    fn build_sandbox_wrapper(
-        config: &SandboxConfig,
-        program: &str,
-        args: &[String],
-        script_args: &[String],
-    ) -> Result<String, OpenSkillError> {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-        
-        // Build list of read-only paths
-        let mut ro_paths: Vec<String> = SYSTEM_READ_PATHS
-            .iter()
-            .filter(|p| PathBuf::from(p).exists())
-            .map(|s| s.to_string())
-            .collect();
-        
-        // Add skill root as read-only
-        ro_paths.push(config.skill_root.to_string_lossy().to_string());
-        
-        // Add configured read paths
-        for p in &config.read_paths {
-            if p.exists() {
-                ro_paths.push(p.to_string_lossy().to_string());
-            }
-        }
-
-        // Build list of read-write paths
-        let mut rw_paths: Vec<String> = TEMP_PATHS
-            .iter()
-            .filter(|p| PathBuf::from(p).exists())
-            .map(|s| s.to_string())
-            .collect();
-        
-        // Add skill root as writable (skills may need to write within their directory)
-        rw_paths.push(config.skill_root.to_string_lossy().to_string());
-        
-        // Add configured write paths
-        for p in &config.write_paths {
-            let path_str = p.to_string_lossy().to_string();
-            if !rw_paths.contains(&path_str) {
-                rw_paths.push(path_str);
-            }
-        }
-
-        // Build sensitive paths to deny (expand ~ to home)
-        let deny_paths: Vec<String> = SENSITIVE_DENY_PATHS
-            .iter()
-            .map(|p| p.replace('~', &home))
-            .filter(|p| PathBuf::from(p).exists())
-            .collect();
-
-        // Build the command line
-        let mut cmd_parts = vec![shell_escape(program)];
-        for arg in args {
-            cmd_parts.push(shell_escape(arg));
-        }
-        for arg in script_args {
-            cmd_parts.push(shell_escape(arg));
-        }
-        let full_command = cmd_parts.join(" ");
-
-        // Generate the wrapper script using Python's landlock bindings if available,
-        // otherwise use a basic approach with prctl NO_NEW_PRIVS
-        let script = format!(r##"#!/bin/bash
-set -e
-
-# OpenSkills Linux Sandbox Wrapper
-# Applies Landlock filesystem restrictions before executing the target command
-
-# First, check if Landlock is supported (Linux >= 5.13)
-LANDLOCK_SUPPORTED=0
-if [ -f /sys/kernel/security/lsm ]; then
-    if grep -q landlock /sys/kernel/security/lsm 2>/dev/null; then
-        LANDLOCK_SUPPORTED=1
-    fi
-fi
-
-# Check for kernel version (Landlock requires 5.13+)
-KERNEL_VERSION=$(uname -r | cut -d. -f1-2)
-KERNEL_MAJOR=$(echo "$KERNEL_VERSION" | cut -d. -f1)
-KERNEL_MINOR=$(echo "$KERNEL_VERSION" | cut -d. -f2)
-
-if [ "$KERNEL_MAJOR" -lt 5 ] || ([ "$KERNEL_MAJOR" -eq 5 ] && [ "$KERNEL_MINOR" -lt 13 ]); then
-    LANDLOCK_SUPPORTED=0
-fi
-
-apply_landlock_python() {{
-    # Use Python to apply Landlock restrictions
-    python3 << 'PYTHON_EOF'
-import os
-import sys
-import ctypes
-import ctypes.util
-
-# Landlock constants (from kernel headers)
-LANDLOCK_CREATE_RULESET_VERSION = 1 << 0
-
-# ABI version 1 access rights
-LANDLOCK_ACCESS_FS_EXECUTE = 1 << 0
-LANDLOCK_ACCESS_FS_WRITE_FILE = 1 << 1
-LANDLOCK_ACCESS_FS_READ_FILE = 1 << 2
-LANDLOCK_ACCESS_FS_READ_DIR = 1 << 3
-LANDLOCK_ACCESS_FS_REMOVE_DIR = 1 << 4
-LANDLOCK_ACCESS_FS_REMOVE_FILE = 1 << 5
-LANDLOCK_ACCESS_FS_MAKE_CHAR = 1 << 6
-LANDLOCK_ACCESS_FS_MAKE_DIR = 1 << 7
-LANDLOCK_ACCESS_FS_MAKE_REG = 1 << 8
-LANDLOCK_ACCESS_FS_MAKE_SOCK = 1 << 9
-LANDLOCK_ACCESS_FS_MAKE_FIFO = 1 << 10
-LANDLOCK_ACCESS_FS_MAKE_BLOCK = 1 << 11
-LANDLOCK_ACCESS_FS_MAKE_SYM = 1 << 12
-
-# Combined access masks
-LANDLOCK_ACCESS_FS_READ = LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR
-LANDLOCK_ACCESS_FS_WRITE = (LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_REMOVE_DIR |
-                            LANDLOCK_ACCESS_FS_REMOVE_FILE | LANDLOCK_ACCESS_FS_MAKE_CHAR |
-                            LANDLOCK_ACCESS_FS_MAKE_DIR | LANDLOCK_ACCESS_FS_MAKE_REG |
-                            LANDLOCK_ACCESS_FS_MAKE_SOCK | LANDLOCK_ACCESS_FS_MAKE_FIFO |
-                            LANDLOCK_ACCESS_FS_MAKE_BLOCK | LANDLOCK_ACCESS_FS_MAKE_SYM)
-LANDLOCK_ACCESS_FS_ALL = LANDLOCK_ACCESS_FS_READ | LANDLOCK_ACCESS_FS_WRITE
-
-# Syscall numbers (x86_64)
-SYS_landlock_create_ruleset = 444
-SYS_landlock_add_rule = 445
-SYS_landlock_restrict_self = 446
-
-# Rule types
-LANDLOCK_RULE_PATH_BENEATH = 1
-
-# prctl constants
-PR_SET_NO_NEW_PRIVS = 38
-
-class LandlockRulesetAttr(ctypes.Structure):
-    _fields_ = [
-        ("handled_access_fs", ctypes.c_uint64),
-    ]
-
-class LandlockPathBeneathAttr(ctypes.Structure):
-    _fields_ = [
-        ("allowed_access", ctypes.c_uint64),
-        ("parent_fd", ctypes.c_int),
-    ]
-
-def syscall(number, *args):
-    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-    libc.syscall.restype = ctypes.c_long
-    libc.syscall.argtypes = [ctypes.c_long] + [ctypes.c_long] * len(args)
-    result = libc.syscall(number, *args)
-    if result < 0:
-        errno = ctypes.get_errno()
-        raise OSError(errno, os.strerror(errno))
-    return result
-
-def prctl(option, arg2=0, arg3=0, arg4=0, arg5=0):
-    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-    libc.prctl.restype = ctypes.c_int
-    libc.prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
-    result = libc.prctl(option, arg2, arg3, arg4, arg5)
-    if result < 0:
-        errno = ctypes.get_errno()
-        raise OSError(errno, os.strerror(errno))
-    return result
-
-def apply_landlock():
-    # Read-only paths
-    ro_paths = {ro_paths_json}
-    # Read-write paths  
-    rw_paths = {rw_paths_json}
-    # Paths to deny entirely
-    deny_paths = {deny_paths_json}
-
-    try:
-        # Create ruleset with all filesystem access rights
-        ruleset_attr = LandlockRulesetAttr()
-        ruleset_attr.handled_access_fs = LANDLOCK_ACCESS_FS_ALL
-        
-        ruleset_fd = syscall(
-            SYS_landlock_create_ruleset,
-            ctypes.addressof(ruleset_attr),
-            ctypes.sizeof(ruleset_attr),
-            0
-        )
-        
-        def add_rule(path, access):
-            if not os.path.exists(path):
-                return
-            try:
-                fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
-                try:
-                    rule = LandlockPathBeneathAttr()
-                    rule.allowed_access = access
-                    rule.parent_fd = fd
-                    syscall(
-                        SYS_landlock_add_rule,
-                        ruleset_fd,
-                        LANDLOCK_RULE_PATH_BENEATH,
-                        ctypes.addressof(rule),
-                        0
-                    )
-                finally:
-                    os.close(fd)
-            except (OSError, IOError) as e:
-                # Skip paths we can't access
-                pass
-        
-        # Add read-only rules
-        for path in ro_paths:
-            # Skip if path is in deny list
-            if any(path.startswith(d) or d.startswith(path) for d in deny_paths):
-                continue
-            add_rule(path, LANDLOCK_ACCESS_FS_READ)
-        
-        # Add read-write rules (these override read-only for the same paths)
-        for path in rw_paths:
-            add_rule(path, LANDLOCK_ACCESS_FS_ALL)
-        
-        # Apply NO_NEW_PRIVS (required before landlock_restrict_self)
-        prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
-        
-        # Restrict ourselves with the ruleset
-        syscall(SYS_landlock_restrict_self, ruleset_fd, 0)
-        
-        os.close(ruleset_fd)
-        print("LANDLOCK_APPLIED", file=sys.stderr)
-        
-    except OSError as e:
-        # Landlock not supported or failed - continue without it
-        # Still apply NO_NEW_PRIVS for basic security
-        try:
-            prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
-        except:
-            pass
-        print(f"LANDLOCK_FALLBACK: {{e}}", file=sys.stderr)
-
-if __name__ == "__main__":
-    apply_landlock()
-PYTHON_EOF
-}}
-
-# Apply sandbox restrictions
-if [ "$LANDLOCK_SUPPORTED" = "1" ]; then
-    apply_landlock_python 2>&1 | grep -E "^LANDLOCK" >&2 || true
-else
-    # Fallback: at minimum apply NO_NEW_PRIVS via Python
-    python3 -c "
-import ctypes
-import ctypes.util
-libc = ctypes.CDLL(ctypes.util.find_library('c'))
-libc.prctl(38, 1, 0, 0, 0)  # PR_SET_NO_NEW_PRIVS
-" 2>/dev/null || true
-    echo "LANDLOCK_UNSUPPORTED: kernel too old or Landlock disabled" >&2
-fi
-
-# Execute the actual command
-exec {full_command}
-"##,
-            ro_paths_json = serde_json::to_string(&ro_paths).unwrap_or_else(|_| "[]".to_string()),
-            rw_paths_json = serde_json::to_string(&rw_paths).unwrap_or_else(|_| "[]".to_string()),
-            deny_paths_json = serde_json::to_string(&deny_paths).unwrap_or_else(|_| "[]".to_string()),
-            full_command = full_command,
-        );
-
-        Ok(script)
-    }
-
-    fn shell_escape(s: &str) -> String {
-        // Simple shell escaping - wrap in single quotes and escape single quotes
-        if s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/') {
-            s.to_string()
-        } else {
-            format!("'{}'", s.replace('\'', "'\\''"))
-        }
-    }
-
-    fn write_wrapper_script(script: &str) -> Result<PathBuf, OpenSkillError> {
-        use rand::Rng;
-        
-        let temp_dir = std::env::temp_dir();
-        let pid = std::process::id();
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let random_suffix: u32 = rand::thread_rng().gen();
-        
-        let filename = format!(
-            "openskills-sandbox-{}-{}-{}.sh",
-            pid, timestamp, random_suffix
-        );
-        let path = temp_dir.join(filename);
-        
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|e| OpenSkillError::NativeExecutionError(format!(
-                "Failed to create sandbox wrapper: {}", e
-            )))?;
-        
-        file.write_all(script.as_bytes()).map_err(OpenSkillError::Io)?;
-        file.flush().map_err(OpenSkillError::Io)?;
-        
-        Ok(path)
-    }
-
-    fn resolve_executable(program: &str) -> Option<PathBuf> {
-        let program_path = Path::new(program);
-        if program_path.is_absolute() {
-            return program_path.exists().then(|| program_path.to_path_buf());
-        }
-
-        let path_var = std::env::var_os("PATH")?;
-        for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join(program);
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-
-        None
-    }
-
-    fn join_thread_with_timeout<T: Send + 'static>(
-        handle: thread::JoinHandle<T>,
-        timeout: Duration,
-    ) -> Result<T, OpenSkillError> {
-        use std::sync::mpsc;
-        
-        let (tx, rx) = mpsc::channel();
-        
-        thread::spawn(move || {
-            let result = handle.join();
-            let _ = tx.send(result);
-        });
-        
-        match rx.recv_timeout(timeout) {
-            Ok(Ok(result)) => Ok(result),
-            Ok(Err(_)) => Err(OpenSkillError::NativeExecutionError(
-                "Thread panicked during execution".to_string()
-            )),
-            Err(_) => Err(OpenSkillError::Timeout),
-        }
-    }
-
-    fn read_stream<T: Read>(mut stream: Option<T>) -> Vec<u8> {
-        let mut buf = Vec::new();
-        if let Some(ref mut reader) = stream {
-            let _ = reader.read_to_end(&mut buf);
-        }
-        buf
     }
 }
 

@@ -120,8 +120,7 @@ pub fn transpile_typescript(
             .arg("--bundle")
             .arg("--format=esm")
             .arg("--target=es2020")
-            .arg("--outfile")
-            .arg(output_js_str)
+            .arg(format!("--outfile={}", output_js_str))
             .status()
             .map_err(|e| OpenSkillError::BuildError(format!("Failed to run esbuild: {}", e)))?;
 
