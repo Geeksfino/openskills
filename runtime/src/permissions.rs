@@ -39,12 +39,10 @@ impl PermissionEnforcer {
     }
 
     /// Check if a tool is allowed.
+    ///
+    /// Per Claude spec: empty allowed-tools means no tools are pre-approved.
     #[allow(dead_code)] // Used in tests
     pub fn is_tool_allowed(&self, tool: &str) -> bool {
-        // Empty allowed_tools means all tools are allowed (no restriction)
-        if self.allowed_tools.is_empty() {
-            return true;
-        }
         self.allowed_tools.contains(tool)
     }
 
@@ -202,9 +200,9 @@ mod tests {
     #[test]
     fn test_tool_allowed_empty_list() {
         let enforcer = PermissionEnforcer::with_defaults(vec![], PathBuf::from("."));
-        // Empty list means all tools allowed
-        assert!(enforcer.is_tool_allowed("Read"));
-        assert!(enforcer.is_tool_allowed("Write"));
+        // Per Claude spec: empty allowed-tools means no tools are pre-approved.
+        assert!(!enforcer.is_tool_allowed("Read"));
+        assert!(!enforcer.is_tool_allowed("Write"));
     }
 
     #[test]

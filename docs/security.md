@@ -7,19 +7,20 @@ This document describes the security model, sandboxing mechanisms, and permissio
 OpenSkills Runtime implements a **defense-in-depth** security model with multiple layers:
 
 1. **Native Script Sandbox** (Primary) - OS-level sandboxing (Seatbelt on macOS) for Python/Shell scripts - production-ready
-2. **WASM Sandbox** (Experimental) - Capability-based isolation for WASM modules (WASI 0.3) - available for specific use cases
-3. **Permission Enforcement** - Tool-based access control via `allowed-tools` and risky tool detection
-4. **Context Isolation** - Forked contexts prevent skill output pollution
+2. **WASM Sandbox** (Experimental) - Capability-based isolation for WASM modules (WASI 0.2/0.3) - available for specific use cases
+3. **Host Policy** - Host-level tool governance sitting between skill declarations and sandbox enforcement
+4. **Permission Enforcement** - Tool-based access control via `allowed-tools`, risky tool detection, and host policy resolution
+5. **Context Isolation** - Forked contexts prevent skill output pollution
 
 **Note**: Native scripts via seatbelt are the primary and recommended execution method. WASM sandboxing is experimental.
 
 ---
 
-## WASM Sandbox (WASI 0.3) - Experimental
+## WASM Sandbox (WASI 0.2/0.3) - Experimental
 
 **Status**: Experimental feature. Native scripts are the primary execution method.
 
-WASM modules execute in a capability-based sandbox using WASI 0.3 (WASIp3) with the component model. This is available for specific use cases requiring determinism, but is not suitable for full Python ecosystem or native libraries.
+WASM modules execute in a capability-based sandbox using the WASI component model. The runtime supports both WASI 0.2 (p2) and 0.3 (p3) — it attempts p3 instantiation first and falls back to p2 for compatibility. The current build toolchain produces WASI 0.2 components via the `wasi_snapshot_preview1` adapter. This is available for specific use cases requiring determinism, but is not suitable for full Python ecosystem or native libraries.
 
 See [README.md](../README.md#wasm-support-long-term-vision) for detailed discussion of WASM's role and limitations.
 
@@ -165,9 +166,15 @@ All native scripts receive these base permissions:
 
 ## Permission Enforcement
 
-### Allowed Tools
+OpenSkills uses a **3-layer permission model**:
 
-Skills can restrict which tools they're allowed to use via the `allowed-tools` field in their manifest:
+1. **Layer 1: SKILL.md** — Skill declares its `allowed-tools` in the manifest
+2. **Layer 2: Host Policy** — Host developer controls which tools are actually granted
+3. **Layer 3: Sandbox** — WASM capabilities or seatbelt profile enforced at OS level
+
+### Allowed Tools (Layer 1)
+
+Skills declare which tools they need via the `allowed-tools` field in their manifest:
 
 ```yaml
 allowed-tools:
@@ -177,13 +184,63 @@ allowed-tools:
 ```
 
 **Behavior:**
-- **Empty list** = All tools allowed (no restriction)
-- **Non-empty list** = Only listed tools allowed
-- Tool calls for unlisted tools are **denied** with `PermissionDenied` error
+- **Empty list** = No tools are pre-approved (per Claude spec)
+- **Non-empty list** = Only listed tools are declared as needed by the skill
+- These declarations are inputs to the host policy (Layer 2), not final decisions
+
+### Host Policy (Layer 2)
+
+The host policy sits between skill declarations and sandbox enforcement. It lets the host developer control which tools are actually granted to skills.
+
+**Configuration (`PermissionsConfig`):**
+
+```rust
+PermissionsConfig {
+    trust_skill_allowed_tools: bool,  // Default: true
+    fallback: Fallback,               // Default: Deny (options: Allow, Deny, Prompt)
+    deny: Vec<String>,                // Tools to always deny (deny overrides)
+    allow: Vec<String>,               // Tools to always allow (allow overrides)
+}
+```
+
+**Resolution algorithm (first match wins):**
+
+1. Tool in `deny` overrides → **DENIED** (always wins, even over allow overrides)
+2. Tool in `allow` overrides → **APPROVED** (unconditionally)
+3. `trust_skill_allowed_tools` is true AND tool is in skill's `allowed-tools` → **APPROVED**
+4. `fallback` applies → Allow/Deny/Prompt
+
+**Default policy:** `trust=true, fallback=deny, no overrides` — trusts what skills declare, denies anything not declared.
+
+**Setting the policy:**
+
+```rust
+let policy = HostPolicy::from_config(PermissionsConfig {
+    trust_skill_allowed_tools: true,
+    fallback: Fallback::Deny,
+    deny: vec!["Bash".to_string()],  // Always block Bash
+    allow: vec![],
+});
+let runtime = OpenSkillRuntime::new().with_host_policy(policy);
+```
+
+**Strict mode:** `with_strict_permissions()` sets both DenyAllCallback AND host policy with `trust=false, fallback=deny`, denying all tools regardless of skill declarations.
+
+### Effective Tools
+
+After host policy resolution, the runtime computes an **effective tools** list — the final set of tools approved for a skill. This list is passed to the sandbox layer (Layer 3) for capability mapping.
+
+The resolution process (`resolve_skill_permissions`):
+1. Iterates through skill's `allowed-tools`
+2. Applies host policy to each tool → Approved/Denied/Prompt
+3. For `Prompt` decisions on risky tools, delegates to permission callback
+4. For `Prompt` decisions on non-risky tools, auto-approves
+5. Adds any `allow` overrides from host policy
+6. Returns the final effective tools list
 
 ### Risky Tools
 
-Some tools are classified as "risky" and require explicit permission via a callback:
+Some tools are classified as "risky" and require explicit permission via a callback when the host policy returns `Prompt`:
 
 **Low Risk:**
 - `Read`, `Grep`, `Glob`, `LS` - Read-only operations
@@ -196,14 +253,17 @@ Some tools are classified as "risky" and require explicit permission via a callb
 - `Bash`, `Terminal` - Arbitrary command execution
 - `Delete` - File deletion
 
-**Permission Flow:**
+### Permission Flow
+
 1. Agent calls `check_tool_permission(skill_id, tool, description)`
-2. Runtime checks if tool is in `allowed-tools` (if list is non-empty)
-3. If tool is risky, runtime calls permission callback:
+2. Runtime resolves tool via host policy → `Approved` / `Denied` / `Prompt`
+3. If **Approved** → return true
+4. If **Denied** → return `PermissionDenied` error
+5. If **Prompt** and tool is risky → call permission callback:
    - `DenyAllCallback` - Always denies (strict mode)
    - `CliPermissionCallback` - Prompts user for approval
    - Custom callback - User-defined logic
-4. Returns `true` if allowed, `false` or error if denied
+6. If **Prompt** and tool is non-risky → auto-approve
 
 ### Tool-to-Capability Mapping
 
@@ -289,10 +349,12 @@ Audit records are sent to the configured audit sink (default: no-op sink).
 
 ### For Runtime Users
 
-1. **Review `allowed-tools`** - Understand what each skill can do
-2. **Configure permission callbacks** - Use `CliPermissionCallback` for interactive approval
-3. **Monitor audit logs** - Review execution records for suspicious activity
-4. **Trust skill sources** - Only load skills from trusted repositories
+1. **Configure host policy** - Use deny overrides to block dangerous tools, set `fallback: prompt` for interactive control
+2. **Review `allowed-tools`** - Understand what each skill requests
+3. **Configure permission callbacks** - Use `CliPermissionCallback` for interactive approval when `fallback: prompt`
+4. **Use strict mode for untrusted skills** - `with_strict_permissions()` denies all tools by default
+5. **Monitor audit logs** - Review execution records for suspicious activity
+6. **Trust skill sources** - Only load skills from trusted repositories
 
 ---
 
@@ -326,7 +388,7 @@ Profile follows this structure:
 
 ### WASI Capability Preopening
 
-WASM modules receive preopened directories via WASI 0.3:
+WASM modules receive preopened directories via WASI 0.2/0.3:
 - Read-only directories: Mapped to skill root or configured read paths
 - Write directories: Mapped to skill root or configured write paths
 - No access to parent directories or system paths
@@ -341,4 +403,4 @@ WASM modules receive preopened directories via WASI 0.3:
 
 ---
 
-Last Updated: 2026-01-18
+Last Updated: 2026-02-09

@@ -84,6 +84,23 @@ if (!config.apiKey) {
 
 console.log("🔧 Initializing OpenSkills runtime...");
 const runtime = OpenSkillRuntime.fromDirectory(config.skillsDir);
+
+// Host policy configuration (Layer 2)
+// Change these values to test different permission scenarios.
+// Resolution order: deny > allow > skill trust > fallback
+runtime.setHostPolicy(
+  false,     // trust_skill_allowed_tools: do not honor skill's allowed-tools declarations
+  "prompt",   // fallback: "allow" | "deny" | "prompt"
+  [],       // deny: tools to block regardless of other settings
+  [],       // allow: tools to grant regardless of fallback
+);
+
+// Permission mode controls what happens when fallback is "prompt":
+// - "cli": interactive terminal prompt (y/n/always)
+// - "deny-all": silently deny all prompted permissions
+// - "allow-all": silently approve all (default if not set)
+runtime.setPermissionMode("cli");
+
 runtime.discoverSkills();
 
 const skills = runtime.listSkills();
