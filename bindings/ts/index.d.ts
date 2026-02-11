@@ -138,6 +138,22 @@ export declare class OpenSkillRuntimeWrapper {
   /** Check if a tool call is permitted for a skill (ask-before-act for risky tools). */
   checkToolPermission(skillId: string, tool: string, description?: string | undefined | null): boolean
   /**
+   * Set the host policy programmatically.
+   *
+   * This overrides the default host policy.
+   * The resolution algorithm is: deny > allow > skill trust > fallback.
+   */
+  setHostPolicy(trustSkillAllowedTools: boolean, fallback: string, deny: Array<string>, allow: Array<string>): void
+  /**
+   * Set the permission mode for interactive prompting.
+   *
+   * Controls what happens when host policy returns `fallback: prompt`:
+   * - `"cli"`: Prompt the user in the terminal (stdin/stdout)
+   * - `"deny-all"`: Deny all permission requests silently
+   * - `"allow-all"`: Auto-approve all permission requests (default)
+   */
+  setPermissionMode(mode: string): void
+  /**
    * Run a specific target (script/WASM) within a skill.
    *
    * This is designed for Claude Skills where SKILL.md instructions tell

@@ -34,6 +34,7 @@ mod context;
 mod errors;
 mod executor;
 mod hook_runner;
+mod host_policy;
 mod manifest;
 mod skill_session;
 mod native_runner;
@@ -100,6 +101,9 @@ pub use executor::{CommandPermissions, CommandResult, run_sandboxed_command};
 
 // Re-export hook execution API
 pub use hook_runner::{HookEvent, HookRunner};
+
+// Re-export host policy types for programmatic configuration
+pub use host_policy::{Fallback, HostPolicy, PermissionsConfig, ToolDecision};
 
 /// Runtime configuration for skill discovery.
 #[derive(Debug, Clone)]
@@ -168,6 +172,8 @@ pub struct OpenSkillRuntime {
     registry: SkillRegistry,
     audit_sink: Box<dyn AuditSink + Send + Sync>,
     permission_manager: PermissionManager,
+    /// Host policy controlling which tools skills are granted.
+    host_policy: HostPolicy,
     custom_directories: Vec<PathBuf>,
     use_standard_locations: bool,
     /// Workspace directory for skill I/O operations.
@@ -188,6 +194,7 @@ impl OpenSkillRuntime {
             registry: SkillRegistry::new(),
             audit_sink: Box::new(NoopAuditSink {}),
             permission_manager: PermissionManager::new(),
+            host_policy: HostPolicy::default(),
             custom_directories: Vec::new(),
             use_standard_locations: true,
             workspace_dir: None,
@@ -205,6 +212,7 @@ impl OpenSkillRuntime {
             registry,
             audit_sink: Box::new(NoopAuditSink {}),
             permission_manager: PermissionManager::new(),
+            host_policy: HostPolicy::default(),
             custom_directories: config.custom_directories,
             use_standard_locations: config.use_standard_locations,
             workspace_dir: config.workspace_dir,
@@ -213,11 +221,15 @@ impl OpenSkillRuntime {
     }
 
     /// Create a runtime with a specific project root.
+    ///
+    /// Uses default host policy. Use `with_host_policy()` to override.
     pub fn with_project_root<P: AsRef<Path>>(root: P) -> Self {
+        let root_ref = root.as_ref();
         Self {
-            registry: SkillRegistry::new().with_project_root(root),
+            registry: SkillRegistry::new().with_project_root(root_ref),
             audit_sink: Box::new(NoopAuditSink {}),
             permission_manager: PermissionManager::new(),
+            host_policy: HostPolicy::default(),
             custom_directories: Vec::new(),
             use_standard_locations: true,
             workspace_dir: None,
@@ -226,6 +238,8 @@ impl OpenSkillRuntime {
     }
 
     /// Create a runtime that only scans a specific directory.
+    ///
+    /// Uses default host policy. Use `with_host_policy()` to override.
     pub fn from_directory<P: AsRef<Path>>(dir: P) -> Self {
         let mut registry = SkillRegistry::new();
         let _ = registry.scan_explicit(dir);
@@ -233,6 +247,7 @@ impl OpenSkillRuntime {
             registry,
             audit_sink: Box::new(NoopAuditSink {}),
             permission_manager: PermissionManager::new(),
+            host_policy: HostPolicy::default(),
             custom_directories: Vec::new(),
             use_standard_locations: false,
             workspace_dir: None,
@@ -295,13 +310,66 @@ impl OpenSkillRuntime {
         self
     }
 
-    /// Enable strict permissions mode (all risky operations denied by default).
+    /// Enable strict permissions mode (all operations denied by default).
     ///
-    /// This is useful for testing or high-security environments.
+    /// Sets host policy to trust=false, fallback=deny and installs a DenyAll callback.
+    /// This means: nothing is pre-approved via skill declarations, and fallback denies.
+    /// Useful for testing or high-security environments.
     pub fn with_strict_permissions(mut self) -> Self {
         use permission_callback::DenyAllCallback;
         self.permission_manager = PermissionManager::with_callback(Arc::new(DenyAllCallback));
+        self.host_policy = HostPolicy::from_config(
+            PermissionsConfig {
+                trust_skill_allowed_tools: false,
+                fallback: Fallback::Deny,
+                deny: Vec::new(),
+                allow: Vec::new(),
+            },
+        );
         self
+    }
+
+    /// Set a host policy programmatically, overriding the default.
+    ///
+    /// The host policy controls which tools skills are granted.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use openskills_runtime::{OpenSkillRuntime, HostPolicy, PermissionsConfig, Fallback};
+    ///
+    /// let policy = HostPolicy::from_config(PermissionsConfig {
+    ///     trust_skill_allowed_tools: true,
+    ///     fallback: Fallback::Deny,
+    ///     deny: vec!["Bash".to_string()],
+    ///     allow: vec![],
+    /// });
+    /// let runtime = OpenSkillRuntime::new().with_host_policy(policy);
+    /// ```
+    pub fn with_host_policy(mut self, policy: HostPolicy) -> Self {
+        self.host_policy = policy;
+        self
+    }
+
+    /// Mutating version of `with_host_policy()`.
+    pub fn set_host_policy(&mut self, policy: HostPolicy) {
+        self.host_policy = policy;
+    }
+
+    /// Set the permission callback on an existing runtime (mutating version).
+    ///
+    /// Pass `Some(callback)` to enable interactive prompting (e.g., `CliPermissionCallback`),
+    /// or `None` to auto-approve all permission requests (default behavior).
+    pub fn set_permission_callback(&mut self, callback: Option<Arc<dyn PermissionCallback>>) {
+        self.permission_manager = match callback {
+            Some(cb) => PermissionManager::with_callback(cb),
+            None => PermissionManager::new(),
+        };
+    }
+
+    /// Get the current host policy.
+    pub fn host_policy(&self) -> &HostPolicy {
+        &self.host_policy
     }
 
     /// Get permission audit log.
@@ -776,10 +844,67 @@ Example response:
         }
     }
 
+    /// Resolve permissions for all tools a skill declares, using host policy.
+    ///
+    /// Returns the effective tools list (approved tools) for executor sandbox config.
+    /// Tools that fall through to "prompt" are delegated to the PermissionManager callback.
+    fn resolve_skill_permissions(
+        &self,
+        skill_id: &str,
+        skill_allowed_tools: &[String],
+    ) -> Result<Vec<String>, OpenSkillError> {
+        let policy = &self.host_policy;
+        let mut effective_tools = Vec::new();
+
+        for tool in skill_allowed_tools {
+            match policy.resolve_tool(tool, skill_allowed_tools) {
+                ToolDecision::Approved => {
+                    effective_tools.push(tool.clone());
+                }
+                ToolDecision::Denied => {
+                    // Tool denied by host policy — not granted to sandbox
+                }
+                ToolDecision::Prompt => {
+                    // Delegate to existing PermissionManager callback
+                    if is_risky_tool(tool) {
+                        let granted = self.permission_manager.check_permission(
+                            skill_id,
+                            tool,
+                            format!("Execute {} operations", tool),
+                            get_risk_level(tool),
+                            std::collections::HashMap::new(),
+                        )?;
+                        if granted {
+                            effective_tools.push(tool.clone());
+                        }
+                    } else {
+                        // Non-risky tool in prompt mode: auto-approve
+                        effective_tools.push(tool.clone());
+                    }
+                }
+            }
+        }
+
+        // Also include allow_overrides that aren't already in the list
+        // (host may grant tools beyond what the skill declares)
+        for tool in policy.allow_overrides() {
+            if !policy.deny_overrides().contains(tool)
+                && !effective_tools.iter().any(|t| t == tool)
+            {
+                effective_tools.push(tool.clone());
+            }
+        }
+
+        Ok(effective_tools)
+    }
+
     /// Check permission for a tool call for a given skill.
     ///
-    /// This is intended for agent-managed tool execution. It enforces allowed-tools
-    /// and triggers ask-before-act for risky tools.
+    /// Uses the host policy resolution algorithm:
+    /// 1. deny_overrides → denied
+    /// 2. allow_overrides → approved
+    /// 3. trust + skill allowed-tools → approved
+    /// 4. fallback (allow/deny/prompt)
     pub fn check_tool_permission(
         &self,
         skill_id: &str,
@@ -787,32 +912,32 @@ Example response:
         description: Option<String>,
         context: std::collections::HashMap<String, String>,
     ) -> Result<bool, OpenSkillError> {
-        // Only need metadata for permission checking
         let metadata = self
             .registry
             .get(skill_id)
             .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
 
-        let allowed = metadata.manifest.get_allowed_tools();
-        if !allowed.is_empty() && !allowed.iter().any(|t| t == tool) {
-            return Err(OpenSkillError::PermissionDenied(format!(
-                "Tool {} is not allowed for skill {}",
+        let skill_allowed = metadata.manifest.get_allowed_tools();
+        let policy = &self.host_policy;
+
+        match policy.resolve_tool(tool, &skill_allowed) {
+            ToolDecision::Approved => Ok(true),
+            ToolDecision::Denied => Err(OpenSkillError::PermissionDenied(format!(
+                "Tool {} is denied by host policy for skill {}",
                 tool, skill_id
-            )));
+            ))),
+            ToolDecision::Prompt => {
+                if is_risky_tool(tool) {
+                    let desc = description
+                        .unwrap_or_else(|| format!("Execute {} operations", tool));
+                    self.permission_manager.check_permission(
+                        skill_id, tool, desc, get_risk_level(tool), context,
+                    )
+                } else {
+                    Ok(true)
+                }
+            }
         }
-
-        if is_risky_tool(tool) {
-            let description = description.unwrap_or_else(|| format!("Execute {} operations", tool));
-            return self.permission_manager.check_permission(
-                skill_id,
-                tool,
-                description,
-                get_risk_level(tool),
-                context,
-            );
-        }
-
-        Ok(true)
     }
 
     /// Execute a skill's WASM module in sandbox.
@@ -887,29 +1012,9 @@ Example response:
             None
         };
 
-        // Check permissions for risky tools before execution
+        // Resolve permissions through host policy
         let allowed_tools = skill.manifest.get_allowed_tools();
-        use permission_callback::{get_risk_level, is_risky_tool};
-        use std::collections::HashMap;
-
-        for tool in &allowed_tools {
-            if is_risky_tool(tool) {
-                let granted = self.permission_manager.check_permission(
-                    skill_id,
-                    tool,
-                    format!("Execute {} operations", tool),
-                    get_risk_level(tool),
-                    HashMap::new(),
-                )?;
-
-                if !granted {
-                    return Err(OpenSkillError::PermissionDenied(format!(
-                        "User denied {} permission for skill {}",
-                        tool, skill_id
-                    )));
-                }
-            }
-        }
+        let effective_tools = self.resolve_skill_permissions(skill_id, &allowed_tools)?;
 
         let start = Instant::now();
         let start_epoch = SystemTime::now()
@@ -923,6 +1028,7 @@ Example response:
             input: options.input.clone(),
             wasm_module: None,
             workspace_dir: self.get_workspace_dir().ok(),
+            effective_tools,
         };
 
         let execution = execute_skill(&skill, exec_options)?;
@@ -990,21 +1096,24 @@ Example response:
     }
 
     /// Check if a tool is allowed for a skill.
+    ///
+    /// Uses host policy resolution. Per Claude spec: empty allowed-tools
+    /// means no tools are pre-approved (previously treated empty as "all allowed").
     pub fn is_tool_allowed(&self, skill_id: &str, tool: &str) -> Result<bool, OpenSkillError> {
-        // Only need metadata for tool checking
         let metadata = self
             .registry
             .get(skill_id)
             .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
 
-        let allowed = metadata.manifest.get_allowed_tools();
-        
-        // Empty list means all tools allowed
-        if allowed.is_empty() {
-            return Ok(true);
-        }
+        let skill_allowed = metadata.manifest.get_allowed_tools();
+        let policy = &self.host_policy;
 
-        Ok(allowed.iter().any(|t| t == tool))
+        match policy.resolve_tool(tool, &skill_allowed) {
+            ToolDecision::Approved => Ok(true),
+            ToolDecision::Denied => Ok(false),
+            // Prompt means "not denied" — the actual prompting happens at execution time
+            ToolDecision::Prompt => Ok(true),
+        }
     }
 
     /// Run a specific target (script/WASM) within a skill.
@@ -1052,29 +1161,9 @@ Example response:
 
         validate_skill(&skill)?;
 
-        // Check permissions for risky tools before execution
+        // Resolve permissions through host policy.
         let allowed_tools = skill.manifest.get_allowed_tools();
-        use permission_callback::{get_risk_level, is_risky_tool};
-        use std::collections::HashMap;
-
-        for tool in &allowed_tools {
-            if is_risky_tool(tool) {
-                let granted = self.permission_manager.check_permission(
-                    skill_id,
-                    tool,
-                    format!("Execute {} operations", tool),
-                    get_risk_level(tool),
-                    HashMap::new(),
-                )?;
-
-                if !granted {
-                    return Err(OpenSkillError::PermissionDenied(format!(
-                        "User denied {} permission for skill {}",
-                        tool, skill_id
-                    )));
-                }
-            }
-        }
+        let effective_tools = self.resolve_skill_permissions(skill_id, &allowed_tools)?;
 
         let start = Instant::now();
         let start_epoch = SystemTime::now()
@@ -1087,6 +1176,7 @@ Example response:
             timeout_ms,
             input,
             workspace_dir: workspace_dir.or_else(|| self.get_workspace_dir().ok()),
+            effective_tools,
             ..Default::default()
         };
 

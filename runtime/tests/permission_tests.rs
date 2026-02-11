@@ -39,17 +39,18 @@ fn test_check_tool_permission_risky_tool_denied_by_callback() {
     let temp_dir = TempDir::new().unwrap();
     write_skill(temp_dir.path(), "perm-risky-skill", "Write");
 
+    // with_strict_permissions() sets host policy to trust=false, fallback=deny.
+    // This means all tools are denied by host policy (step 4: fallback=deny),
+    // regardless of whether they're in the skill's allowed-tools.
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path()).with_strict_permissions();
     runtime.discover_skills().unwrap();
 
-    let allowed = runtime
-        .check_tool_permission(
-            "perm-risky-skill",
-            "Write",
-            Some("Attempt write".to_string()),
-            std::collections::HashMap::new(),
-        )
-        .expect("permission check should return result");
+    let result = runtime.check_tool_permission(
+        "perm-risky-skill",
+        "Write",
+        Some("Attempt write".to_string()),
+        std::collections::HashMap::new(),
+    );
 
-    assert!(!allowed, "strict permissions should deny risky tool");
+    assert!(result.is_err(), "strict permissions should deny risky tool");
 }

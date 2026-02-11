@@ -50,6 +50,10 @@ pub struct ExecutionOptions {
     /// If set, SKILL_WORKSPACE env var is injected and the directory is
     /// accessible with write permissions in the sandbox.
     pub workspace_dir: Option<PathBuf>,
+    /// Host-policy-resolved tools used for sandbox capability mapping.
+    /// Set by OpenSkillRuntime after resolving the skill manifest's allowed-tools
+    /// against the host policy. Defaults to empty (no tools approved).
+    pub effective_tools: Vec<String>,
 }
 
 /// Target for skill execution (what to run within a skill).
@@ -99,6 +103,10 @@ pub struct TargetExecutionOptions {
     /// If set, SKILL_WORKSPACE env var is injected and the directory is
     /// accessible with write permissions in the sandbox.
     pub workspace_dir: Option<PathBuf>,
+    /// Host-policy-resolved tools used for sandbox capability mapping.
+    /// Set by OpenSkillRuntime after resolving the skill manifest's allowed-tools
+    /// against the host policy. Defaults to empty (no tools approved).
+    pub effective_tools: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -116,8 +124,7 @@ pub fn execute_skill(
     skill: &Skill,
     options: ExecutionOptions,
 ) -> Result<ExecutionArtifacts, OpenSkillError> {
-    // Map allowed-tools to WASM capabilities
-    let allowed_tools = skill.manifest.get_allowed_tools();
+    let allowed_tools = options.effective_tools.clone();
     let mut wasm_config = map_tools_to_capabilities(&allowed_tools);
 
     // Apply option overrides
@@ -208,7 +215,7 @@ pub fn run_skill_target(
     options: TargetExecutionOptions,
 ) -> Result<ExecutionArtifacts, OpenSkillError> {
     // Map allowed-tools to capabilities
-    let allowed_tools = skill.manifest.get_allowed_tools();
+    let allowed_tools = options.effective_tools.clone();
     let mut wasm_config = map_tools_to_capabilities(&allowed_tools);
 
     // Apply option overrides

@@ -1,7 +1,7 @@
 use openskills_runtime::{
-    CommandPermissions, ExecutionContext, ExecutionOptions, ExecutionTarget, OpenSkillRuntime, OutputType,
-    RuntimeConfig, RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
-    run_sandboxed_command,
+    CommandPermissions, ExecutionContext, ExecutionOptions, ExecutionTarget, Fallback, HostPolicy,
+    OpenSkillRuntime, OutputType, PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus,
+    SkillExecutionSession, SkillLocation, run_sandboxed_command,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -399,6 +399,40 @@ impl OpenSkillRuntimeWrapper {
         runtime
             .check_tool_permission(&skill_id, &tool, description, std::collections::HashMap::new())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Set the host policy programmatically.
+    ///
+    /// This overrides the default host policy.
+    /// The resolution algorithm is: deny > allow > skill trust > fallback.
+    #[pyo3(signature = (trust_skill_allowed_tools, fallback, deny=vec![], allow=vec![]))]
+    fn set_host_policy(
+        &self,
+        trust_skill_allowed_tools: bool,
+        fallback: String,
+        deny: Vec<String>,
+        allow: Vec<String>,
+    ) -> PyResult<()> {
+        let fallback = match fallback.as_str() {
+            "allow" => Fallback::Allow,
+            "deny" => Fallback::Deny,
+            "prompt" => Fallback::Prompt,
+            _ => {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Invalid fallback: '{}'. Must be 'allow', 'deny', or 'prompt'.",
+                    fallback
+                )))
+            }
+        };
+        let policy = HostPolicy::from_config(PermissionsConfig {
+            trust_skill_allowed_tools,
+            fallback,
+            deny,
+            allow,
+        });
+        let mut runtime = self.inner.lock().unwrap();
+        runtime.set_host_policy(policy);
+        Ok(())
     }
 
     /// Read a file from a skill directory.

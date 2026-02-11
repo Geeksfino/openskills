@@ -1,12 +1,13 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use openskills_runtime::{
-    CommandPermissions, ExecutionContext, ExecutionOptions, ExecutionTarget, OpenSkillRuntime,
-    OutputType, RuntimeConfig, RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
+    CliPermissionCallback, CommandPermissions, DenyAllCallback, ExecutionContext, ExecutionOptions,
+    ExecutionTarget, Fallback, HostPolicy, OpenSkillRuntime, OutputType, PermissionCallback,
+    PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
     run_sandboxed_command,
 };
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[napi(object)]
 pub struct SkillDescriptorJs {
@@ -584,6 +585,71 @@ impl OpenSkillRuntimeWrapper {
         runtime
             .check_tool_permission(&skill_id, &tool, description, std::collections::HashMap::new())
             .map_err(|e| Error::from_reason(e.to_string()))
+    }
+
+    /// Set the host policy programmatically.
+    ///
+    /// This overrides the default host policy.
+    /// The resolution algorithm is: deny > allow > skill trust > fallback.
+    #[napi]
+    pub fn set_host_policy(
+        &self,
+        trust_skill_allowed_tools: bool,
+        fallback: String,
+        deny: Vec<String>,
+        allow: Vec<String>,
+    ) -> Result<()> {
+        let fallback = match fallback.as_str() {
+            "allow" => Fallback::Allow,
+            "deny" => Fallback::Deny,
+            "prompt" => Fallback::Prompt,
+            _ => {
+                return Err(Error::from_reason(format!(
+                    "Invalid fallback: '{}'. Must be 'allow', 'deny', or 'prompt'.",
+                    fallback
+                )))
+            }
+        };
+        let policy = HostPolicy::from_config(PermissionsConfig {
+            trust_skill_allowed_tools,
+            fallback,
+            deny,
+            allow,
+        });
+        let mut runtime = self.inner.lock().unwrap();
+        runtime.set_host_policy(policy);
+        Ok(())
+    }
+
+    /// Set the permission mode for interactive prompting.
+    ///
+    /// Controls what happens when host policy returns `fallback: prompt`:
+    /// - `"cli"`: Prompt the user in the terminal (stdin/stdout)
+    /// - `"deny-all"`: Deny all permission requests silently
+    /// - `"allow-all"`: Auto-approve all permission requests (default)
+    #[napi]
+    pub fn set_permission_mode(&self, mode: String) -> Result<()> {
+        let mut runtime = self.inner.lock().unwrap();
+        match mode.as_str() {
+            "cli" => {
+                let cb: Arc<dyn PermissionCallback> = Arc::new(CliPermissionCallback);
+                runtime.set_permission_callback(Some(cb));
+            }
+            "deny-all" => {
+                let cb: Arc<dyn PermissionCallback> = Arc::new(DenyAllCallback);
+                runtime.set_permission_callback(Some(cb));
+            }
+            "allow-all" => {
+                runtime.set_permission_callback(None);
+            }
+            _ => {
+                return Err(Error::from_reason(format!(
+                    "Invalid permission mode: '{}'. Must be 'cli', 'deny-all', or 'allow-all'.",
+                    mode
+                )))
+            }
+        }
+        Ok(())
     }
 
     /// Run a specific target (script/WASM) within a skill.

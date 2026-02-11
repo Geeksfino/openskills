@@ -192,10 +192,13 @@ fn test_check_tool_permission_for_forked_skill() {
         std::collections::HashMap::new(),
     );
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("not allowed"));
+    let err_msg = result.unwrap_err().to_string();
+    // Tool denied by host policy (default: fallback=deny for unlisted tools)
+    assert!(
+        err_msg.contains("denied"),
+        "Expected denial error, got: {}",
+        err_msg
+    );
 }
 
 #[test]
