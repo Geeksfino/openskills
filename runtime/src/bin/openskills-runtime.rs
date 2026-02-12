@@ -3,14 +3,17 @@
 //! Claude Skills compatible runtime with WASM sandbox.
 
 use openskills_runtime::{
-    analyze_skill_tokens, build_skill, BuildConfig, validate_skill_path, ExecutionOptions,
+    analyze_skill_tokens, validate_skill_path, ExecutionOptions,
     OpenSkillRuntime,
 };
+#[cfg(feature = "build-tool")]
+use openskills_runtime::{build_skill, BuildConfig};
 use serde_json::Value;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
 use std::process;
+#[cfg(feature = "build-tool")]
+use std::path::PathBuf;
 
 fn print_usage() {
     eprintln!("OpenSkills Runtime - Claude Skills compatible with WASM sandbox");
@@ -354,6 +357,7 @@ fn cmd_execute(args: &[String]) {
     }
 }
 
+#[cfg(feature = "build-tool")]
 fn cmd_build(args: &[String]) {
     let mut skill_path: Option<String> = None;
     let mut force = false;
@@ -515,6 +519,14 @@ fn cmd_build(args: &[String]) {
             process::exit(1);
         }
     }
+}
+
+#[cfg(not(feature = "build-tool"))]
+fn cmd_build(_args: &[String]) {
+    eprintln!(
+        "Build tooling is disabled in this binary. Rebuild with the `build-tool` feature enabled."
+    );
+    process::exit(1);
 }
 
 fn cmd_validate(args: &[String]) {
