@@ -521,14 +521,6 @@ mod macos {
         profile.push_str("(allow process-exec)\n");
         profile.push_str("(allow mach-lookup)\n");
         profile.push_str("(allow signal)\n");
-        
-        // process-fork: always allowed on macOS.
-        // Apple's /usr/bin/python3 is a CLT shim that needs fork+exec to launch the
-        // real interpreter and may probe for xcodebuild during init.  Blocking fork
-        // breaks even simple Python scripts.  This matches Claude Code's model:
-        // security comes from filesystem restrictions + permission system, not from
-        // blocking process spawning.
-        profile.push_str("(allow process-fork)\n");
 
         // Deny sensitive credential and config paths FIRST (before allow-all)
         // Seatbelt uses first-match-wins, so deny rules must come before allow rules
@@ -601,7 +593,9 @@ mod macos {
 
         // Additional process permissions if shell/terminal tools are allowed
         if allow_process {
-            // Allow all process operations (broader than just fork+exec)
+            // process-fork: allow subprocess spawning (needed for Shell/Bash/Terminal tools)
+            profile.push_str("(allow process-fork)\n");
+            // Allow all other process operations (broader than just fork+exec)
             profile.push_str("(allow process*)\n");
         }
 
