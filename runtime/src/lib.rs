@@ -29,6 +29,7 @@
 //! ```
 
 mod audit;
+#[cfg(feature = "build-tool")]
 mod build;
 mod context;
 mod errors;
@@ -79,6 +80,7 @@ use validator::validate_skill;
 
 // Re-exports for public API
 pub use audit::{AuditRecord as RuntimeAuditRecord, ExecutionStatus as RuntimeExecutionStatus};
+#[cfg(feature = "build-tool")]
 pub use build::{build_skill, BuildConfig, list_build_plugins};
 pub use errors::OpenSkillError as RuntimeError;
 pub use manifest::{constraints, HooksConfig, SkillManifest, WasmConfig};

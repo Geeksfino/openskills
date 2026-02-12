@@ -522,8 +522,13 @@ mod macos {
         profile.push_str("(allow mach-lookup)\n");
         profile.push_str("(allow signal)\n");
         
-        // process-fork: only allow when explicitly permitted (Bash/Terminal tools)
-        // This prevents subprocess spawning without explicit permission
+        // process-fork: always allowed on macOS.
+        // Apple's /usr/bin/python3 is a CLT shim that needs fork+exec to launch the
+        // real interpreter and may probe for xcodebuild during init.  Blocking fork
+        // breaks even simple Python scripts.  This matches Claude Code's model:
+        // security comes from filesystem restrictions + permission system, not from
+        // blocking process spawning.
+        profile.push_str("(allow process-fork)\n");
 
         // Deny sensitive credential and config paths FIRST (before allow-all)
         // Seatbelt uses first-match-wins, so deny rules must come before allow rules
@@ -594,11 +599,9 @@ mod macos {
             ));
         }
 
-        // Process permissions if shell/terminal tools are allowed
+        // Additional process permissions if shell/terminal tools are allowed
         if allow_process {
-            // Allow process-fork for subprocess spawning
-            profile.push_str("(allow process-fork)\n");
-            // Allow all other process operations
+            // Allow all process operations (broader than just fork+exec)
             profile.push_str("(allow process*)\n");
         }
 
@@ -961,14 +964,22 @@ mod linux {
                     continue;
                 }
                 if let Ok(fd) = PathFd::new(path) {
-                    let _ = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)));
+                    if let Ok(updated_ruleset) =
+                        ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)))
+                    {
+                        ruleset = updated_ruleset;
+                    }
                 }
             }
 
             // Add read-write rules (these grant full access for the path subtree)
             for path in rw_paths {
                 if let Ok(fd) = PathFd::new(path) {
-                    let _ = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)));
+                    if let Ok(updated_ruleset) =
+                        ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)))
+                    {
+                        ruleset = updated_ruleset;
+                    }
                 }
             }
 
