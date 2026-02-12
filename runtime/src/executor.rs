@@ -1154,21 +1154,13 @@ pub fn run_sandboxed_command(
 
                 for path in &ro_clone {
                     if let Ok(fd) = PathFd::new(path) {
-                        if let Ok(updated_ruleset) =
-                            ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)))
-                        {
-                            ruleset = updated_ruleset;
-                        }
+                        ruleset = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)))?;
                     }
                 }
 
                 for path in &rw_clone {
                     if let Ok(fd) = PathFd::new(path) {
-                        if let Ok(updated_ruleset) =
-                            ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)))
-                        {
-                            ruleset = updated_ruleset;
-                        }
+                        ruleset = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)))?;
                     }
                 }
 

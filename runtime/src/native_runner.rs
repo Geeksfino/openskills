@@ -964,22 +964,14 @@ mod linux {
                     continue;
                 }
                 if let Ok(fd) = PathFd::new(path) {
-                    if let Ok(updated_ruleset) =
-                        ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)))
-                    {
-                        ruleset = updated_ruleset;
-                    }
+                    ruleset = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)))?;
                 }
             }
 
             // Add read-write rules (these grant full access for the path subtree)
             for path in rw_paths {
                 if let Ok(fd) = PathFd::new(path) {
-                    if let Ok(updated_ruleset) =
-                        ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)))
-                    {
-                        ruleset = updated_ruleset;
-                    }
+                    ruleset = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)))?;
                 }
             }
 
