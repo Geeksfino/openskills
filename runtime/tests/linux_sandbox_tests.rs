@@ -3,12 +3,17 @@
 //! These tests verify the Linux sandbox implementation using Landlock.
 //! They are only compiled and run on Linux systems.
 
+#[cfg(target_os = "linux")]
 use openskills_runtime::{OpenSkillRuntime, ExecutionOptions, RuntimeExecutionStatus};
+#[cfg(target_os = "linux")]
 use serde_json::json;
+#[cfg(target_os = "linux")]
 use std::fs;
+#[cfg(target_os = "linux")]
 use tempfile::TempDir;
 
 /// Check if Landlock is supported on the current system.
+#[cfg(target_os = "linux")]
 fn is_landlock_supported() -> bool {
     // Check kernel version (Landlock requires 5.13+)
     if let Ok(version) = std::fs::read_to_string("/proc/version") {

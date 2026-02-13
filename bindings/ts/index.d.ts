@@ -8,6 +8,18 @@ export interface SkillDescriptorJs {
   description: string
   location: string
   userInvocable: boolean
+  /** OpenClaw-compatible: "bins, env" summary (e.g. "git, GITHUB_TOKEN"). */
+  requiresSummary?: string
+}
+/** OpenClaw-compatible requires (bins/env) from SKILL.md frontmatter. */
+export interface RequiresJs {
+  bins: Array<string>
+  env: Array<string>
+}
+/** Missing dependencies at activation time (bins not in PATH, env not set). */
+export interface MissingDependenciesJs {
+  bins: Array<string>
+  env: Array<string>
 }
 export interface LoadedSkillJs {
   id: string
@@ -20,6 +32,10 @@ export interface LoadedSkillJs {
   userInvocable: boolean
   location: string
   instructions: string
+  /** OpenClaw-compatible requires (bins/env) from manifest. */
+  requires?: RequiresJs
+  /** Missing dependencies at activation time. */
+  missingDependencies?: MissingDependenciesJs
 }
 export interface ExecutionOptionsJs {
   timeoutMs?: number

@@ -77,6 +77,9 @@ pub struct SkillDescriptor {
     pub description: String,
     pub location: SkillLocation,
     pub user_invocable: bool,
+    /// OpenClaw-compatible: "bins, env" summary from requires (e.g. "git, GITHUB_TOKEN").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires_summary: Option<String>,
 }
 
 /// Registry of discovered Claude Skills.
@@ -99,7 +102,11 @@ impl SkillRegistry {
         }
     }
     
-    /// Get loading errors encountered during discovery
+    /// Get loading errors encountered during discovery.
+    ///
+    /// Returns a map of skill ID to error message for skills that failed to load.
+    /// This is useful for diagnostics and logging after skill discovery.
+    #[allow(dead_code)]
     pub fn get_loading_errors(&self) -> &HashMap<String, String> {
         &self.loading_errors
     }
@@ -290,11 +297,24 @@ impl SkillRegistry {
     pub fn list(&self) -> Vec<SkillDescriptor> {
         self.skills
             .values()
-            .map(|s| SkillDescriptor {
-                id: s.id.clone(),
-                description: s.manifest.description.clone(),
-                location: s.location.clone(),
-                user_invocable: s.manifest.is_user_invocable(),
+            .map(|s| {
+                let requires_summary = s.manifest.requires.as_ref().map(|r| {
+                    let mut parts: Vec<String> = Vec::new();
+                    if !r.bins.is_empty() {
+                        parts.push(r.bins.join(", "));
+                    }
+                    if !r.env.is_empty() {
+                        parts.push(r.env.join(", "));
+                    }
+                    parts.join(", ")
+                }).filter(|s| !s.is_empty());
+                SkillDescriptor {
+                    id: s.id.clone(),
+                    description: s.manifest.description.clone(),
+                    location: s.location.clone(),
+                    user_invocable: s.manifest.is_user_invocable(),
+                    requires_summary,
+                }
             })
             .collect()
     }
@@ -379,6 +399,7 @@ mod tests {
             license: None,
             compatibility: None,
             metadata: None,
+            requires: None,
         };
         assert!(validate_skill_id("my-skill", &manifest).is_ok());
     }
@@ -397,6 +418,7 @@ mod tests {
             license: None,
             compatibility: None,
             metadata: None,
+            requires: None,
         };
         assert!(validate_skill_id("my-skill", &manifest).is_err());
     }
@@ -415,6 +437,7 @@ mod tests {
             license: None,
             compatibility: None,
             metadata: None,
+            requires: None,
         };
         assert!(validate_skill_id("My_Skill", &manifest).is_err());
     }

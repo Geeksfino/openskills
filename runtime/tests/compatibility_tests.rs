@@ -137,6 +137,46 @@ description: Second version (should win)
 }
 
 #[test]
+fn test_system_prompt_includes_requires_summary() {
+    use tempfile::TempDir;
+    use std::fs;
+
+    let temp_dir = TempDir::new().unwrap();
+    let skill_dir = temp_dir.path().join("git-workflow");
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        r#"---
+name: git-workflow
+description: Git operations and workflows.
+requires:
+  bins: [git]
+  env: [GITHUB_TOKEN]
+---
+# Instructions
+Use git and GITHUB_TOKEN.
+"#,
+    )
+    .unwrap();
+
+    let config = RuntimeConfig {
+        custom_directories: vec![temp_dir.path().to_path_buf()],
+        use_standard_locations: false,
+        project_root: None,
+        workspace_dir: None,
+    };
+    let mut runtime = OpenSkillRuntime::from_config(config);
+    runtime.discover_skills().unwrap();
+
+    let prompt = runtime.get_agent_system_prompt();
+    assert!(
+        prompt.contains("(requires:") && prompt.contains("git") && prompt.contains("GITHUB_TOKEN"),
+        "System prompt should include requires summary for user-invocable skill; got: {}",
+        prompt
+    );
+}
+
+#[test]
 fn test_discovery_nested_skills() {
     use tempfile::TempDir;
     use std::fs;

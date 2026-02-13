@@ -32,6 +32,7 @@ mod audit;
 #[cfg(feature = "build-tool")]
 mod build;
 mod context;
+mod deps_check;
 mod errors;
 mod executor;
 mod hook_runner;
@@ -84,7 +85,8 @@ pub use audit::{AuditRecord as RuntimeAuditRecord, ExecutionStatus as RuntimeExe
 #[cfg(feature = "build-tool")]
 pub use build::{build_skill, BuildConfig, list_build_plugins};
 pub use errors::OpenSkillError as RuntimeError;
-pub use manifest::{constraints, HooksConfig, SkillManifest, WasmConfig};
+pub use deps_check::MissingDependencies;
+pub use manifest::{constraints, HooksConfig, SkillManifest, SkillRequires, WasmConfig};
 pub use context::{ContextOutput, ExecutionContext, OutputType};
 pub use skill_session::SkillExecutionSession;
 pub use permission_callback::{
@@ -156,15 +158,27 @@ pub struct LoadedSkill {
     pub instructions: String,
     /// Location where skill was discovered.
     pub location: SkillLocation,
+    /// OpenClaw-compatible requires (bins/env) from manifest.
+    pub requires: Option<SkillRequires>,
+    /// Missing dependencies at activation time (bins not in PATH, env not set).
+    pub missing_dependencies: Option<MissingDependencies>,
 }
 
 impl From<&Skill> for LoadedSkill {
     fn from(skill: &Skill) -> Self {
+        let missing = deps_check::check_requires(skill.manifest.requires.as_ref());
+        let missing_dependencies = if missing.is_empty() {
+            None
+        } else {
+            Some(missing)
+        };
         Self {
             id: skill.id.clone(),
             manifest: skill.manifest.clone(),
             instructions: skill.instructions.clone(),
             location: skill.location.clone(),
+            requires: skill.manifest.requires.clone(),
+            missing_dependencies,
         }
     }
 }
@@ -598,15 +612,22 @@ impl OpenSkillRuntime {
     /// - Knows how to activate a skill to get its full instructions
     /// - Follows the instructions in SKILL.md without prior knowledge
     ///
-    /// This is the recommended way to integrate skills into an agent.
+    /// Skills with `user_invocable: false` (always-loaded) have their full
+    /// instructions appended to the prompt so the agent has them without calling
+    /// `activate_skill`. OpenClaw-compatible behavior.
     pub fn get_agent_system_prompt(&self) -> String {
-        let skills: Vec<SkillDescriptor> = self
-            .list_skills()
-            .into_iter()
-            .filter(|skill| skill.user_invocable)
+        let all_skills = self.list_skills();
+        let user_invocable: Vec<SkillDescriptor> = all_skills
+            .iter()
+            .filter(|s| s.user_invocable)
+            .cloned()
+            .collect();
+        let always_skills: Vec<&SkillDescriptor> = all_skills
+            .iter()
+            .filter(|s| !s.user_invocable)
             .collect();
 
-        if skills.is_empty() {
+        if user_invocable.is_empty() && always_skills.is_empty() {
             return String::from("No skills are currently available.");
         }
 
@@ -616,8 +637,22 @@ impl OpenSkillRuntime {
 
 "#);
 
-        for skill in &skills {
-            prompt.push_str(&format!("- **{}**: {}\n", skill.id, skill.description));
+        if user_invocable.is_empty() && !always_skills.is_empty() {
+            prompt.push_str("(No additional skills to activate - the following are always active.)\n\n");
+        } else {
+            for skill in &user_invocable {
+                let req_note = skill
+                    .requires_summary
+                    .as_deref()
+                    .map(|r| format!(" (requires: {})", r))
+                    .unwrap_or_default();
+                prompt.push_str(&format!(
+                    "- **{}**: {}{}\n",
+                    skill.id,
+                    skill.description,
+                    req_note
+                ));
+            }
         }
 
         prompt.push_str(r#"
@@ -696,6 +731,20 @@ Example response:
 - `list_workspace_files(subdir?, recursive?, pattern?)` - List files in the workspace directory
 - `get_file_info(path)` - Get file information (size, type, MIME type)
 "#);
+
+        // OpenClaw-compatible: append full instructions for always-loaded skills
+        if !always_skills.is_empty() {
+            prompt.push_str("\n\n--- Pre-loaded Skills ---\n");
+            for skill in always_skills {
+                if let Ok(loaded) = self.activate_skill(&skill.id) {
+                    prompt.push_str(&format!(
+                        "\n### Pre-loaded Skill: {}\n\n{}\n",
+                        loaded.manifest.name,
+                        loaded.instructions
+                    ));
+                }
+            }
+        }
 
         prompt
     }

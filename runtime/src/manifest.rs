@@ -60,6 +60,22 @@ pub struct SkillManifest {
     /// Additional metadata (author, repository, keywords).
     #[serde(default)]
     pub metadata: Option<SkillMetadataInfo>,
+
+    /// OpenClaw-compatible dependency requirements (bins in PATH, env vars set).
+    #[serde(default)]
+    pub requires: Option<SkillRequires>,
+}
+
+/// OpenClaw-compatible dependency requirements (requires.bins, requires.env in SKILL.md).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct SkillRequires {
+    /// Required binaries (must be in PATH).
+    #[serde(default)]
+    pub bins: Vec<String>,
+    /// Required environment variables (must be set and non-empty).
+    #[serde(default)]
+    pub env: Vec<String>,
 }
 
 /// Allowed tools can be specified as a list or comma-separated string.
@@ -323,6 +339,22 @@ compatibility:
         assert_eq!(compat.min_version, Some("1.0.0".to_string()));
         assert_eq!(compat.max_version, Some("2.0.0".to_string()));
         assert_eq!(compat.platforms, Some(vec!["macos".to_string(), "linux".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_requires_field() {
+        let yaml = r#"name: git-workflow
+description: Git operations
+requires:
+  bins:
+    - git
+  env:
+    - GITHUB_TOKEN"#;
+        let manifest: SkillManifest = serde_yaml::from_str(yaml).unwrap();
+        assert!(manifest.requires.is_some());
+        let r = manifest.requires.unwrap();
+        assert_eq!(r.bins, vec!["git"]);
+        assert_eq!(r.env, vec!["GITHUB_TOKEN"]);
     }
 
     #[test]

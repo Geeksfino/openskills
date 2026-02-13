@@ -415,6 +415,7 @@ mod tests {
             license: None,
             compatibility: None,
             metadata: None,
+            requires: None,
         };
         assert!(validate_manifest(&manifest).is_err());
     }
@@ -434,6 +435,7 @@ mod tests {
             license: None,
             compatibility: None,
             metadata: None,
+            requires: None,
         };
         assert!(validate_manifest(&manifest).is_ok());
     }

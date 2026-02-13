@@ -15,6 +15,22 @@ pub struct SkillDescriptorJs {
     pub description: String,
     pub location: String,
     pub user_invocable: bool,
+    /// OpenClaw-compatible: "bins, env" summary (e.g. "git, GITHUB_TOKEN").
+    pub requires_summary: Option<String>,
+}
+
+/// OpenClaw-compatible requires (bins/env) from SKILL.md frontmatter.
+#[napi(object)]
+pub struct RequiresJs {
+    pub bins: Vec<String>,
+    pub env: Vec<String>,
+}
+
+/// Missing dependencies at activation time (bins not in PATH, env not set).
+#[napi(object)]
+pub struct MissingDependenciesJs {
+    pub bins: Vec<String>,
+    pub env: Vec<String>,
 }
 
 #[napi(object)]
@@ -29,6 +45,10 @@ pub struct LoadedSkillJs {
     pub user_invocable: bool,
     pub location: String,
     pub instructions: String,
+    /// OpenClaw-compatible requires (bins/env) from manifest.
+    pub requires: Option<RequiresJs>,
+    /// Missing dependencies at activation time.
+    pub missing_dependencies: Option<MissingDependenciesJs>,
 }
 
 #[napi(object)]
@@ -346,6 +366,7 @@ impl OpenSkillRuntimeWrapper {
                     SkillLocation::Custom => "custom".to_string(),
                 },
                 user_invocable: s.user_invocable,
+                requires_summary: s.requires_summary,
             })
             .collect())
     }
@@ -370,6 +391,7 @@ impl OpenSkillRuntimeWrapper {
                     SkillLocation::Custom => "custom".to_string(),
                 },
                 user_invocable: s.user_invocable,
+                requires_summary: s.requires_summary,
             })
             .collect())
     }
@@ -392,6 +414,7 @@ impl OpenSkillRuntimeWrapper {
                     SkillLocation::Custom => "custom".to_string(),
                 },
                 user_invocable: s.user_invocable,
+                requires_summary: s.requires_summary,
             })
             .collect())
     }
@@ -411,6 +434,15 @@ impl OpenSkillRuntimeWrapper {
             .activate_skill(&skill_id)
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
+        let requires = loaded.requires.as_ref().map(|r| RequiresJs {
+            bins: r.bins.clone(),
+            env: r.env.clone(),
+        });
+        let missing_dependencies = loaded.missing_dependencies.as_ref().map(|m| MissingDependenciesJs {
+            bins: m.bins.clone(),
+            env: m.env.clone(),
+        });
+
         Ok(LoadedSkillJs {
             id: loaded.id.clone(),
             name: loaded.manifest.name.clone(),
@@ -427,6 +459,8 @@ impl OpenSkillRuntimeWrapper {
                 SkillLocation::Custom => "custom".to_string(),
             },
             instructions: loaded.instructions.clone(),
+            requires,
+            missing_dependencies,
         })
     }
 
