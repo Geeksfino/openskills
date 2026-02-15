@@ -4,14 +4,14 @@
 
 ## 概述
 
-OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提供 macOS 上的原生 seatbelt 沙箱（主要方式）和实验性的基于 WASM 的沙箱。架构强调：
+OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提供原生操作系统级沙箱（macOS seatbelt + Linux Landlock）作为主要执行方法，以及可用于特定用例的实验性基于 WASM 的沙箱。架构强调：
 
-- **安全性**：操作系统级沙箱（seatbelt）作为主要方式，实验性的基于能力权限的 WASM 沙箱
+- **安全性**：操作系统级沙箱（macOS seatbelt + Linux Landlock）作为主要方式，实验性的基于能力权限的 WASM 沙箱
 - **性能**：高效的技能发现和执行
 - **兼容性**：100% 兼容 Claude Skills 格式
 - **可扩展性**：多个生态系统的语言绑定
 
-**注意**：WASM 沙箱是实验性的，不是主要的执行方法。大多数技能使用原生 Python 和 Shell 脚本通过 seatbelt 沙箱。
+**注意**：WASM 沙箱是实验性的，不是主要的执行方法。大多数技能使用原生 Python 和 Shell 脚本通过操作系统级沙箱。
 
 ## 核心组件
 
@@ -66,7 +66,7 @@ OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提
 
 负责：
 - 通过操作系统级沙箱执行原生 Python 和 shell 脚本（macOS seatbelt + Linux Landlock）
-- 从权限构建 seatbelt 配置文件
+- 从权限构建沙箱配置文件
 - 捕获 stdout/stderr
 - 超时强制执行
 

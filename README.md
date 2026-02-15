@@ -2,16 +2,16 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A **Claude Skills compatible runtime** with **dual sandboxing**: **macOS seatbelt** for native Python and shell scripts (primary), plus **experimental WASM-based sandboxing** for cross-platform security. OpenSkills implements the [Claude Code Agent Skills specification](https://code.claude.com/docs/en/skills), providing a secure, flexible runtime for executing skills in **any agent framework**.
+A **Claude Skills compatible runtime** with **dual sandboxing**: **native execution** (macOS seatbelt + Linux Landlock) for Python and shell scripts (primary), plus **experimental WASM-based sandboxing** for cross-platform security. OpenSkills implements the [Claude Code Agent Skills specification](https://code.claude.com/docs/en/skills), providing a secure, flexible runtime for executing skills in **any agent framework**.
 
 ## Philosophy
 
 OpenSkills is **syntactically 100% compatible** with Claude Skills, meaning any skill that follows the Claude Skills format (SKILL.md with YAML frontmatter) will work with OpenSkills. What makes OpenSkills unique is its **dual sandboxing approach**:
 
-- **macOS seatbelt sandboxing** (primary) for native Python and shell scripts - production-ready, fully supported
+- **Native sandboxing** (primary) for Python and shell scripts via OS-level isolation (macOS seatbelt + Linux Landlock) - production-ready, fully supported
 - **WASM/WASI sandboxing** (experimental) for cross-platform security and consistency - available for early adopters
 
-**Primary execution model**: Native Python and shell scripts via OS-level sandboxing on macOS (seatbelt) and Linux (Landlock). This is the recommended, production-ready approach that works with the full Python ecosystem and native tools.
+**Primary execution model**: Native Python and shell scripts via OS-level sandboxing (macOS seatbelt and Linux Landlock). This is the recommended, production-ready approach that works with the full Python ecosystem and native tools.
 
 **Experimental WASM support**: WASM sandboxing is available for developers who want to explore cross-platform deterministic execution, but it is not required for using OpenSkills. Most skills work perfectly fine with native scripts.
 
@@ -21,8 +21,8 @@ OpenSkills can be integrated into **any agent framework** (LangChain, Vercel AI 
 
 1. **100% Syntactic Compatibility**: OpenSkills reads and executes skills using the exact same SKILL.md format as Claude Skills. Skills can be shared between Claude Code and OpenSkills without modification.
 
-2. **Dual Sandbox Architecture**: OpenSkills combines **macOS seatbelt** (primary) with **experimental WASM/WASI 0.3** sandboxing:
-   - **macOS Seatbelt** (primary): Native Python and shell script execution with OS-level sandboxing - production-ready, full ecosystem support
+2. **Dual Sandbox Architecture**: OpenSkills combines **native OS-level sandboxing** (primary) with **experimental WASM/WASI 0.3** sandboxing:
+   - **Native Sandboxing** (primary): Python and shell script execution with OS-level isolation (macOS seatbelt + Linux Landlock) - production-ready, full ecosystem support
    - **WASM/WASI** (experimental): Cross-platform security, capability-based permissions, memory safety, deterministic execution - available for early adopters
    - **Automatic Detection**: Runtime automatically chooses the appropriate sandbox based on skill type
    - **Native-first**: Most skills use native scripts; WASM is optional for specific use cases
@@ -36,7 +36,7 @@ OpenSkills is designed for **any agent framework** that needs Claude-compatible 
 - **Agent Framework Integration**: Works with LangChain, Vercel AI SDK, custom frameworks, or any system that needs tool-like capabilities
 - **Enterprise Agents**: Internal skills developed by trusted developers
 - **Native Scripts**: Primary execution model using Python and shell scripts with OS-level sandboxing
-- **Cross-Platform Native**: macOS seatbelt (production), Linux Landlock (production)
+- **Cross-Platform Native**: macOS seatbelt + Linux Landlock (both production-ready)
 - **Experimental WASM**: Optional WASM execution for specific use cases requiring determinism
 - **Security & Auditability**: Both sandboxing methods provide strong isolation and audit logging
 
@@ -47,7 +47,7 @@ OpenSkills is designed for **any agent framework** that needs Claude-compatible 
 ### Current Limitations
 
 1. **Native Scripts Platform Scope**:
-   - Native Python and shell scripts are supported on macOS (seatbelt) and Linux (Landlock)
+   - Native Python and shell scripts are supported on macOS (seatbelt) and Linux (Landlock) - both production-ready
    - Other platforms should use experimental WASM execution
 
 2. **WASM Support (Experimental)**:
@@ -62,7 +62,7 @@ OpenSkills is designed for **any agent framework** that needs Claude-compatible 
 
 OpenSkills will evolve to address limitations while maintaining its native-first approach:
 
-1. **Linux Native Scripting**: Continue improving Linux Landlock policy coverage and diagnostics.
+1. **Enhanced Native Sandboxing**: Continue improving Linux Landlock and macOS seatbelt policy coverage and diagnostics.
 
 2. **WASM Improvements** (experimental): Continued development of WASM support for specific use cases requiring determinism and cross-platform consistency.
 
@@ -71,15 +71,15 @@ OpenSkills will evolve to address limitations while maintaining its native-first
 ## Features
 
 - ✅ **100% Claude Skills Compatible**: Full SKILL.md format support
-- 🔒 **Dual Sandbox Architecture**: macOS seatbelt (primary) + experimental WASM/WASI 0.3
-- 🧰 **Native Script Support**: Execute Python and shell scripts with OS-level sandboxing on macOS (seatbelt) and Linux (Landlock)
+- 🔒 **Dual Sandbox Architecture**: Native (macOS seatbelt + Linux Landlock) + experimental WASM/WASI 0.3
+- 🧰 **Native Script Support**: Execute Python and shell scripts with OS-level sandboxing on macOS and Linux
 - 🤖 **Any Agent Framework**: Integrate with LangChain, Vercel AI SDK, or custom frameworks
 - 🚀 **Pre-built Tools**: Ready-to-use tool definitions for TS/Python (~200 lines less code)
 - 📊 **Progressive Disclosure**: Efficient tiered loading (metadata → instructions → resources)
 - 🔌 **Multi-Language Bindings**: Rust core with TypeScript and Python bindings
-- 🛡️ **Capability-Based Security**: Fine-grained permissions via seatbelt profiles (and WASI for experimental WASM)
+- 🛡️ **Capability-Based Security**: Fine-grained permissions via native OS sandboxing (and WASI for experimental WASM)
 - 🏗️ **Build Tool**: `openskills build` for compiling TS/JS to WASM components (experimental)
-- 🌐 **Cross-Platform Native**: macOS seatbelt (production), Linux Landlock (production)
+- 🌐 **Cross-Platform Native**: macOS seatbelt + Linux Landlock (both production-ready)
 - 📁 **Workspace Management**: Built-in sandboxed workspace for file I/O operations
 
 ## Quick Start
@@ -312,7 +312,7 @@ OpenSkills uses a Rust core runtime with language bindings:
     └──────┬──────┘
            │
     ┌──────▼──────┐
-    │ Execution  │  (WASM/WASI 0.3 + seatbelt on macOS)
+    │ Execution  │  (Native OS sandboxing + WASM/WASI 0.3)
     └─────────────┘
 ```
 
@@ -320,21 +320,21 @@ OpenSkills uses a Rust core runtime with language bindings:
 
 1. **Skill Discovery**: Scans directories for SKILL.md files
 2. **Progressive Loading**: Loads metadata → instructions → resources on demand
-3. **Execution**: Runs `wasm/skill.wasm` in Wasmtime or native `.py/.sh` via seatbelt on macOS
-4. **Permission Enforcement**: Capabilities mapped from `allowed-tools` for WASM or seatbelt
+3. **Execution**: Runs native `.py/.sh` scripts via OS-level sandboxing (macOS seatbelt / Linux Landlock) or `wasm/skill.wasm` in Wasmtime
+4. **Permission Enforcement**: Capabilities mapped from `allowed-tools` for native sandboxes or WASM
 5. **Audit Logging**: All executions logged with input/output hashes
 
 ## What Makes OpenSkills Unique
 
 OpenSkills is the **only runtime** that combines:
 
-1. **WASM/WASI Sandboxing**: Cross-platform security with capability-based permissions
-2. **macOS Seatbelt Sandboxing**: Native Python and shell script execution with OS-level isolation
+1. **Native OS Sandboxing**: Production-ready isolation via macOS seatbelt and Linux Landlock
+2. **WASM/WASI Sandboxing**: Experimental cross-platform security with capability-based permissions
 3. **Automatic Detection**: Runtime automatically chooses the right sandbox for each skill
 4. **Agent Framework Agnostic**: Works with any agent framework (LangChain, Vercel AI SDK, custom)
 
 This dual approach means you get:
-- **Native Flexibility**: Full Python ecosystem and native tools via seatbelt (primary)
+- **Native Flexibility**: Full Python ecosystem and native tools via OS sandboxing (primary)
 - **Experimental WASM**: Cross-platform determinism for specific use cases (optional)
 - **Security**: Both sandboxing methods provide strong isolation
 - **Compatibility**: 100% compatible with Claude Skills specification
@@ -492,7 +492,7 @@ This gives us:
 | Aspect | Claude Code | OpenSkills |
 |--------|-------------|------------|
 | **SKILL.md Format** | ✅ Full support | ✅ 100% compatible |
-| **Sandbox** | seatbelt/seccomp | **seatbelt (macOS, primary) + Landlock (Linux, primary) + WASM/WASI 0.3 (experimental)** ⭐ |
+| **Sandbox** | seatbelt/seccomp | **Native (macOS seatbelt + Linux Landlock, primary) + WASM/WASI 0.3 (experimental)** ⭐ |
 | **Cross-platform** | OS-specific | Native macOS + Linux (production); WASM identical (experimental) |
 | **Script Execution** | Native (Python, shell) | Native (macOS + Linux, primary) + WASM components (experimental) |
 | **Build Required** | No | No for native scripts. Yes for WASM (experimental, TS/JS → WASM) |

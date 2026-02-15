@@ -1,6 +1,6 @@
 # OpenSkills Runtime 规范 (v0.2)
 
-OpenSkills 是一个 Claude Skills 兼容的运行时，它使用**操作系统级别的沙箱（macOS 上的 seatbelt，Linux 上的 seccomp）作为主要执行方法**，并提供**实验性的基于 WASM 的沙箱**用于特定用例。
+OpenSkills 是一个 Claude Skills 兼容的运行时，它使用**操作系统级别的沙箱（macOS seatbelt + Linux Landlock）作为主要执行方法**，并提供**实验性的基于 WASM 的沙箱**用于特定用例。
 
 ## Claude Skills 兼容性
 
