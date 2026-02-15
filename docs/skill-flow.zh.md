@@ -516,16 +516,18 @@ OpenSkills 提供两个互补的沙箱环境，各自针对不同用例优化:
 
 ---
 
-### 2. 本地 Seatbelt 沙箱 (仅限 macOS)
+### 2. 本地 OS 沙箱（macOS Seatbelt + Linux Landlock）
 
 **目的**: 用于本地 Python 和 shell 脚本的 OS 级沙箱处理
 
 **技术栈**:
-- **运行时**: macOS `sandbox-exec` 与 seatbelt 配置文件
+- **运行时**: macOS `sandbox-exec` + seatbelt 配置文件；Linux 使用 Landlock 规则进行进程隔离
 - **隔离**: 过程级沙箱处理，带文件系统和网络限制
-- **平台支持**: 仅限 macOS (已计划 Linux seccomp 支持)
+- **平台支持**: macOS（seatbelt）与 Linux（Landlock）
 
 **工作原理**:
+
+在 Linux 上，运行时会直接执行脚本，并应用 Landlock 规则进行文件系统沙箱隔离。下面的详细流程主要展示 macOS seatbelt 路径：
 
 1. **脚本检测**: 运行时在 `scripts/` 目录中检测本地脚本 (`.py`、`.sh`)
 2. **Seatbelt 配置文件生成**:
@@ -558,7 +560,7 @@ OpenSkills 提供两个互补的沙箱环境，各自针对不同用例优化:
 - ✅ **强隔离**: 过程级沙箱处理
 
 **限制**:
-- 仅限 macOS (已计划 Linux seccomp 支持)
+- 仅支持 macOS 和 Linux
 - 特定于平台的行为
 - 需要本地 Python/系统依赖
 - 不如 WASM 可移植
@@ -567,7 +569,7 @@ OpenSkills 提供两个互补的沙箱环境，各自针对不同用例优化:
 - 基于 Python 的技能 (PDF 处理、文档操作)
 - 需要本地库的技能
 - 无法编译为 WASM 的遗留脚本
-- 仅限 macOS 的部署
+- macOS/Linux 部署
 
 ---
 
