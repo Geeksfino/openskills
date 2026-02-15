@@ -2,16 +2,16 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-一个支持**双沙箱方案**的 **Claude Skills 兼容运行时**：**macOS seatbelt** 用于原生 Python 和 Shell 脚本执行（主要方式），加上**实验性的基于 WASM 的沙箱**用于跨平台安全。OpenSkills 实现了 [Claude Code Agent Skills 规范](https://code.claude.com/docs/en/skills)，为**任何智能体框架**提供安全、灵活的运行时来执行技能。
+一个支持**双沙箱方案**的 **Claude Skills 兼容运行时**：**原生执行**（macOS seatbelt + Linux Landlock）用于 Python 和 Shell 脚本执行（主要方式），加上**实验性的基于 WASM 的沙箱**用于跨平台安全。OpenSkills 实现了 [Claude Code Agent Skills 规范](https://code.claude.com/docs/en/skills)，为**任何智能体框架**提供安全、灵活的运行时来执行技能。
 
 ## 设计理念
 
 OpenSkills 与 Claude Skills **100% 语法兼容**，这意味着任何遵循 Claude Skills 格式（带有 YAML 前置元数据的 SKILL.md）的技能都可以在 OpenSkills 上运行。OpenSkills 的独特之处在于其**双沙箱架构**：
 
-- **macOS seatbelt 沙箱**（主要方式）：用于原生 Python 和 Shell 脚本执行 - 生产就绪，完全支持
+- **原生沙箱**（主要方式）：通过操作系统级隔离（macOS seatbelt + Linux Landlock）执行 Python 和 Shell 脚本 - 生产就绪，完全支持
 - **WASM/WASI 沙箱**（实验性）：提供跨平台安全性和一致性 - 面向早期采用者
 
-**主要执行模型**：通过操作系统级沙箱执行原生 Python 和 Shell 脚本：macOS（seatbelt）与 Linux（Landlock）。这是推荐的生产就绪方法，可与完整的 Python 生态系统和原生工具配合使用。
+**主要执行模型**：通过操作系统级沙箱（macOS seatbelt 和 Linux Landlock）执行原生 Python 和 Shell 脚本。这是推荐的生产就绪方法，可与完整的 Python 生态系统和原生工具配合使用。
 
 **实验性 WASM 支持**：WASM 沙箱可供希望探索跨平台确定性执行的开发者使用，但使用 OpenSkills 并不需要它。大多数技能使用原生脚本即可完美运行。
 
@@ -21,8 +21,8 @@ OpenSkills 可以集成到**任何智能体框架**（LangChain、Vercel AI SDK�
 
 1. **100% 语法兼容性**：OpenSkills 使用与 Claude Skills 完全相同的 SKILL.md 格式来读取和执行技能。技能可以在 Claude Code 和 OpenSkills 之间共享，无需修改。
 
-2. **双沙箱架构**：OpenSkills 结合了 **macOS seatbelt**（主要方式）与**实验性的 WASM/WASI 0.3** 沙箱：
-   - **macOS Seatbelt**（主要方式）：原生 Python 和 Shell 脚本执行，具有操作系统级别的沙箱隔离 - 生产就绪，完整生态系统支持
+2. **双沙箱架构**：OpenSkills 结合了**原生操作系统级沙箱**（主要方式）与**实验性的 WASM/WASI 0.3** 沙箱：
+   - **原生沙箱**（主要方式）：Python 和 Shell 脚本执行，具有操作系统级别的隔离（macOS seatbelt + Linux Landlock）- 生产就绪，完整生态系统支持
    - **WASM/WASI**（实验性）：跨平台安全性、基于能力的权限、内存安全、确定性执行 - 面向早期采用者
    - **自动检测**：运行时根据技能类型自动选择合适的沙箱
    - **原生优先**：大多数技能使用原生脚本；WASM 是特定用例的可选方案
@@ -36,7 +36,7 @@ OpenSkills 专为需要 Claude 兼容技能的**任何智能体框架**而设计
 - **智能体框架集成**：可与 LangChain、Vercel AI SDK、自定义框架或任何需要工具式功能的系统配合使用
 - **企业智能体**：由受信任的开发人员开发的内部技能
 - **原生脚本**：使用 Python 和 Shell 脚本的主要执行模型，具有操作系统级别的沙箱
-- **跨平台原生**：macOS seatbelt（生产环境），Linux Landlock（生产环境）
+- **跨平台原生**：macOS seatbelt + Linux Landlock（均为生产就绪）
 - **实验性 WASM**：用于需要确定性的特定用例的可选 WASM 执行
 - **安全性和可审计性**：两种沙箱方法都提供强大的隔离和审计日志记录
 
@@ -47,7 +47,7 @@ OpenSkills 专为需要 Claude 兼容技能的**任何智能体框架**而设计
 ### 当前限制
 
 1. **原生脚本的平台范围**：
-   - 原生 Python 和 Shell 脚本支持 macOS（seatbelt）和 Linux（Landlock）
+   - 原生 Python 和 Shell 脚本支持 macOS（seatbelt）和 Linux（Landlock）- 均为生产就绪
    - 其他平台可使用实验性的 WASM 执行
 
 2. **WASM 支持（实验性）**：
@@ -62,7 +62,7 @@ OpenSkills 专为需要 Claude 兼容技能的**任何智能体框架**而设计
 
 OpenSkills 将在保持其原生优先方法的同时不断发展以解决限制：
 
-1. **Linux 原生脚本**：持续改进 Linux Landlock 策略覆盖和诊断能力。
+1. **增强的原生沙箱**：持续改进 Linux Landlock 和 macOS seatbelt 策略覆盖和诊断能力。
 
 2. **WASM 改进**（实验性）：继续开发 WASM 支持，用于需要确定性和跨平台一致性的特定用例。
 
@@ -71,15 +71,15 @@ OpenSkills 将在保持其原生优先方法的同时不断发展以解决限制
 ## 特性
 
 - ✅ **100% Claude Skills 兼容**：完整支持 SKILL.md 格式
-- 🔒 **双沙箱架构**：macOS seatbelt（主要方式）+ 实验性 WASM/WASI 0.3
-- 🧰 **原生脚本支持**：通过操作系统级沙箱执行 Python 和 Shell 脚本：macOS（seatbelt）与 Linux（Landlock）
+- 🔒 **双沙箱架构**：原生（macOS seatbelt + Linux Landlock）+ 实验性 WASM/WASI 0.3
+- 🧰 **原生脚本支持**：通过操作系统级沙箱执行 Python 和 Shell 脚本（macOS 和 Linux）
 - 🤖 **任何智能体框架**：与 LangChain、Vercel AI SDK 或自定义框架集成
 - 🚀 **预构建工具**：为 TS/Python 提供即用型工具定义（减少约 200 行代码）
 - 📊 **渐进式披露**：高效的分层加载（元数据 → 指令 → 资源）
 - 🔌 **多语言绑定**：Rust 核心，提供 TypeScript 和 Python 绑定
-- 🛡️ **基于能力的安全性**：通过 seatbelt 配置文件实现细粒度权限（以及实验性 WASM 的 WASI）
+- 🛡️ **基于能力的安全性**：通过原生操作系统沙箱实现细粒度权限（以及实验性 WASM 的 WASI）
 - 🏗️ **构建工具**：`openskills build` 用于将 TS/JS 编译为 WASM 组件（实验性）
-- 🌐 **跨平台原生**：macOS seatbelt（生产环境），Linux Landlock（生产环境）
+- 🌐 **跨平台原生**：macOS seatbelt + Linux Landlock（均为生产就绪）
 - 📁 **工作空间管理**：内置沙箱化工作空间用于文件 I/O 操作
 
 ## 快速开始
