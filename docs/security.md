@@ -6,13 +6,13 @@ This document describes the security model, sandboxing mechanisms, and permissio
 
 OpenSkills Runtime implements a **defense-in-depth** security model with multiple layers:
 
-1. **Native Script Sandbox** (Primary) - OS-level sandboxing (Seatbelt on macOS) for Python/Shell scripts - production-ready
+1. **Native Script Sandbox** (Primary) - OS-level sandboxing (macOS seatbelt + Linux Landlock) for Python/Shell scripts - production-ready
 2. **WASM Sandbox** (Experimental) - Capability-based isolation for WASM modules (WASI 0.2/0.3) - available for specific use cases
 3. **Host Policy** - Host-level tool governance sitting between skill declarations and sandbox enforcement
 4. **Permission Enforcement** - Tool-based access control via `allowed-tools`, risky tool detection, and host policy resolution
 5. **Context Isolation** - Forked contexts prevent skill output pollution
 
-**Note**: Native scripts via seatbelt are the primary and recommended execution method. WASM sandboxing is experimental.
+**Note**: Native scripts via OS-level sandboxing are the primary and recommended execution method. WASM sandboxing is experimental.
 
 ---
 
@@ -72,18 +72,18 @@ See [README.md](../README.md#wasm-support-long-term-vision) for detailed discuss
 
 ---
 
-## Native Script Sandbox (macOS Seatbelt) - Primary
+## Native Script Sandbox (macOS/Linux) - Primary
 
 **Status**: Production-ready, primary execution method.
 
-Native Python and Shell scripts execute under macOS Seatbelt sandbox profiles following Claude Code's security model. This is the recommended approach for most skills, providing full access to the Python ecosystem and native tools.
+Native Python and Shell scripts execute under OS-level sandboxing (macOS seatbelt and Linux Landlock) following Claude Code's security model. This is the recommended approach for most skills, providing full access to the Python ecosystem and native tools.
 
 ### Security Model
 
-The seatbelt profile uses a **"allow broad reads, deny specific sensitive paths"** approach:
+The sandbox profile uses a **"allow broad reads, deny specific sensitive paths"** approach (on macOS; Linux Landlock uses capability-based path restrictions):
 
 1. **Deny default** - All operations denied by default
-2. **Allow broad file reads** - Python and interpreters need system library access
+2. **Allow broad file reads** - Python and interpreters need system library access (macOS)
 3. **Deny specific sensitive paths** - Credentials and config files explicitly blocked
 4. **Allow writes only to specific paths** - Temp directories, skill root, configured paths
 
@@ -360,9 +360,9 @@ Audit records are sent to the configured audit sink (default: no-op sink).
 
 ## Implementation Details
 
-### Seatbelt Profile Generation
+### Sandbox Profile Generation
 
-The seatbelt profile is generated dynamically based on:
+**macOS Seatbelt**: The seatbelt profile is generated dynamically based on:
 - Skill root directory
 - Configured read/write paths
 - `allowed-tools` (for network/process permissions)
@@ -385,6 +385,8 @@ Profile follows this structure:
 (allow process*)  # if Bash/Terminal allowed
 (allow network*) # if WebSearch/Fetch allowed
 ```
+
+**Linux Landlock**: Path-based restrictions are enforced using Landlock LSM, providing similar security guarantees with capability-based access control.
 
 ### WASI Capability Preopening
 

@@ -1,6 +1,6 @@
 # OpenSkills Runtime Specification (v0.2)
 
-OpenSkills is a Claude Skills compatible runtime that uses **OS-level sandboxing (seatbelt on macOS, seccomp on Linux) as the primary execution method**, with **experimental WASM-based sandboxing** available for specific use cases.
+OpenSkills is a Claude Skills compatible runtime that uses **OS-level sandboxing (macOS seatbelt + Linux Landlock) as the primary execution method**, with **experimental WASM-based sandboxing** available for specific use cases.
 
 ## Claude Skills Conformance
 
@@ -87,7 +87,7 @@ This allows agents to:
 
 ## WASM Sandbox (OpenSkills Extension) - Experimental
 
-**Status**: Experimental feature. Native scripts via OS-level sandboxing (seatbelt/seccomp) are the primary execution method.
+**Status**: Experimental feature. Native scripts via OS-level sandboxing (macOS seatbelt + Linux Landlock) are the primary execution method.
 
 OpenSkills provides **experimental** WASM/WASI sandboxing as an optional execution method for specific use cases.
 

@@ -4,9 +4,9 @@ This document describes the internal architecture of OpenSkills Runtime.
 
 ## Overview
 
-OpenSkills is built with Rust as the core runtime, providing a native seatbelt sandbox on macOS (primary) and an experimental WASM-based sandbox for executing Claude Skills. The architecture emphasizes:
+OpenSkills is built with Rust as the core runtime, providing native OS-level sandboxing (macOS seatbelt + Linux Landlock) as the primary execution method, with experimental WASM-based sandboxing available for specific use cases. The architecture emphasizes:
 
-- **Security**: OS-level sandboxing (seatbelt) as primary, experimental WASM sandboxing with capability-based permissions
+- **Security**: OS-level sandboxing (macOS seatbelt + Linux Landlock) as primary, experimental WASM sandboxing with capability-based permissions
 - **Performance**: Efficient skill discovery and execution
 - **Compatibility**: 100% Claude Skills format compatibility
 - **Extensibility**: Language bindings for multiple ecosystems
@@ -66,7 +66,7 @@ Responsible for:
 
 Responsible for:
 - Executing native Python and shell scripts with OS-level sandboxing (macOS seatbelt + Linux Landlock)
-- Building seatbelt profiles from permissions
+- Building sandbox profiles from permissions
 - Capturing stdout/stderr
 - Timeout enforcement
 
@@ -129,8 +129,8 @@ Responsible for:
    └─> Auto-detect execution mode
 
 2. Executor.execute()
-   ├─> For Native (macOS, primary):
-   │   ├─> Build seatbelt profile
+   ├─> For Native (macOS/Linux, primary):
+   │   ├─> Build sandbox profile (seatbelt/Landlock)
    │   ├─> Execute Python/shell script
    │   ├─> Enforce filesystem/network permissions
    │   └─> Capture output
@@ -169,11 +169,11 @@ The runtime implements three-tier loading:
 
 ## Security Model
 
-### Native Seatbelt Sandbox (macOS) - Primary
+### Native OS Sandboxing (macOS/Linux) - Primary
 
 **Status**: Production-ready, primary execution method.
 
-- **Isolation**: Script execution is restricted by seatbelt profile
+- **Isolation**: Script execution is restricted by OS-level sandbox (seatbelt on macOS, Landlock on Linux)
 - **Filesystem**: Subpath read/write allowlists from `allowed-tools`
 - **Network**: Allowed only when `WebSearch`/`Fetch` are enabled
 - **Timeouts**: Epoch interruption for timeout enforcement
@@ -188,12 +188,6 @@ The runtime implements three-tier loading:
 - **Network**: Domain allowlist enforcement
 
 **Limitations**: Cannot access full Python ecosystem, native libraries, or OS-native behaviors. Best for deterministic logic and policy enforcement.
-
-- **Isolation**: Script execution is restricted by seatbelt profile
-- **Filesystem**: Subpath read/write allowlists from `allowed-tools`
-- **Network**: Allowed only when `WebSearch`/`Fetch` are enabled
-- **Timeouts**: Epoch interruption for timeout enforcement
-- **Memory**: Configurable memory limits
 
 ### Permission Enforcement
 

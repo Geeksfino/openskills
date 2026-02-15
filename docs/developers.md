@@ -4,7 +4,7 @@ This guide is for developers who want to use OpenSkills Runtime in their applica
 
 ## Overview
 
-OpenSkills Runtime is a Claude Skills-compatible runtime that executes skills primarily via native Python and shell scripts with OS-level sandboxing (seatbelt on macOS). Experimental WASM-based sandboxing is also available for specific use cases. It provides a Rust core with TypeScript and Python bindings.
+OpenSkills Runtime is a Claude Skills-compatible runtime that executes skills primarily via native Python and shell scripts with OS-level sandboxing (macOS seatbelt + Linux Landlock). Experimental WASM-based sandboxing is also available for specific use cases. It provides a Rust core with TypeScript and Python bindings.
 
 **Note**: WASM sandboxing is experimental. Most skills use native scripts, which is the recommended approach.
 
