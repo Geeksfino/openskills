@@ -4,7 +4,7 @@
 
 ## 概述
 
-OpenSkills 运行时是一个与 Claude Skills 兼容的运行时，主要通过原生 Python 和 Shell 脚本与操作系统级沙箱（macOS 上的 seatbelt）执行技能。实验性的基于 WASM 的沙箱也可用于特定用例。它提供了一个 Rust 核心以及 TypeScript 和 Python 绑定。
+OpenSkills 运行时是一个与 Claude Skills 兼容的运行时，主要通过原生 Python 和 Shell 脚本与操作系统级沙箱（macOS seatbelt + Linux Landlock）执行技能。实验性的基于 WASM 的沙箱也可用于特定用例。它提供了一个 Rust 核心以及 TypeScript 和 Python 绑定。
 
 **注意**：WASM 沙箱是实验性的。大多数技能使用原生脚本，这是推荐的方法。
 
