@@ -65,7 +65,7 @@ Responsible for:
 **Status**: Primary execution method, production-ready.
 
 Responsible for:
-- Executing native Python and shell scripts (macOS only, Linux planned)
+- Executing native Python and shell scripts with OS-level sandboxing (macOS seatbelt + Linux Landlock)
 - Building seatbelt profiles from permissions
 - Capturing stdout/stderr
 - Timeout enforcement

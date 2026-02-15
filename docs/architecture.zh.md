@@ -65,7 +65,7 @@ OpenSkills 使用 Rust 作为核心运行时构建，为执行 Claude Skills 提
 **状态**：主要执行方法，生产就绪。
 
 负责：
-- 执行原生 Python 和 shell 脚本（仅 macOS，Linux 计划中）
+- 通过操作系统级沙箱执行原生 Python 和 shell 脚本（macOS seatbelt + Linux Landlock）
 - 从权限构建 seatbelt 配置文件
 - 捕获 stdout/stderr
 - 超时强制执行

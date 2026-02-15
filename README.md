@@ -11,7 +11,7 @@ OpenSkills is **syntactically 100% compatible** with Claude Skills, meaning any 
 - **macOS seatbelt sandboxing** (primary) for native Python and shell scripts - production-ready, fully supported
 - **WASM/WASI sandboxing** (experimental) for cross-platform security and consistency - available for early adopters
 
-**Primary execution model**: Native Python and shell scripts via macOS seatbelt (with Linux seccomp support planned). This is the recommended, production-ready approach that works with the full Python ecosystem and native tools.
+**Primary execution model**: Native Python and shell scripts via OS-level sandboxing on macOS (seatbelt) and Linux (Landlock). This is the recommended, production-ready approach that works with the full Python ecosystem and native tools.
 
 **Experimental WASM support**: WASM sandboxing is available for developers who want to explore cross-platform deterministic execution, but it is not required for using OpenSkills. Most skills work perfectly fine with native scripts.
 
@@ -36,7 +36,7 @@ OpenSkills is designed for **any agent framework** that needs Claude-compatible 
 - **Agent Framework Integration**: Works with LangChain, Vercel AI SDK, custom frameworks, or any system that needs tool-like capabilities
 - **Enterprise Agents**: Internal skills developed by trusted developers
 - **Native Scripts**: Primary execution model using Python and shell scripts with OS-level sandboxing
-- **Cross-Platform Native**: macOS seatbelt (production), Linux seccomp (planned)
+- **Cross-Platform Native**: macOS seatbelt (production), Linux Landlock (production)
 - **Experimental WASM**: Optional WASM execution for specific use cases requiring determinism
 - **Security & Auditability**: Both sandboxing methods provide strong isolation and audit logging
 
@@ -46,9 +46,9 @@ OpenSkills is designed for **any agent framework** that needs Claude-compatible 
 
 ### Current Limitations
 
-1. **Native Scripts on Non-macOS**:
-   - Native Python and shell scripts are supported only on macOS (seatbelt)
-   - Linux seccomp support is planned
+1. **Native Scripts Platform Scope**:
+   - Native Python and shell scripts are supported on macOS (seatbelt) and Linux (Landlock)
+   - Other platforms should use experimental WASM execution
 
 2. **WASM Support (Experimental)**:
    - WASM sandboxing is experimental and not the primary execution method
@@ -62,7 +62,7 @@ OpenSkills is designed for **any agent framework** that needs Claude-compatible 
 
 OpenSkills will evolve to address limitations while maintaining its native-first approach:
 
-1. **Linux Native Scripting**: Linux seccomp support is planned to complete cross-platform native sandboxing (macOS seatbelt is already production-ready).
+1. **Linux Native Scripting**: Continue improving Linux Landlock policy coverage and diagnostics.
 
 2. **WASM Improvements** (experimental): Continued development of WASM support for specific use cases requiring determinism and cross-platform consistency.
 
@@ -72,14 +72,14 @@ OpenSkills will evolve to address limitations while maintaining its native-first
 
 - ✅ **100% Claude Skills Compatible**: Full SKILL.md format support
 - 🔒 **Dual Sandbox Architecture**: macOS seatbelt (primary) + experimental WASM/WASI 0.3
-- 🧰 **Native Script Support**: Execute Python and shell scripts on macOS via seatbelt (production-ready)
+- 🧰 **Native Script Support**: Execute Python and shell scripts with OS-level sandboxing on macOS (seatbelt) and Linux (Landlock)
 - 🤖 **Any Agent Framework**: Integrate with LangChain, Vercel AI SDK, or custom frameworks
 - 🚀 **Pre-built Tools**: Ready-to-use tool definitions for TS/Python (~200 lines less code)
 - 📊 **Progressive Disclosure**: Efficient tiered loading (metadata → instructions → resources)
 - 🔌 **Multi-Language Bindings**: Rust core with TypeScript and Python bindings
 - 🛡️ **Capability-Based Security**: Fine-grained permissions via seatbelt profiles (and WASI for experimental WASM)
 - 🏗️ **Build Tool**: `openskills build` for compiling TS/JS to WASM components (experimental)
-- 🌐 **Cross-Platform Native**: macOS seatbelt (production), Linux seccomp (planned)
+- 🌐 **Cross-Platform Native**: macOS seatbelt (production), Linux Landlock (production)
 - 📁 **Workspace Management**: Built-in sandboxed workspace for file I/O operations
 
 ## Quick Start
@@ -492,12 +492,12 @@ This gives us:
 | Aspect | Claude Code | OpenSkills |
 |--------|-------------|------------|
 | **SKILL.md Format** | ✅ Full support | ✅ 100% compatible |
-| **Sandbox** | seatbelt/seccomp | **seatbelt (macOS, primary) + WASM/WASI 0.3 (experimental)** ⭐ |
-| **Cross-platform** | OS-specific | Native macOS (production), Linux planned; WASM identical (experimental) |
-| **Script Execution** | Native (Python, shell) | Native (macOS, primary) + WASM components (experimental) |
+| **Sandbox** | seatbelt/seccomp | **seatbelt (macOS, primary) + Landlock (Linux, primary) + WASM/WASI 0.3 (experimental)** ⭐ |
+| **Cross-platform** | OS-specific | Native macOS + Linux (production); WASM identical (experimental) |
+| **Script Execution** | Native (Python, shell) | Native (macOS + Linux, primary) + WASM components (experimental) |
 | **Build Required** | No | No for native scripts. Yes for WASM (experimental, TS/JS → WASM) |
-| **Native Python** | ✅ Supported | ✅ macOS (seatbelt) |
-| **Shell Scripts** | ✅ Supported | ✅ macOS (seatbelt) |
+| **Native Python** | ✅ Supported | ✅ macOS (seatbelt) + Linux (Landlock) |
+| **Shell Scripts** | ✅ Supported | ✅ macOS (seatbelt) + Linux (Landlock) |
 | **Agent Framework** | Claude Desktop & Claude Agent SDK | **Any framework** ⭐ |
 | **Use Case** | Desktop users, arbitrary skills | Enterprise agents, any agent framework |
 
@@ -509,7 +509,7 @@ openskills/
 │   ├── src/
 │   │   ├── build.rs      # Build tool for TS/JS → WASM (uses javy-codegen)
 │   │   ├── wasm_runner.rs # WASI 0.3 execution
-│   │   ├── native_runner.rs # Seatbelt execution (macOS)
+│   │   ├── native_runner.rs # Native sandbox execution (macOS seatbelt + Linux Landlock)
 │   │   └── ...
 │   └── BUILD.md          # Build tool documentation
 ├── scripts/
@@ -566,10 +566,9 @@ The `examples/claude-official-skills` directory is a git submodule pointing to [
 - ✅ **Rust Runtime**: Fully functional
 - ✅ **TypeScript Bindings**: Working
 - ✅ **Python Bindings**: Working (requires Python ≤3.13)
-- ✅ **Native Scripting**: Seatbelt sandbox (macOS, production-ready)
+- ✅ **Native Scripting**: OS sandboxing on macOS (seatbelt) and Linux (Landlock), production-ready
 - 🧪 **WASM Execution**: WASI 0.3 component model (experimental)
 - 🧪 **Build Tool**: `openskills build` for TS/JS → WASM compilation (experimental)
-- 🚧 **Native Scripting (Linux)**: Seccomp support planned
 
 ## Related Projects
 

@@ -516,16 +516,18 @@ OpenSkills provides two complementary sandbox environments, each optimized for d
 
 ---
 
-### 2. Native Seatbelt Sandbox (macOS Only)
+### 2. Native OS Sandbox (macOS Seatbelt + Linux Landlock)
 
 **Purpose**: OS-level sandboxing for native Python and shell scripts
 
 **Technology Stack**:
-- **Runtime**: macOS `sandbox-exec` with seatbelt profiles
+- **Runtime**: macOS `sandbox-exec` with seatbelt profiles; Linux process isolation with Landlock rules
 - **Isolation**: Process-level sandboxing with filesystem and network restrictions
-- **Platform Support**: macOS only (Linux seccomp support planned)
+- **Platform Support**: macOS (seatbelt) and Linux (Landlock)
 
 **How It Works**:
+
+On Linux, the runtime executes scripts directly and applies Landlock rules for filesystem sandboxing. The detailed flow below shows the macOS seatbelt path:
 
 1. **Script Detection**: Runtime detects native scripts (`.py`, `.sh`) in `scripts/` directory
 2. **Seatbelt Profile Generation**:
@@ -558,7 +560,7 @@ OpenSkills provides two complementary sandbox environments, each optimized for d
 - ✅ **Strong isolation**: Process-level sandboxing
 
 **Limitations**:
-- macOS only (Linux seccomp support planned)
+- Available on macOS and Linux only
 - Platform-specific behavior
 - Requires native Python/system dependencies
 - Less portable than WASM
@@ -567,7 +569,7 @@ OpenSkills provides two complementary sandbox environments, each optimized for d
 - Python-based skills (PDF processing, document manipulation)
 - Skills requiring native libraries
 - Legacy scripts that cannot be compiled to WASM
-- macOS-specific deployments
+- macOS/Linux deployments
 
 ---
 
