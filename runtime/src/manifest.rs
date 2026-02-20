@@ -133,7 +133,7 @@ pub struct HookEntry {
 
 /// WASM execution configuration for sandboxed script execution.
 /// This extends Claude Skills with WASM-based sandboxing instead of OS-level sandboxing.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WasmConfig {
     /// Path to the WASM module relative to the skill directory.
     pub module: Option<String>,
@@ -155,6 +155,20 @@ pub struct WasmConfig {
     /// Deterministic random seed (for reproducibility).
     #[serde(default)]
     pub random_seed: Option<u64>,
+}
+
+impl Default for WasmConfig {
+    fn default() -> Self {
+        Self {
+            module: None,
+            timeout_ms: default_timeout_ms(),
+            memory_mb: default_memory_mb(),
+            filesystem: FilesystemPermissions::default(),
+            network: NetworkPermissions::default(),
+            env: EnvPermissions::default(),
+            random_seed: None,
+        }
+    }
 }
 
 fn default_timeout_ms() -> u64 {
@@ -253,6 +267,13 @@ pub mod constraints {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_wasm_config_default_timeout_and_memory() {
+        let config = WasmConfig::default();
+        assert_eq!(config.timeout_ms, 30_000, "WasmConfig::default() must use 30s timeout");
+        assert_eq!(config.memory_mb, 128, "WasmConfig::default() must use 128 MB");
+    }
 
     #[test]
     fn test_allowed_tools_space_delimited() {
