@@ -129,9 +129,6 @@ const SENSITIVE_DENY_PATHS: &[&str] = &[
     "~/.zprofile",
 ];
 
-// Keep this aligned with manifest::default_timeout_ms() for native scripts.
-const DEFAULT_SCRIPT_TIMEOUT_MS: u64 = 30_000;
-
 // ============================================================================
 // macOS implementation (Seatbelt)
 // ============================================================================
@@ -203,11 +200,7 @@ mod macos {
                 script_path.display()
             )));
         }
-        let effective_timeout_ms = if timeout_ms == 0 {
-            DEFAULT_SCRIPT_TIMEOUT_MS
-        } else {
-            timeout_ms
-        };
+        // Callers (executor) only pass timeout_ms from WasmConfig default or options.timeout_ms when > 0; 0 is never passed.
 
         let input_json = serde_json::to_string(&input)?;
         let allow_network = allowed_tools.iter().any(|t| t == "WebSearch" || t == "Fetch");
@@ -306,7 +299,7 @@ mod macos {
             &mut cmd,
             skill,
             &input_json,
-            effective_timeout_ms,
+            timeout_ms,
             enforcer,
             script_type,
             workspace_dir,
@@ -348,7 +341,7 @@ mod macos {
             if let Some(status) = child.try_wait().map_err(OpenSkillError::Io)? {
                 break Some(status);
             }
-            if start.elapsed() >= Duration::from_millis(effective_timeout_ms) {
+            if start.elapsed() >= Duration::from_millis(timeout_ms) {
                 timed_out = true;
                 let _ = child.kill();
                 break child.wait().ok();
@@ -734,11 +727,7 @@ mod linux {
                 script_path.display()
             )));
         }
-        let effective_timeout_ms = if timeout_ms == 0 {
-            DEFAULT_SCRIPT_TIMEOUT_MS
-        } else {
-            timeout_ms
-        };
+        // Callers (executor) only pass timeout_ms from WasmConfig default or options.timeout_ms when > 0; 0 is never passed.
 
         let input_json = serde_json::to_string(&input)?;
         let _allow_network = allowed_tools
@@ -834,7 +823,7 @@ mod linux {
             &mut cmd,
             skill,
             &input_json,
-            effective_timeout_ms,
+            timeout_ms,
             enforcer,
             script_type,
             workspace_dir,
@@ -888,7 +877,7 @@ mod linux {
             if let Some(status) = child.try_wait().map_err(OpenSkillError::Io)? {
                 break Some(status);
             }
-            if start.elapsed() >= Duration::from_millis(effective_timeout_ms) {
+            if start.elapsed() >= Duration::from_millis(timeout_ms) {
                 timed_out = true;
                 let _ = child.kill();
                 break child.wait().ok();
