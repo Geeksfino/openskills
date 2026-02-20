@@ -128,7 +128,7 @@ pub fn execute_skill(
     let mut wasm_config = map_tools_to_capabilities(&allowed_tools);
 
     // Apply option overrides
-    if let Some(timeout) = options.timeout_ms {
+    if let Some(timeout) = options.timeout_ms.filter(|&timeout| timeout > 0) {
         wasm_config.timeout_ms = timeout;
     }
     if let Some(memory) = options.memory_mb {
@@ -219,7 +219,7 @@ pub fn run_skill_target(
     let mut wasm_config = map_tools_to_capabilities(&allowed_tools);
 
     // Apply option overrides
-    if let Some(timeout) = options.timeout_ms {
+    if let Some(timeout) = options.timeout_ms.filter(|&timeout| timeout > 0) {
         wasm_config.timeout_ms = timeout;
     }
     if let Some(memory) = options.memory_mb {

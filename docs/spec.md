@@ -128,6 +128,14 @@ If a WASM module is present, the runtime:
 
 **If no WASM module is present**, the runtime uses native Python/shell scripts via OS-level sandboxing (seatbelt on macOS).
 
+### Native Script Dependency Model
+
+Native scripts execute with the resolved host interpreter (for Python: `python3` from `PATH` first, then platform fallback locations).
+
+- The runtime does **not** install third-party packages (no automatic `pip`/venv provisioning).
+- Skills that import third-party modules (for example `yaml`) require that the selected interpreter already has those dependencies.
+- For portability, prefer stdlib-only scripts where practical, or document required dependencies for deployers.
+
 ### Capability Mapping
 
 `allowed-tools` values are mapped to WASI capabilities:

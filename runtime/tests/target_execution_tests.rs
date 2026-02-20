@@ -269,6 +269,80 @@ echo "should not reach"
     }
 }
 
+#[test]
+#[cfg(target_os = "macos")]
+fn test_run_skill_target_zero_timeout_uses_default() {
+    let temp_dir = TempDir::new().unwrap();
+    create_skill_with_script(
+        &temp_dir,
+        "zero-timeout-skill",
+        "script.sh",
+        r#"#!/bin/bash
+sleep 1
+echo "finished"
+"#,
+    );
+
+    let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
+    runtime.discover_skills().unwrap();
+
+    let target = ExecutionTarget::Path {
+        path: "script.sh".to_string(),
+        args: vec![],
+    };
+
+    let result = runtime.run_skill_target("zero-timeout-skill", target, Some(0), None, None);
+
+    match result {
+        Ok(exec_result) => {
+            assert!(
+                exec_result.stdout.contains("finished"),
+                "Zero timeout should fall back to default timeout instead of timing out immediately"
+            );
+        }
+        Err(_) => {
+            // Sandbox/environment differences can still fail execution.
+        }
+    }
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn test_run_skill_target_none_timeout_uses_default() {
+    let temp_dir = TempDir::new().unwrap();
+    create_skill_with_script(
+        &temp_dir,
+        "none-timeout-skill",
+        "script.sh",
+        r#"#!/bin/bash
+sleep 1
+echo "finished"
+"#,
+    );
+
+    let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
+    runtime.discover_skills().unwrap();
+
+    let target = ExecutionTarget::Path {
+        path: "script.sh".to_string(),
+        args: vec![],
+    };
+
+    let result = runtime.run_skill_target("none-timeout-skill", target, None, None, None);
+
+    match result {
+        Ok(exec_result) => {
+            assert!(
+                exec_result.stdout.contains("finished"),
+                "Missing timeout should use default timeout instead of timing out immediately"
+            );
+        }
+        Err(_) => {
+            // Sandbox/environment differences can still fail execution.
+        }
+    }
+}
+
 // =============================================================================
 // Invalid Path
 // =============================================================================

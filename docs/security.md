@@ -397,6 +397,22 @@ WASM modules receive preopened directories via WASI 0.2/0.3:
 
 ---
 
+## Planned improvements: Native script sandbox
+
+The following improvements are **not yet implemented** (Option B: stricter read policy). Tests are aligned with current behavior (Option A: allow broad reads, deny sensitive paths only).
+
+- [ ] **Allowlist-based file reads (macOS seatbelt)**  
+  Replace `(allow file-read*)` with deny-by-default for reads and allow only:
+  - Skill root and configured `read_paths`
+  - System paths required for interpreter execution (e.g. `/usr`, `/Library`, `/opt/homebrew`, interpreter binary and its libs)
+  - Temp paths needed for execution
+  So that scripts cannot read arbitrary files outside the skill and explicit allowlist. Requires careful allowlisting to avoid breaking Python/Shell interpreters.
+
+- [ ] **Regression test for out-of-skill-dir read denial**  
+  Once allowlist-based reads are implemented, add or re-enable a test that asserts a script cannot read a file that is outside the skill directory and not in the read allowlist (e.g. a sibling file in the same parent dir). See `test_native_seatbelt_file_access_outside_skill_dir` in `runtime/tests/seatbelt_tests.rs`.
+
+---
+
 ## Related Documentation
 
 - [Architecture](./architecture.md) - Overall system design

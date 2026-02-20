@@ -129,6 +129,9 @@ const SENSITIVE_DENY_PATHS: &[&str] = &[
     "~/.zprofile",
 ];
 
+// Keep this aligned with manifest::default_timeout_ms() for native scripts.
+const DEFAULT_SCRIPT_TIMEOUT_MS: u64 = 30_000;
+
 // ============================================================================
 // macOS implementation (Seatbelt)
 // ============================================================================
@@ -200,6 +203,11 @@ mod macos {
                 script_path.display()
             )));
         }
+        let effective_timeout_ms = if timeout_ms == 0 {
+            DEFAULT_SCRIPT_TIMEOUT_MS
+        } else {
+            timeout_ms
+        };
 
         let input_json = serde_json::to_string(&input)?;
         let allow_network = allowed_tools.iter().any(|t| t == "WebSearch" || t == "Fetch");
@@ -294,7 +302,15 @@ mod macos {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        apply_environment(&mut cmd, skill, &input_json, timeout_ms, enforcer, script_type, workspace_dir);
+        apply_environment(
+            &mut cmd,
+            skill,
+            &input_json,
+            effective_timeout_ms,
+            enforcer,
+            script_type,
+            workspace_dir,
+        );
 
         let mut child = match cmd.spawn() {
             Ok(child) => child,
@@ -332,7 +348,7 @@ mod macos {
             if let Some(status) = child.try_wait().map_err(OpenSkillError::Io)? {
                 break Some(status);
             }
-            if start.elapsed() >= Duration::from_millis(timeout_ms) {
+            if start.elapsed() >= Duration::from_millis(effective_timeout_ms) {
                 timed_out = true;
                 let _ = child.kill();
                 break child.wait().ok();
@@ -396,11 +412,16 @@ mod macos {
     ) -> Result<(String, Vec<String>, Option<PathBuf>), OpenSkillError> {
         match script_type {
             ScriptType::Python => {
-                let resolved = PYTHON_EXEC_PATHS
-                    .iter()
-                    .map(PathBuf::from)
-                    .find(|candidate| candidate.exists())
-                    .or_else(|| resolve_executable("python3"))
+                // Prefer PATH-resolved python3 first so that user-installed interpreters
+                // (e.g. Homebrew's python3 with site-packages like PyYAML) take precedence
+                // over system-bundled interpreters that may lack packages.
+                let resolved = resolve_executable("python3")
+                    .or_else(|| {
+                        PYTHON_EXEC_PATHS
+                            .iter()
+                            .map(PathBuf::from)
+                            .find(|candidate| candidate.exists())
+                    })
                     .ok_or_else(|| {
                         OpenSkillError::NativeExecutionError("python3 not found".to_string())
                     })?;
@@ -713,6 +734,11 @@ mod linux {
                 script_path.display()
             )));
         }
+        let effective_timeout_ms = if timeout_ms == 0 {
+            DEFAULT_SCRIPT_TIMEOUT_MS
+        } else {
+            timeout_ms
+        };
 
         let input_json = serde_json::to_string(&input)?;
         let _allow_network = allowed_tools
@@ -808,7 +834,7 @@ mod linux {
             &mut cmd,
             skill,
             &input_json,
-            timeout_ms,
+            effective_timeout_ms,
             enforcer,
             script_type,
             workspace_dir,
@@ -862,7 +888,7 @@ mod linux {
             if let Some(status) = child.try_wait().map_err(OpenSkillError::Io)? {
                 break Some(status);
             }
-            if start.elapsed() >= Duration::from_millis(timeout_ms) {
+            if start.elapsed() >= Duration::from_millis(effective_timeout_ms) {
                 timed_out = true;
                 let _ = child.kill();
                 break child.wait().ok();
@@ -996,11 +1022,16 @@ mod linux {
     ) -> Result<(String, Vec<String>), OpenSkillError> {
         match script_type {
             ScriptType::Python => {
-                let resolved = PYTHON_EXEC_PATHS
-                    .iter()
-                    .map(PathBuf::from)
-                    .find(|candidate| candidate.exists())
-                    .or_else(|| resolve_executable("python3"))
+                // Prefer PATH-resolved python3 first so that user-installed interpreters
+                // (e.g. Homebrew's python3 with site-packages like PyYAML) take precedence
+                // over system-bundled interpreters that may lack packages.
+                let resolved = resolve_executable("python3")
+                    .or_else(|| {
+                        PYTHON_EXEC_PATHS
+                            .iter()
+                            .map(PathBuf::from)
+                            .find(|candidate| candidate.exists())
+                    })
                     .ok_or_else(|| {
                         OpenSkillError::NativeExecutionError("python3 not found".to_string())
                     })?;
