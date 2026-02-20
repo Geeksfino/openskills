@@ -235,9 +235,12 @@ mod macos {
             })
             .collect();
 
-        // Add workspace directory to write paths if configured
+        // Add workspace directory to write paths if configured (create if missing, for parity with Linux)
         if let Some(workspace) = workspace_dir {
             if workspace.exists() {
+                write_paths.push(workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf()));
+            } else {
+                let _ = std::fs::create_dir_all(workspace);
                 write_paths.push(workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf()));
             }
         }
