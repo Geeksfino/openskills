@@ -286,11 +286,10 @@ mod macos {
         if !script_args.is_empty() {
             cmd.args(script_args);
         }
-        // Use workspace_dir as cwd if provided, otherwise fall back to skill_root.
-        // This ensures scripts that create output files write to the workspace directory.
-        // Scripts can still access skill resources via SKILL_ROOT env var.
-        let working_directory = workspace_dir.unwrap_or(&skill_root);
-        cmd.current_dir(working_directory);
+        // Always use skill_root as cwd so scripts that expect to run from the skill directory
+        // (e.g. quick_validate.py with args ["."]) see SKILL.md and skill files. Scripts that
+        // need to write output can use SKILL_WORKSPACE env var (set when workspace_dir is provided).
+        cmd.current_dir(&skill_root);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -812,9 +811,8 @@ mod linux {
             cmd.args(script_args);
         }
 
-        // Use workspace_dir as cwd if provided, otherwise fall back to skill_root
-        let working_directory = workspace_dir.unwrap_or(&skill_root);
-        cmd.current_dir(working_directory);
+        // Always use skill_root as cwd so scripts run from the skill directory (see macOS comment).
+        cmd.current_dir(&skill_root);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
