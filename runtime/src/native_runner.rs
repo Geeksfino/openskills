@@ -611,8 +611,9 @@ mod macos {
         if allow_process {
             // process-fork: allow subprocess spawning (needed for Shell/Bash/Terminal tools)
             profile.push_str("(allow process-fork)\n");
-            // Allow all other process operations (broader than just fork+exec)
-            profile.push_str("(allow process*)\n");
+            // Do not emit `(allow process*)` here. Broad wildcard process rules
+            // can fail profile application on some seatbelt runtimes and break
+            // strict-sandbox execution with exit code 1.
         }
 
         // Network access only if explicitly allowed

@@ -1092,7 +1092,10 @@ fn build_command_seatbelt_profile(
     // Process permissions
     if permissions.allow_process {
         profile.push_str("(allow process-fork)\n");
-        profile.push_str("(allow process*)\n");
+        // Avoid broad wildcard process operation rules here. On some macOS
+        // seatbelt runtimes, `(allow process*)` can make profile application
+        // fail with exit code 1 under strict sandbox mode.
+        // `process-fork` is sufficient for subprocess spawning in exec tool use.
     }
 
     // Network permissions
