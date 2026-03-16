@@ -38,9 +38,16 @@ fn current_platform() -> &'static str {
 }
 
 /// Best-effort check if a Python package (import name) is importable.
+const PYTHON_IMPORT_CHECK_SCRIPT: &str = "import importlib.util, sys\n\
+try:\n\
+    spec = importlib.util.find_spec(sys.argv[1])\n\
+except (ImportError, ModuleNotFoundError, ValueError):\n\
+    spec = None\n\
+raise SystemExit(0 if spec is not None else 1)";
+
 fn check_python_package(interpreter: &Path, import_name: &str) -> bool {
     let status = Command::new(interpreter)
-        .args(["-c", &format!("import {}", import_name)])
+        .args(["-c", PYTHON_IMPORT_CHECK_SCRIPT, import_name])
         .output();
     matches!(status, Ok(ref o) if o.status.success())
 }
@@ -143,6 +150,12 @@ pub fn check_requires_bins_env_only(requires: Option<&SkillRequires>) -> Missing
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_os = "windows"))]
+    use std::fs;
+    #[cfg(not(target_os = "windows"))]
+    use std::os::unix::fs::PermissionsExt;
+    #[cfg(not(target_os = "windows"))]
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_check_env_set_empty() {
@@ -171,5 +184,42 @@ mod tests {
             || check_binary_in_path("false")
             || check_binary_in_path("echo");
         assert!(has_any);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn test_check_python_package_treats_manifest_value_as_data() {
+        let unique = format!(
+            "openskills-deps-check-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir = std::env::temp_dir().join(unique);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let interpreter = temp_dir.join("fake-python.sh");
+        let code_capture = temp_dir.join("code.txt");
+        let arg_capture = temp_dir.join("arg.txt");
+        let malicious = "yaml; __import__('os').system('touch /tmp/openskills-test')";
+        let script = format!(
+            "#!/bin/sh\nprintf '%s' \"$2\" > \"{}\"\nprintf '%s' \"$3\" > \"{}\"\n[ \"$3\" = \"{}\" ]\n",
+            code_capture.display(),
+            arg_capture.display(),
+            malicious
+        );
+        fs::write(&interpreter, script).unwrap();
+
+        let mut perms = fs::metadata(&interpreter).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&interpreter, perms).unwrap();
+
+        assert!(check_python_package(&interpreter, malicious));
+        assert_eq!(fs::read_to_string(&arg_capture).unwrap(), malicious);
+        assert!(!fs::read_to_string(&code_capture).unwrap().contains(malicious));
+
+        fs::remove_dir_all(temp_dir).unwrap();
     }
 }
