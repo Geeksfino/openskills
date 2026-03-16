@@ -1,6 +1,8 @@
-//! Dependency checking for skills (OpenClaw-compatible requires.bins / requires.env).
+//! Dependency checking for skills (OpenClaw-compatible requires.bins / requires.env
+//! and optional package-level metadata).
 
 use crate::manifest::SkillRequires;
+use std::path::Path;
 use std::process::Command;
 
 /// Check if a binary exists in PATH.
@@ -22,21 +24,67 @@ pub fn check_env_set(key: &str) -> bool {
     std::env::var(key).is_ok_and(|v| !v.trim().is_empty())
 }
 
+/// Current platform identifier for requires.platforms matching.
+fn current_platform() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    }
+}
+
+/// Best-effort check if a Python package (import name) is importable.
+fn check_python_package(interpreter: &Path, import_name: &str) -> bool {
+    let status = Command::new(interpreter)
+        .args(["-c", &format!("import {}", import_name)])
+        .output();
+    matches!(status, Ok(ref o) if o.status.success())
+}
+
 /// Result of checking skill requirements.
 #[derive(Debug, Clone, Default)]
 pub struct MissingDependencies {
     pub bins: Vec<String>,
     pub env: Vec<String>,
+    /// Declared Python packages that could not be imported (when interpreter was available).
+    pub missing_python_packages: Vec<String>,
+    /// Declared Python packages not verified (no interpreter provided; host can resolve).
+    pub unverified_python_packages: Vec<String>,
+    /// Declared Node packages not verified (runtime does not run node checks; host can resolve).
+    pub unverified_node_packages: Vec<String>,
+    /// Declared Rust crates not verified (metadata only; host can resolve).
+    pub unverified_rust_crates: Vec<String>,
+    /// Declared system packages not verified (metadata only; host can resolve).
+    pub unverified_system_packages: Vec<String>,
+    /// Set when requires.platforms is non-empty and current OS is not in the list.
+    pub platform_mismatch: Option<String>,
 }
 
 impl MissingDependencies {
     pub fn is_empty(&self) -> bool {
-        self.bins.is_empty() && self.env.is_empty()
+        self.bins.is_empty()
+            && self.env.is_empty()
+            && self.missing_python_packages.is_empty()
+            && self.unverified_python_packages.is_empty()
+            && self.unverified_node_packages.is_empty()
+            && self.unverified_rust_crates.is_empty()
+            && self.unverified_system_packages.is_empty()
+            && self.platform_mismatch.is_none()
     }
 }
 
-/// Check skill requires and return missing bins and env vars.
-pub fn check_requires(requires: Option<&SkillRequires>) -> MissingDependencies {
+/// Check skill requires and return missing bins, env, and (when interpreter provided) package diagnostics.
+///
+/// * `requires` - from skill manifest
+/// * `python_interpreter` - if set, Python package imports are checked; otherwise declared python_packages are reported as unverified
+pub fn check_requires(
+    requires: Option<&SkillRequires>,
+    python_interpreter: Option<&Path>,
+) -> MissingDependencies {
     let mut missing = MissingDependencies::default();
     let Some(requires) = requires else {
         return missing;
@@ -51,7 +99,45 @@ pub fn check_requires(requires: Option<&SkillRequires>) -> MissingDependencies {
             missing.env.push(key.clone());
         }
     }
+    if !requires.platforms.is_empty() {
+        let current = current_platform();
+        let matches = requires
+            .platforms
+            .iter()
+            .any(|s| s.to_lowercase() == current);
+        if !matches {
+            missing.platform_mismatch = Some(format!(
+                "skill requires one of [{}], current platform is {}",
+                requires.platforms.join(", "),
+                current
+            ));
+        }
+    }
+    if let Some(interpreter) = python_interpreter {
+        for pkg in &requires.python_packages {
+            if !check_python_package(interpreter, pkg) {
+                missing.missing_python_packages.push(pkg.clone());
+            }
+        }
+    } else if !requires.python_packages.is_empty() {
+        missing.unverified_python_packages.extend(requires.python_packages.clone());
+    }
+    if !requires.node_packages.is_empty() {
+        missing.unverified_node_packages.extend(requires.node_packages.clone());
+    }
+    if !requires.rust_crates.is_empty() {
+        missing.unverified_rust_crates.extend(requires.rust_crates.clone());
+    }
+    if !requires.system_packages.is_empty() {
+        missing.unverified_system_packages.extend(requires.system_packages.clone());
+    }
     missing
+}
+
+/// Legacy: check only bins and env (no interpreter, no package diagnostics).
+#[allow(dead_code)]
+pub fn check_requires_bins_env_only(requires: Option<&SkillRequires>) -> MissingDependencies {
+    check_requires(requires, None)
 }
 
 #[cfg(test)]
@@ -67,17 +153,14 @@ mod tests {
 
     #[test]
     fn test_check_requires_none() {
-        let m = check_requires(None);
+        let m = check_requires(None, None);
         assert!(m.is_empty());
     }
 
     #[test]
     fn test_check_requires_empty() {
-        let r = SkillRequires {
-            bins: vec![],
-            env: vec![],
-        };
-        let m = check_requires(Some(&r));
+        let r = SkillRequires::default();
+        let m = check_requires(Some(&r), None);
         assert!(m.is_empty());
     }
 

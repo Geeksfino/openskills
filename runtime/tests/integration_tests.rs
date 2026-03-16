@@ -399,6 +399,7 @@ description: Custom directory skill.
         use_standard_locations: false,
         project_root: None,
         workspace_dir: Some(temp_dir.path().join("workspace")),
+        native_runner_config: None,
     };
 
     let mut runtime = OpenSkillRuntime::from_config(config);

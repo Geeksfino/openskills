@@ -132,9 +132,31 @@ If a WASM module is present, the runtime:
 
 Native scripts execute with the resolved host interpreter (for Python: `python3` from `PATH` first, then platform fallback locations).
 
-- The runtime does **not** install third-party packages (no automatic `pip`/venv provisioning).
+- The runtime does **not** install third-party packages (no automatic `pip`/venv provisioning). OpenSkills describes and executes; the **host** (embedding system) decides if and how installs happen.
 - Skills that import third-party modules (for example `yaml`) require that the selected interpreter already has those dependencies.
 - For portability, prefer stdlib-only scripts where practical, or document required dependencies for deployers.
+
+**Embedding and external provisioning:** OpenSkills can be embedded in systems (e.g. ChatKit) that provision dependencies externally. To avoid blocking host-provisioned packages:
+
+- **Interpreter override:** The host can set a specific Python (or other) interpreter path via runtime config (`NativeRunnerConfig.python_interpreter`) so a venv or managed environment is used.
+- **Package visibility:** By default the runtime sets `PYTHONNOUSERSITE=1` for isolation. When the host provisions packages in a user site or venv, it can set `python_allow_user_site: true` in `NativeRunnerConfig` so those packages remain visible to skill scripts.
+- **Requires metadata:** Skills can declare `requires.python-packages`, `requires.node-packages`, `requires.platforms`, etc. in the manifest. These are declarative metadata only; the runtime reports missing or unverified requirements at activation so the host can run its own install workflow before execution.
+
+#### Requires (dependency metadata)
+
+In SKILL.md frontmatter, optional `requires` can list:
+
+| Field | Description |
+|-------|-------------|
+| `bins` | Binaries that must be in `PATH` (e.g. `git`, `python3`). |
+| `env` | Environment variables that must be set and non-empty. |
+| `python-packages` | Python import names (declarative; host may install via pip). |
+| `node-packages` | Node package names (declarative; host may install via npm). |
+| `rust-crates` | Rust crate names (declarative). |
+| `system-packages` | System package names (declarative; host may install via apt/brew etc.). |
+| `platforms` | Platforms where the skill applies (e.g. `[linux, macos]`). |
+
+At activation, the runtime reports missing bins/env and (when an interpreter is configured) missing Python packages; other package fields are reported as unverified so the embedding system can resolve them.
 
 ### Capability Mapping
 

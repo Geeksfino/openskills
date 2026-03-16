@@ -67,6 +67,8 @@ pub struct SkillManifest {
 }
 
 /// OpenClaw-compatible dependency requirements (requires.bins, requires.env in SKILL.md).
+/// Extended with optional package-level dependency metadata for embedding systems to
+/// resolve or preflight; OpenSkills does not install packages, only reports what is declared.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct SkillRequires {
@@ -76,6 +78,21 @@ pub struct SkillRequires {
     /// Required environment variables (must be set and non-empty).
     #[serde(default)]
     pub env: Vec<String>,
+    /// Declarative Python package names (e.g. pip installable). Metadata only; host provisions.
+    #[serde(default)]
+    pub python_packages: Vec<String>,
+    /// Declarative Node package names or CLI names (e.g. npm installable). Metadata only.
+    #[serde(default)]
+    pub node_packages: Vec<String>,
+    /// Declarative Rust crate or CLI names. Metadata only.
+    #[serde(default)]
+    pub rust_crates: Vec<String>,
+    /// Declarative system package names (e.g. apt, dnf, brew). Metadata only.
+    #[serde(default)]
+    pub system_packages: Vec<String>,
+    /// Platforms where this skill is applicable (e.g. ["linux", "macos"]). Optional constraint.
+    #[serde(default)]
+    pub platforms: Vec<String>,
 }
 
 /// Allowed tools can be specified as a list or comma-separated string.
@@ -376,6 +393,25 @@ requires:
         let r = manifest.requires.unwrap();
         assert_eq!(r.bins, vec!["git"]);
         assert_eq!(r.env, vec!["GITHUB_TOKEN"]);
+        assert!(r.python_packages.is_empty());
+        assert!(r.platforms.is_empty());
+    }
+
+    #[test]
+    fn test_parse_requires_package_metadata() {
+        let yaml = r#"name: data-toolkit
+description: Data processing
+requires:
+  bins: [python3]
+  python-packages: [pyyaml, pandas]
+  node-packages: [typescript]
+  platforms: [linux, macos]"#;
+        let manifest: SkillManifest = serde_yaml::from_str(yaml).unwrap();
+        let r = manifest.requires.unwrap();
+        assert_eq!(r.bins, vec!["python3"]);
+        assert_eq!(r.python_packages, vec!["pyyaml", "pandas"]);
+        assert_eq!(r.node_packages, vec!["typescript"]);
+        assert_eq!(r.platforms, vec!["linux", "macos"]);
     }
 
     #[test]

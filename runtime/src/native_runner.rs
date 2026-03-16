@@ -27,6 +27,19 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
+/// Configuration for native script execution (Python, shell).
+/// Embedding systems can use this to choose the interpreter and control
+/// package visibility without OpenSkills owning install policy.
+#[derive(Debug, Clone, Default)]
+pub struct NativeRunnerConfig {
+    /// Override the Python interpreter used for native Python scripts.
+    /// If set, this path is used instead of resolving `python3` from PATH.
+    pub python_interpreter: Option<PathBuf>,
+    /// When true, do not set PYTHONNOUSERSITE=1, so user-site and venv
+    /// packages are visible. Default is false (conservative: user site disabled).
+    pub python_allow_user_site: bool,
+}
+
 /// Supported native script types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScriptType {
@@ -193,6 +206,7 @@ mod macos {
         allowed_tools: &[String],
         workspace_dir: Option<&Path>,
         script_args: &[String],
+        native_config: Option<&NativeRunnerConfig>,
     ) -> Result<ExecutionArtifacts, OpenSkillError> {
         if !script_path.exists() {
             return Err(OpenSkillError::NativeExecutionError(format!(
@@ -245,7 +259,8 @@ mod macos {
             }
         }
 
-        let (program, args, program_path) = command_for_script(script_type, script_path)?;
+        let (program, args, program_path) =
+            command_for_script(script_type, script_path, native_config)?;
         // Canonicalize the executable path for the seatbelt profile
         // We need to pass the actual executable path (not its parent) to grant file-map-executable permission
         let exec_path = program_path.as_ref().and_then(|p| {
@@ -305,6 +320,7 @@ mod macos {
             enforcer,
             script_type,
             workspace_dir,
+            native_config,
         );
 
         let mut child = match cmd.spawn() {
@@ -404,22 +420,44 @@ mod macos {
     fn command_for_script(
         script_type: ScriptType,
         script_path: &Path,
+        native_config: Option<&NativeRunnerConfig>,
     ) -> Result<(String, Vec<String>, Option<PathBuf>), OpenSkillError> {
         match script_type {
             ScriptType::Python => {
-                // Prefer PATH-resolved python3 first so that user-installed interpreters
-                // (e.g. Homebrew's python3 with site-packages like PyYAML) take precedence
-                // over system-bundled interpreters that may lack packages.
-                let resolved = resolve_executable("python3")
-                    .or_else(|| {
-                        PYTHON_EXEC_PATHS
-                            .iter()
-                            .map(PathBuf::from)
-                            .find(|candidate| candidate.exists())
-                    })
-                    .ok_or_else(|| {
-                        OpenSkillError::NativeExecutionError("python3 not found".to_string())
-                    })?;
+                let resolved = if let Some(cfg) = native_config {
+                    if let Some(ref path) = cfg.python_interpreter {
+                        if path.exists() {
+                            path.clone()
+                        } else {
+                            return Err(OpenSkillError::NativeExecutionError(format!(
+                                "Configured python_interpreter not found: {}",
+                                path.display()
+                            )));
+                        }
+                    } else {
+                        resolve_executable("python3")
+                            .or_else(|| {
+                                PYTHON_EXEC_PATHS
+                                    .iter()
+                                    .map(PathBuf::from)
+                                    .find(|candidate| candidate.exists())
+                            })
+                            .ok_or_else(|| {
+                                OpenSkillError::NativeExecutionError("python3 not found".to_string())
+                            })?
+                    }
+                } else {
+                    resolve_executable("python3")
+                        .or_else(|| {
+                            PYTHON_EXEC_PATHS
+                                .iter()
+                                .map(PathBuf::from)
+                                .find(|candidate| candidate.exists())
+                        })
+                        .ok_or_else(|| {
+                            OpenSkillError::NativeExecutionError("python3 not found".to_string())
+                        })?
+                };
                 Ok((
                     resolved.to_string_lossy().to_string(),
                     vec![script_path.to_string_lossy().to_string()],
@@ -446,6 +484,7 @@ mod macos {
         enforcer: &PermissionEnforcer,
         script_type: ScriptType,
         workspace_dir: Option<&Path>,
+        native_config: Option<&NativeRunnerConfig>,
     ) {
         cmd.env_clear();
 
@@ -494,7 +533,12 @@ mod macos {
         if script_type == ScriptType::Python {
             cmd.env("PYTHONUNBUFFERED", "1");
             cmd.env("PYTHONDONTWRITEBYTECODE", "1");
-            cmd.env("PYTHONNOUSERSITE", "1");
+            // Only disable user site-packages when not explicitly allowed (conservative default).
+            // When python_allow_user_site is true, host-provisioned packages (venv, pip --user) remain visible.
+            let allow_user_site = native_config.map(|c| c.python_allow_user_site).unwrap_or(false);
+            if !allow_user_site {
+                cmd.env("PYTHONNOUSERSITE", "1");
+            }
             // Prevent Python from trying to check for Xcode/development tools during initialization.
             // Python (especially when built with Clang) may try to spawn xcodebuild to verify
             // development tools are available. Since the sandbox blocks subprocess spawning
@@ -723,6 +767,7 @@ mod linux {
         allowed_tools: &[String],
         workspace_dir: Option<&Path>,
         script_args: &[String],
+        native_config: Option<&NativeRunnerConfig>,
     ) -> Result<ExecutionArtifacts, OpenSkillError> {
         if !script_path.exists() {
             return Err(OpenSkillError::NativeExecutionError(format!(
@@ -771,7 +816,8 @@ mod linux {
             }
         }
 
-        let (program, args) = command_for_script(script_type, script_path)?;
+        let (program, args) =
+            command_for_script(script_type, script_path, native_config)?;
 
         // --- Collect Landlock path sets ---
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
@@ -829,6 +875,7 @@ mod linux {
             enforcer,
             script_type,
             workspace_dir,
+            native_config,
         );
 
         // Apply Landlock sandbox restrictions in the child process before exec.
@@ -1010,24 +1057,48 @@ mod linux {
     fn command_for_script(
         script_type: ScriptType,
         script_path: &Path,
+        native_config: Option<&NativeRunnerConfig>,
     ) -> Result<(String, Vec<String>), OpenSkillError> {
         match script_type {
             ScriptType::Python => {
-                // Prefer PATH-resolved python3 first so that user-installed interpreters
-                // (e.g. Homebrew's python3 with site-packages like PyYAML) take precedence
-                // over system-bundled interpreters that may lack packages.
-                let resolved = resolve_executable("python3")
-                    .or_else(|| {
-                        PYTHON_EXEC_PATHS
-                            .iter()
-                            .map(PathBuf::from)
-                            .find(|candidate| candidate.exists())
-                    })
-                    .ok_or_else(|| {
-                        OpenSkillError::NativeExecutionError("python3 not found".to_string())
-                    })?;
+                let resolved = if let Some(cfg) = native_config {
+                    if let Some(ref path) = cfg.python_interpreter {
+                        if path.exists() {
+                            path.to_string_lossy().to_string()
+                        } else {
+                            return Err(OpenSkillError::NativeExecutionError(format!(
+                                "Configured python_interpreter not found: {}",
+                                path.display()
+                            )));
+                        }
+                    } else {
+                        resolve_executable("python3")
+                            .or_else(|| {
+                                PYTHON_EXEC_PATHS
+                                    .iter()
+                                    .map(PathBuf::from)
+                                    .find(|candidate| candidate.exists())
+                            })
+                            .map(|p| p.to_string_lossy().to_string())
+                            .ok_or_else(|| {
+                                OpenSkillError::NativeExecutionError("python3 not found".to_string())
+                            })?
+                    }
+                } else {
+                    resolve_executable("python3")
+                        .or_else(|| {
+                            PYTHON_EXEC_PATHS
+                                .iter()
+                                .map(PathBuf::from)
+                                .find(|candidate| candidate.exists())
+                        })
+                        .map(|p| p.to_string_lossy().to_string())
+                        .ok_or_else(|| {
+                            OpenSkillError::NativeExecutionError("python3 not found".to_string())
+                        })?
+                };
                 Ok((
-                    resolved.to_string_lossy().to_string(),
+                    resolved,
                     vec![script_path.to_string_lossy().to_string()],
                 ))
             }
@@ -1046,6 +1117,7 @@ mod linux {
         enforcer: &PermissionEnforcer,
         script_type: ScriptType,
         workspace_dir: Option<&Path>,
+        native_config: Option<&NativeRunnerConfig>,
     ) {
         cmd.env_clear();
 
@@ -1092,7 +1164,10 @@ mod linux {
         if script_type == ScriptType::Python {
             cmd.env("PYTHONUNBUFFERED", "1");
             cmd.env("PYTHONDONTWRITEBYTECODE", "1");
-            cmd.env("PYTHONNOUSERSITE", "1");
+            let allow_user_site = native_config.map(|c| c.python_allow_user_site).unwrap_or(false);
+            if !allow_user_site {
+                cmd.env("PYTHONNOUSERSITE", "1");
+            }
         }
     }
 }
@@ -1111,6 +1186,7 @@ pub fn execute_native(
     _allowed_tools: &[String],
     _workspace_dir: Option<&Path>,
     _script_args: &[String],
+    _native_config: Option<&NativeRunnerConfig>,
 ) -> Result<ExecutionArtifacts, OpenSkillError> {
     Err(OpenSkillError::UnsupportedPlatform(
         "Native execution requires macOS (seatbelt) or Linux (Landlock)".to_string(),

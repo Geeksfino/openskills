@@ -100,6 +100,7 @@ pub use validator::{analyze_skill_tokens, validate_skill_path, TokenAnalysis, Va
 
 // Re-export execution target types for public API
 pub use executor::{ExecutionTarget, TargetExecutionOptions};
+pub use native_runner::NativeRunnerConfig;
 
 // Re-export sandboxed command execution API
 pub use executor::{CommandPermissions, CommandResult, run_sandboxed_command};
@@ -122,6 +123,8 @@ pub struct RuntimeConfig {
     /// Workspace directory for skill I/O operations.
     /// If not set, defaults to ~/.cache/openskills/workspace/{session_id}/
     pub workspace_dir: Option<PathBuf>,
+    /// Optional native runner config (interpreter overrides, Python site visibility).
+    pub native_runner_config: Option<NativeRunnerConfig>,
 }
 
 /// Execution options for skill invocation.
@@ -167,7 +170,8 @@ pub struct LoadedSkill {
 
 impl From<&Skill> for LoadedSkill {
     fn from(skill: &Skill) -> Self {
-        let missing = deps_check::check_requires(skill.manifest.requires.as_ref());
+        let missing =
+            deps_check::check_requires(skill.manifest.requires.as_ref(), None);
         let missing_dependencies = if missing.is_empty() {
             None
         } else {
@@ -197,6 +201,8 @@ pub struct OpenSkillRuntime {
     workspace_dir: Option<PathBuf>,
     /// Session ID for unique workspace paths.
     session_id: String,
+    /// Optional native runner config (interpreter overrides, Python site visibility).
+    native_runner_config: Option<NativeRunnerConfig>,
 }
 
 impl OpenSkillRuntime {
@@ -216,6 +222,7 @@ impl OpenSkillRuntime {
             use_standard_locations: true,
             workspace_dir: None,
             session_id: generate_session_id(),
+            native_runner_config: None,
         }
     }
 
@@ -234,6 +241,7 @@ impl OpenSkillRuntime {
             use_standard_locations: config.use_standard_locations,
             workspace_dir: config.workspace_dir,
             session_id: generate_session_id(),
+            native_runner_config: config.native_runner_config,
         }
     }
 
@@ -251,6 +259,7 @@ impl OpenSkillRuntime {
             use_standard_locations: true,
             workspace_dir: None,
             session_id: generate_session_id(),
+            native_runner_config: None,
         }
     }
 
@@ -269,6 +278,7 @@ impl OpenSkillRuntime {
             use_standard_locations: false,
             workspace_dir: None,
             session_id: generate_session_id(),
+            native_runner_config: None,
         }
     }
 
@@ -438,6 +448,17 @@ impl OpenSkillRuntime {
     /// pointing to this directory.
     pub fn with_workspace_dir<P: AsRef<Path>>(mut self, dir: P) -> Self {
         self.workspace_dir = Some(dir.as_ref().to_path_buf());
+        self
+    }
+
+    /// Set native runner config (interpreter overrides, Python site-package visibility).
+    ///
+    /// Embedding systems (e.g. ChatKit) can use this to:
+    /// - Choose the exact Python interpreter (e.g. a venv binary)
+    /// - Allow user-site or venv packages by setting `python_allow_user_site: true`
+    ///   so host-provisioned dependencies are visible to skill scripts.
+    pub fn with_native_runner_config(mut self, config: NativeRunnerConfig) -> Self {
+        self.native_runner_config = Some(config);
         self
     }
 
@@ -773,7 +794,27 @@ Example response:
 
         validate_skill(&skill)?;
 
-        Ok(LoadedSkill::from(&skill))
+        let python_interpreter = self
+            .native_runner_config
+            .as_ref()
+            .and_then(|c| c.python_interpreter.as_deref());
+        let missing = deps_check::check_requires(
+            skill.manifest.requires.as_ref(),
+            python_interpreter,
+        );
+        let missing_dependencies = if missing.is_empty() {
+            None
+        } else {
+            Some(missing)
+        };
+        Ok(LoadedSkill {
+            id: skill.id.clone(),
+            manifest: skill.manifest.clone(),
+            instructions: skill.instructions.clone(),
+            location: skill.location.clone(),
+            requires: skill.manifest.requires.clone(),
+            missing_dependencies,
+        })
     }
 
     /// Start a skill execution session for instruction-based workflows.
@@ -1081,6 +1122,7 @@ Example response:
             wasm_module: None,
             workspace_dir: self.get_workspace_dir().ok(),
             effective_tools,
+            native_runner_config: self.native_runner_config.clone(),
         };
 
         let execution = execute_skill(&skill, exec_options)?;
@@ -1229,6 +1271,7 @@ Example response:
             input,
             workspace_dir: workspace_dir.or_else(|| self.get_workspace_dir().ok()),
             effective_tools,
+            native_runner_config: self.native_runner_config.clone(),
             ..Default::default()
         };
 

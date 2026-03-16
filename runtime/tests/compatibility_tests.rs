@@ -75,6 +75,7 @@ fn test_runtime_config_builder() {
         use_standard_locations: false,
         project_root: None,
         workspace_dir: None,
+        native_runner_config: None,
     };
     
     let mut runtime = OpenSkillRuntime::from_config(config);
@@ -125,6 +126,7 @@ description: Second version (should win)
         use_standard_locations: false,
         project_root: None,
         workspace_dir: None,
+        native_runner_config: None,
     };
     
     let mut runtime = OpenSkillRuntime::from_config(config);
@@ -164,6 +166,7 @@ Use git and GITHUB_TOKEN.
         use_standard_locations: false,
         project_root: None,
         workspace_dir: None,
+        native_runner_config: None,
     };
     let mut runtime = OpenSkillRuntime::from_config(config);
     runtime.discover_skills().unwrap();
@@ -205,6 +208,7 @@ description: Skill from nested directory
         use_standard_locations: true, // Enable standard locations to trigger nested discovery
         project_root: Some(temp_dir.path().join("project")),
         workspace_dir: None,
+        native_runner_config: None,
     };
     
     let mut runtime = OpenSkillRuntime::from_config(config);

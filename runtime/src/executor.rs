@@ -12,7 +12,7 @@
 
 use crate::audit::ExecutionStatus;
 use crate::errors::OpenSkillError;
-use crate::native_runner::{detect_script_type, execute_native, ScriptType};
+use crate::native_runner::{detect_script_type, execute_native, NativeRunnerConfig, ScriptType};
 use crate::permissions::{map_tools_to_capabilities, PermissionEnforcer};
 use crate::registry::Skill;
 #[cfg(feature = "wasm")]
@@ -55,6 +55,8 @@ pub struct ExecutionOptions {
     /// Set by OpenSkillRuntime after resolving the skill manifest's allowed-tools
     /// against the host policy. Defaults to empty (no tools approved).
     pub effective_tools: Vec<String>,
+    /// Optional native runner config (interpreter overrides, Python site visibility).
+    pub native_runner_config: Option<NativeRunnerConfig>,
 }
 
 /// Target for skill execution (what to run within a skill).
@@ -108,6 +110,8 @@ pub struct TargetExecutionOptions {
     /// Set by OpenSkillRuntime after resolving the skill manifest's allowed-tools
     /// against the host policy. Defaults to empty (no tools approved).
     pub effective_tools: Vec<String>,
+    /// Optional native runner config (interpreter overrides, Python site visibility).
+    pub native_runner_config: Option<NativeRunnerConfig>,
 }
 
 #[derive(Debug)]
@@ -184,6 +188,7 @@ pub fn execute_skill(
             &allowed_tools,
             options.workspace_dir.as_deref(),
             &[], // No user-provided args for auto-detected scripts
+            options.native_runner_config.as_ref(),
         ),
     }
 }
@@ -281,6 +286,7 @@ pub fn run_skill_target(
                     &allowed_tools,
                     options.workspace_dir.as_deref(),
                     &[], // No user-provided args for auto-detected scripts
+                    options.native_runner_config.as_ref(),
                 ),
             }
         }
@@ -367,6 +373,7 @@ pub fn run_skill_target(
                     &allowed_tools,
                     options.workspace_dir.as_deref(),
                     &args, // Pass args as command-line arguments too
+                    options.native_runner_config.as_ref(),
                 )
             }
         }
@@ -436,6 +443,7 @@ pub fn run_skill_target(
                 &allowed_tools,
                 options.workspace_dir.as_deref(),
                 &args, // Pass args as command-line arguments too
+                options.native_runner_config.as_ref(),
             )
         }
         ExecutionTarget::Wasm { path } => {
