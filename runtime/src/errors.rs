@@ -29,6 +29,10 @@ pub enum OpenSkillError {
     #[error("wasm execution failed: {0}")]
     WasmError(String),
 
+    /// WASM execution disabled in this build (build with default-features or feature "wasm").
+    #[error("wasm execution disabled in this build (build with default-features or feature 'wasm')")]
+    WasmDisabled,
+
     /// Native execution failure.
     #[error("native execution failed: {0}")]
     NativeExecutionError(String),

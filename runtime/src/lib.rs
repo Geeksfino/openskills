@@ -45,6 +45,7 @@ mod permissions;
 mod registry;
 mod skill_parser;
 mod validator;
+#[cfg(feature = "wasm")]
 mod wasm_runner;
 
 use std::path::{Path, PathBuf};

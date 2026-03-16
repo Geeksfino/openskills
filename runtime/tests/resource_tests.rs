@@ -233,7 +233,7 @@ fn test_run_skill_target_script() {
         Err(e) => {
             // Acceptable errors: Python not found, execution failed, etc.
             let error_str = e.to_string();
-            assert!(error_str.contains("python") || 
+            assert!(error_str.contains("python") ||
                     error_str.contains("Python") ||
                     error_str.contains("not found") ||
                     error_str.contains("execution"));

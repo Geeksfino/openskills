@@ -15,6 +15,7 @@ use crate::errors::OpenSkillError;
 use crate::native_runner::{detect_script_type, execute_native, ScriptType};
 use crate::permissions::{map_tools_to_capabilities, PermissionEnforcer};
 use crate::registry::Skill;
+#[cfg(feature = "wasm")]
 use crate::wasm_runner::execute_wasm;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -158,14 +159,17 @@ pub fn execute_skill(
                     wasm_path.display()
                 )));
             }
-            execute_wasm(
+            #[cfg(feature = "wasm")]
+            return execute_wasm(
                 skill,
                 &wasm_module,
                 input,
                 wasm_config.timeout_ms,
                 &enforcer,
                 options.workspace_dir.as_deref(),
-            )
+            );
+            #[cfg(not(feature = "wasm"))]
+            return Err(OpenSkillError::WasmDisabled);
         }
         ExecutionMode::Native {
             script_path,
@@ -252,14 +256,17 @@ pub fn run_skill_target(
                             wasm_path.display()
                         )));
                     }
-                    execute_wasm(
+                    #[cfg(feature = "wasm")]
+                    return execute_wasm(
                         skill,
                         &wasm_module,
                         input,
                         wasm_config.timeout_ms,
                         &enforcer,
                         options.workspace_dir.as_deref(),
-                    )
+                    );
+                    #[cfg(not(feature = "wasm"))]
+                    return Err(OpenSkillError::WasmDisabled);
                 }
                 ExecutionMode::Native {
                     script_path,
@@ -323,14 +330,17 @@ pub fn run_skill_target(
             let path_lower = path.to_lowercase();
             if path_lower.ends_with(".wasm") {
                 // Execute as WASM
-                execute_wasm(
+                #[cfg(feature = "wasm")]
+                return execute_wasm(
                     skill,
                     &path,
                     input,
                     wasm_config.timeout_ms,
                     &enforcer,
                     options.workspace_dir.as_deref(),
-                )
+                );
+                #[cfg(not(feature = "wasm"))]
+                return Err(OpenSkillError::WasmDisabled);
             } else {
                 // Execute as native script (seatbelt on macOS, seccomp on Linux when available)
                 let script_type = detect_script_type(&full_path)?;
@@ -457,14 +467,17 @@ pub fn run_skill_target(
                 )));
             }
 
-            execute_wasm(
+            #[cfg(feature = "wasm")]
+            return execute_wasm(
                 skill,
                 &path,
                 input,
                 wasm_config.timeout_ms,
                 &enforcer,
                 options.workspace_dir.as_deref(),
-            )
+            );
+            #[cfg(not(feature = "wasm"))]
+            return Err(OpenSkillError::WasmDisabled);
         }
     }
 }

@@ -42,15 +42,11 @@ url = "2.5"
 # Random number generation for secure temp file names
 rand = "0.8"
 
-# WASM runtime
+# WASM runtime — optional; when disabled (default-features = false), WASM execution returns WasmDisabled
 # Using latest wasmtime (40+) for WASI 0.3.0 preview support
-# WASI 0.3.0 final release expected February 2026
-# Using workspace dependency to ensure version consistency
-wasmtime = { workspace = true }
-# IMPORTANT: OpenSkills runtime is WASI 0.3 (WASIp3) / component-model-only.
-# We explicitly disable wasmtime-wasi default features to avoid relying on legacy WASI "preview" APIs.
-wasmtime-wasi = { workspace = true }
-cap-std = "2.0"
+wasmtime = { workspace = true, optional = true }
+wasmtime-wasi = { workspace = true, optional = true }
+cap-std = { version = "2.0", optional = true }
 tokio = { version = "1", features = ["io-util", "rt-multi-thread"] }
 
 # JavaScript to WASM compilation (plugin-based)
@@ -65,7 +61,9 @@ landlock = "0.4"
 libc = "0.2"
 
 [features]
-default = []
+default = ["wasm"]
+# WASM execution (wasmtime + WASI). Disable for smaller binaries; native scripts still work.
+wasm = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:cap-std"]
 # Enable build tooling (compiler plugins).
 # Python/TS bindings disable this via default-features = false to avoid wasmtime conflicts.
 build-tool = []
