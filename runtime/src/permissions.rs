@@ -102,6 +102,7 @@ impl PermissionEnforcer {
     }
 
     /// Get deterministic random seed if configured.
+    #[allow(dead_code)] // Used by WASM runner when WASM feature enabled; unused in native-only builds
     pub fn random_seed(&self) -> Option<u64> {
         self.wasm_config.random_seed
     }
