@@ -509,10 +509,6 @@ mod macos {
         if let Ok(lc_all) = std::env::var("LC_ALL") {
             cmd.env("LC_ALL", lc_all);
         }
-        if let Ok(tmpdir) = std::env::var("TMPDIR") {
-            cmd.env("TMPDIR", tmpdir);
-        }
-
         cmd.env("SKILL_ID", &skill.id);
         cmd.env("SKILL_NAME", &skill.manifest.name);
         cmd.env("SKILL_INPUT", input_json);
@@ -522,6 +518,14 @@ mod macos {
         // Inject workspace directory if configured
         if let Some(workspace) = workspace_dir {
             cmd.env("SKILL_WORKSPACE", workspace.to_string_lossy().to_string());
+            // Put npm cache and tmp inside workspace—avoids EACCES (root-owned /root/.npm)
+            // and EXDEV (hard links across mount points). Same as exec tool's execution_env_vars_for_home.
+            let npm_cache = workspace.join(".npm-cache");
+            let tmp_dir = workspace.join(".tmp");
+            cmd.env("npm_config_cache", npm_cache.to_string_lossy().to_string());
+            cmd.env("TMPDIR", tmp_dir.to_string_lossy().to_string());
+        } else if let Ok(tmpdir) = std::env::var("TMPDIR") {
+            cmd.env("TMPDIR", tmpdir);
         }
 
         for key in enforcer.env_allowlist() {
@@ -1006,9 +1010,9 @@ mod linux {
         rw_paths: &[PathBuf],
         deny_paths: &[PathBuf],
     ) -> std::io::Result<()> {
-        // Use ABI V1 (Linux 5.13+) for widest compatibility.
-        // The landlock crate handles best-effort downgrade automatically.
-        let abi = ABI::V1;
+        // Use ABI V2 (Linux 5.19+): includes Refer for link/rename across dirs.
+        // npm cacache uses hard links; V1 forbids this (EXDEV).
+        let abi = ABI::V2;
 
         let result = (|| -> Result<(), landlock::RulesetError> {
             let mut ruleset = Ruleset::default()
