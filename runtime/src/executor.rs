@@ -1286,7 +1286,9 @@ pub fn run_sandboxed_command(
     let rw_clone = rw_paths;
     unsafe {
         cmd.pre_exec(move || {
-            let abi = ABI::V1;
+            // Use ABI V2 (Linux 5.19+): includes Refer for link/rename across dirs.
+            // npm cacache uses hard links from _cacache/tmp/ to content-v2/; V1 forbids this (EXDEV).
+            let abi = ABI::V2;
             let result = (|| -> Result<(), landlock::RulesetError> {
                 let mut ruleset = Ruleset::default()
                     .handle_access(AccessFs::from_all(abi))?
