@@ -416,6 +416,7 @@ mod tests {
             compatibility: None,
             metadata: None,
             requires: None,
+            actions: None,
         };
         assert!(validate_manifest(&manifest).is_err());
     }
@@ -436,6 +437,7 @@ mod tests {
             compatibility: None,
             metadata: None,
             requires: None,
+            actions: None,
         };
         assert!(validate_manifest(&manifest).is_ok());
     }

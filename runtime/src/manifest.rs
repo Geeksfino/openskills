@@ -64,6 +64,56 @@ pub struct SkillManifest {
     /// OpenClaw-compatible dependency requirements (bins in PATH, env vars set).
     #[serde(default)]
     pub requires: Option<SkillRequires>,
+
+    /// OpenSkills action/capability descriptors (machine-readable actions this skill provides).
+    #[serde(default)]
+    pub actions: Option<Vec<SkillAction>>,
+}
+
+/// Machine-readable action descriptor (OpenSkills extension).
+///
+/// Declares a stable action id, capability tags, target (script or WASM), and input contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SkillAction {
+    /// Stable action id (e.g. "scaffold.create").
+    pub id: String,
+    /// Semantic capability tags (e.g. ["skill.scaffold"]). Used for capability-based resolution.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    /// Human-readable description (optional).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Target to execute (script path or WASM path within the skill).
+    pub target: ActionTarget,
+    /// Input contract for validation and argv building.
+    #[serde(default)]
+    pub input: Option<ActionInputSchema>,
+    /// Optional notes for embedding systems.
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// How to run the action (script or WASM).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ActionTarget {
+    /// Run a script (e.g. scripts/init_skill.py). Args built from action input.
+    Script { path: String },
+    /// Run a WASM module. Input passed as JSON.
+    Wasm { path: String },
+}
+
+/// Minimal input contract: required and optional keys. Extra keys are rejected.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct ActionInputSchema {
+    /// Required top-level keys (all must be present).
+    #[serde(default)]
+    pub required: Vec<String>,
+    /// Optional keys (may be present).
+    #[serde(default)]
+    pub optional: Vec<String>,
 }
 
 /// OpenClaw-compatible dependency requirements (requires.bins, requires.env in SKILL.md).
@@ -433,5 +483,37 @@ metadata:
         assert_eq!(meta.repository, Some("https://github.com/test/skill".to_string()));
         assert_eq!(meta.keywords, Some(vec!["test".to_string(), "skill".to_string()]));
         assert_eq!(meta.homepage, Some("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn test_parse_actions_field() {
+        let yaml = r#"name: skill-creator
+description: Creates new skills
+actions:
+  - id: scaffold.create
+    capabilities: [skill.scaffold]
+    description: Create a new skill from template
+    target:
+      type: script
+      path: scripts/init_skill.py
+    input:
+      required: [skill_name, path]
+      optional: [resources, examples]
+"#;
+        let manifest: SkillManifest = serde_yaml::from_str(yaml).unwrap();
+        assert!(manifest.actions.is_some());
+        let actions = manifest.actions.unwrap();
+        assert_eq!(actions.len(), 1);
+        let a = &actions[0];
+        assert_eq!(a.id, "scaffold.create");
+        assert_eq!(a.capabilities, vec!["skill.scaffold"]);
+        assert_eq!(a.description.as_deref(), Some("Create a new skill from template"));
+        match &a.target {
+            ActionTarget::Script { path } => assert_eq!(path, "scripts/init_skill.py"),
+            _ => panic!("expected script target"),
+        }
+        let input = a.input.as_ref().unwrap();
+        assert_eq!(input.required, vec!["skill_name", "path"]);
+        assert_eq!(input.optional, vec!["resources", "examples"]);
     }
 }

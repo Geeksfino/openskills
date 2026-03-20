@@ -97,6 +97,75 @@ description: {}
 }
 
 // =============================================================================
+// Action / Capability model
+// =============================================================================
+
+#[test]
+fn test_list_and_resolve_skill_actions() {
+    let temp_dir = TempDir::new().unwrap();
+    let skill_dir = temp_dir.path().join("scaffold-skill");
+    fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        r#"---
+name: scaffold-skill
+description: Creates new skills.
+actions:
+  - id: scaffold.create
+    capabilities: [skill.scaffold]
+    description: Create a new skill from template
+    target:
+      type: script
+      path: scripts/init.sh
+    input:
+      required: [skill_name, path]
+      optional: [resources]
+---
+# Scaffold instructions
+"#,
+    )
+    .unwrap();
+
+    // Minimal script so invoke_skill_action can run (exit 0)
+    fs::write(
+        skill_dir.join("scripts/init.sh"),
+        "#!/bin/sh\necho ok\nexit 0\n",
+    )
+    .unwrap();
+
+    let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
+    runtime.discover_skills().unwrap();
+
+    let actions = runtime.list_skill_actions();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].skill_id, "scaffold-skill");
+    assert_eq!(actions[0].action_id, "scaffold.create");
+    assert!(actions[0].capabilities.contains(&"skill.scaffold".to_string()));
+    assert!(actions[0].has_input_schema);
+
+    let (sid, aid) = runtime.find_skill_for_capability("skill.scaffold").unwrap();
+    assert_eq!(sid, "scaffold-skill");
+    assert_eq!(aid, "scaffold.create");
+
+    let sid2 = runtime.find_skill_for_action("scaffold.create").unwrap();
+    assert_eq!(sid2, "scaffold-skill");
+
+    let result = runtime.invoke_skill_action(
+        "scaffold-skill",
+        "scaffold.create",
+        json!({
+            "skill_name": "hello-world",
+            "path": "skills/public",
+            "resources": "refs"
+        }),
+    );
+    assert!(result.is_ok(), "invoke_skill_action should succeed: {:?}", result.err());
+    let out = result.unwrap();
+    assert!(out.stdout.contains("ok") || out.stderr.is_empty() || out.audit.exit_status == "success");
+}
+
+// =============================================================================
 // Discovery to Prompt Generation
 // =============================================================================
 

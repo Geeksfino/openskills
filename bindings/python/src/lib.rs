@@ -165,6 +165,77 @@ impl OpenSkillRuntimeWrapper {
         Ok(list.into())
     }
 
+    /// List all declared actions from all skills (capability/action model).
+    fn list_skill_actions(&self, py: Python) -> PyResult<Py<PyAny>> {
+        let runtime = self.inner.lock().unwrap();
+        let actions = runtime.list_skill_actions();
+        let list = PyList::empty(py);
+        for a in actions {
+            let item = PyDict::new(py);
+            item.set_item("skill_id", a.skill_id)?;
+            item.set_item("action_id", a.action_id)?;
+            item.set_item("capabilities", a.capabilities)?;
+            item.set_item("description", a.description)?;
+            item.set_item("has_input_schema", a.has_input_schema)?;
+            list.append(item.as_any())?;
+        }
+        Ok(list.into())
+    }
+
+    /// Find (skill_id, action_id) that provides the given capability (e.g. "skill.scaffold").
+    fn find_skill_for_capability(&self, capability: String) -> PyResult<Option<(String, String)>> {
+        let runtime = self.inner.lock().unwrap();
+        Ok(runtime.find_skill_for_capability(&capability))
+    }
+
+    /// Find skill_id that declares the given action id (e.g. "scaffold.create").
+    fn find_skill_for_action(&self, action_id: String) -> PyResult<Option<String>> {
+        let runtime = self.inner.lock().unwrap();
+        Ok(runtime.find_skill_for_action(&action_id))
+    }
+
+    /// Invoke a declared action by skill_id and action_id with validated input (dict).
+    #[pyo3(signature = (skill_id, action_id, input))]
+    fn invoke_skill_action(
+        &self,
+        py: Python<'_>,
+        skill_id: String,
+        action_id: String,
+        input: Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let json_module = py.import("json")?;
+        let json_dumps = json_module.getattr("dumps")?;
+        let json_str: String = json_dumps.call1((input,))?.extract()?;
+        let input_val: Value = serde_json::from_str(&json_str).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid input JSON: {e}"))
+        })?;
+        let mut runtime = self.inner.lock().unwrap();
+        let result = runtime
+            .invoke_skill_action(&skill_id, &action_id, input_val)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        let json_str = serde_json::to_string(&result.output)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e}")))?;
+        let json_loads = json_module.getattr("loads")?;
+        let output: Py<PyAny> = json_loads.call1((json_str,))?.into();
+        let exit_status = match &result.audit.exit_status {
+            RuntimeExecutionStatus::Success => "success".to_string(),
+            RuntimeExecutionStatus::Timeout => "timeout".to_string(),
+            RuntimeExecutionStatus::PermissionDenied => "permission_denied".to_string(),
+            RuntimeExecutionStatus::Failed(msg) => format!("failed:{}", msg),
+        };
+        let audit = PyDict::new(py);
+        audit.set_item("skill_id", result.audit.skill_id)?;
+        audit.set_item("exit_status", exit_status.as_str())?;
+        audit.set_item("stdout", result.audit.stdout)?;
+        audit.set_item("stderr", result.audit.stderr)?;
+        let out = PyDict::new(py);
+        out.set_item("output", output)?;
+        out.set_item("stdout", result.stdout)?;
+        out.set_item("stderr", result.stderr)?;
+        out.set_item("audit", audit)?;
+        Ok(out.into())
+    }
+
     /// Get a complete skill-agnostic system prompt for agents.
     fn get_agent_system_prompt(&self) -> PyResult<String> {
         let runtime = self.inner.lock().unwrap();

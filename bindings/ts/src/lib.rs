@@ -3,8 +3,8 @@ use napi_derive::napi;
 use openskills_runtime::{
     CliPermissionCallback, CommandPermissions, DenyAllCallback, ExecutionContext, ExecutionOptions,
     ExecutionTarget, Fallback, HostPolicy, OpenSkillRuntime, OutputType, PermissionCallback,
-    PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
-    run_sandboxed_command,
+    PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus, SkillActionDescriptor,
+    SkillExecutionSession, SkillLocation, run_sandboxed_command,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -17,6 +17,16 @@ pub struct SkillDescriptorJs {
     pub user_invocable: bool,
     /// OpenClaw-compatible: "bins, env" summary (e.g. "git, GITHUB_TOKEN").
     pub requires_summary: Option<String>,
+}
+
+/// Action descriptor (capability/action model).
+#[napi(object)]
+pub struct SkillActionDescriptorJs {
+    pub skill_id: String,
+    pub action_id: String,
+    pub capabilities: Vec<String>,
+    pub description: Option<String>,
+    pub has_input_schema: bool,
 }
 
 /// OpenClaw-compatible requires (bins/env) from SKILL.md frontmatter.
@@ -417,6 +427,84 @@ impl OpenSkillRuntimeWrapper {
                 requires_summary: s.requires_summary,
             })
             .collect())
+    }
+
+    /// List all declared actions from all skills (capability/action model).
+    #[napi]
+    pub fn list_skill_actions(&self) -> Vec<SkillActionDescriptorJs> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .list_skill_actions()
+            .into_iter()
+            .map(|a| SkillActionDescriptorJs {
+                skill_id: a.skill_id,
+                action_id: a.action_id,
+                capabilities: a.capabilities,
+                description: a.description,
+                has_input_schema: a.has_input_schema,
+            })
+            .collect()
+    }
+
+    /// Find (skill_id, action_id) that provides the given capability (e.g. "skill.scaffold").
+    #[napi]
+    pub fn find_skill_for_capability(
+        &self,
+        capability: String,
+    ) -> Option<Vec<String>> {
+        let runtime = self.inner.lock().unwrap();
+        runtime
+            .find_skill_for_capability(&capability)
+            .map(|(sid, aid)| vec![sid, aid])
+    }
+
+    /// Find skill_id that declares the given action id (e.g. "scaffold.create").
+    #[napi]
+    pub fn find_skill_for_action(&self, action_id: String) -> Option<String> {
+        let runtime = self.inner.lock().unwrap();
+        runtime.find_skill_for_action(&action_id)
+    }
+
+    /// Invoke a declared action by skill_id and action_id with validated input (JSON string).
+    #[napi]
+    pub fn invoke_skill_action(
+        &self,
+        skill_id: String,
+        action_id: String,
+        input_json: String,
+    ) -> Result<ExecutionResult> {
+        let input: serde_json::Value = serde_json::from_str(&input_json)
+            .map_err(|e| Error::from_reason(format!("invalid input JSON: {}", e)))?;
+        let mut runtime = self.inner.lock().unwrap();
+        let result = runtime
+            .invoke_skill_action(&skill_id, &action_id, input)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
+        let output_json = serde_json::to_string(&result.output)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        let exit_status = match result.audit.exit_status {
+            RuntimeExecutionStatus::Success => "success".to_string(),
+            RuntimeExecutionStatus::Timeout => "timeout".to_string(),
+            RuntimeExecutionStatus::PermissionDenied => "permission_denied".to_string(),
+            RuntimeExecutionStatus::Failed(msg) => format!("failed:{}", msg),
+        };
+        Ok(ExecutionResult {
+            output_json,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            audit: AuditRecord {
+                skill_id: result.audit.skill_id,
+                version: result.audit.version,
+                input_hash: result.audit.input_hash,
+                output_hash: result.audit.output_hash,
+                start_time_ms: result.audit.start_time_ms.min(i64::MAX as u64) as i64,
+                duration_ms: result.audit.duration_ms.min(i64::MAX as u64) as i64,
+                permissions_used: result.audit.permissions_used,
+                exit_status,
+                stdout: result.audit.stdout,
+                stderr: result.audit.stderr,
+            },
+        })
     }
 
     /// Get a complete skill-agnostic system prompt for agents.
