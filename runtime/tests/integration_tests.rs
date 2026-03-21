@@ -162,7 +162,9 @@ actions:
     );
     assert!(result.is_ok(), "invoke_skill_action should succeed: {:?}", result.err());
     let out = result.unwrap();
-    assert!(out.stdout.contains("ok") || out.stderr.is_empty() || out.audit.exit_status == "success");
+    assert!(
+        out.stdout.contains("ok") || out.stderr.is_empty() || matches!(out.audit.exit_status, RuntimeExecutionStatus::Success)
+    );
 }
 
 // =============================================================================

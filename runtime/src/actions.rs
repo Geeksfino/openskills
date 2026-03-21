@@ -42,10 +42,10 @@ pub fn list_skill_actions(registry: &SkillRegistry) -> Vec<SkillActionDescriptor
 }
 
 /// Find a (skill_id, action) that provides the given capability.
-pub fn find_action_by_capability(
-    registry: &SkillRegistry,
+pub fn find_action_by_capability<'a>(
+    registry: &'a SkillRegistry,
     capability: &str,
-) -> Option<(String, &SkillAction)> {
+) -> Option<(String, &'a SkillAction)> {
     for meta in registry.all() {
         let Some(actions) = &meta.manifest.actions else {
             continue;
@@ -60,10 +60,10 @@ pub fn find_action_by_capability(
 }
 
 /// Find a (skill_id, action) by action id (first match wins).
-pub fn find_action_by_id(
-    registry: &SkillRegistry,
+pub fn find_action_by_id<'a>(
+    registry: &'a SkillRegistry,
     action_id: &str,
-) -> Option<(String, &SkillAction)> {
+) -> Option<(String, &'a SkillAction)> {
     for meta in registry.all() {
         let Some(actions) = &meta.manifest.actions else {
             continue;
