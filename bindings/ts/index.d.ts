@@ -88,8 +88,10 @@ export interface AuditRecord {
   version: string
   inputHash: string
   outputHash: string
-  startTimeMs: number
-  durationMs: number
+  /** Milliseconds as decimal string (full u64 range; use BigInt(s) if needed). */
+  startTimeMs: string
+  /** Milliseconds as decimal string (full u64 range). */
+  durationMs: string
   permissionsUsed: Array<string>
   exitStatus: string
   stdout: string

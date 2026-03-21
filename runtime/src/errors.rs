@@ -64,4 +64,12 @@ pub enum OpenSkillError {
     /// Build/compilation error.
     #[error("build error: {0}")]
     BuildError(String),
+
+    /// Action not found (by id or capability).
+    #[error("action not found: {0}")]
+    ActionNotFound(String),
+
+    /// Action input validation failed.
+    #[error("invalid action input: {0}")]
+    InvalidActionInput(String),
 }

@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Claude Skills compatible runtime with WASM sandbox"
-repository = "https://github.com/finogeeks/openskills"
+repository = "https://github.com/Geeksfino/openskills"
 keywords = ["claude", "skills", "wasm", "sandbox", "agent"]
 categories = ["development-tools", "wasm"]
 

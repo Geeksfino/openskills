@@ -400,6 +400,7 @@ mod tests {
             compatibility: None,
             metadata: None,
             requires: None,
+            actions: None,
         };
         assert!(validate_skill_id("my-skill", &manifest).is_ok());
     }
@@ -419,6 +420,7 @@ mod tests {
             compatibility: None,
             metadata: None,
             requires: None,
+            actions: None,
         };
         assert!(validate_skill_id("my-skill", &manifest).is_err());
     }
@@ -438,6 +440,7 @@ mod tests {
             compatibility: None,
             metadata: None,
             requires: None,
+            actions: None,
         };
         assert!(validate_skill_id("My_Skill", &manifest).is_err());
     }

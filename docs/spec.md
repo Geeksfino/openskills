@@ -79,6 +79,43 @@ This allows agents to:
 - Share skills across multiple agents
 - Override standard Claude Skills locations when needed
 
+## Actions / Capability Model (OpenSkills Extension)
+
+Skills can declare **machine-readable actions** in SKILL.md frontmatter via the optional `actions` array. Each action has a stable id, capability tags, a target (script or WASM path), and an optional input schema. Hosts can resolve and invoke by **capability** (e.g. `skill.scaffold`) or by **action id** (e.g. `scaffold.create`) without hard-coding skill ids.
+
+### Declaring actions
+
+```yaml
+---
+name: my-skill
+description: Does something.
+actions:
+  - id: scaffold.create
+    capabilities: [skill.scaffold]
+    description: Create a new skill from template
+    target:
+      type: script
+      path: scripts/init_skill.py
+    input:
+      required: [skill_name, path]
+      optional: [resources, examples]
+---
+```
+
+- **id**: Stable action id (e.g. `scaffold.create`).
+- **capabilities**: Semantic tags for resolution (e.g. `skill.scaffold`). Multiple skills can provide the same capability.
+- **target**: `type: script` with `path` (relative to skill root), or `type: wasm` with `path`. For script, input is validated and converted to argv (first required key = positional, rest as `--key value`).
+- **input**: Optional. `required` and `optional` keys; extra keys are rejected.
+
+### Runtime APIs
+
+- `list_skill_actions()`: All actions from all skills (skill_id, action_id, capabilities, description).
+- `find_skill_for_capability(capability)`: Returns `(skill_id, action_id)` for the first skill that provides the capability.
+- `find_skill_for_action(action_id)`: Returns `skill_id` for the first skill that declares the action.
+- `invoke_skill_action(skill_id, action_id, input)`: Validates input against the action’s schema, builds script args or passes JSON for WASM, and runs the target.
+
+If no skill provides a capability, the host can report “capability unavailable” instead of guessing script contracts.
+
 ## Progressive Disclosure
 
 1. **Discovery**: At startup, only `name` and `description` are loaded.

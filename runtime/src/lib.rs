@@ -28,6 +28,7 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
+mod actions;
 mod audit;
 #[cfg(feature = "build-tool")]
 mod build;
@@ -87,7 +88,10 @@ pub use audit::{AuditRecord as RuntimeAuditRecord, ExecutionStatus as RuntimeExe
 pub use build::{build_skill, BuildConfig, list_build_plugins};
 pub use errors::OpenSkillError as RuntimeError;
 pub use deps_check::MissingDependencies;
-pub use manifest::{constraints, HooksConfig, SkillManifest, SkillRequires, WasmConfig};
+pub use manifest::{
+    constraints, ActionInputSchema, ActionTarget, HooksConfig, SkillAction, SkillManifest,
+    SkillRequires, WasmConfig,
+};
 pub use context::{ContextOutput, ExecutionContext, OutputType};
 pub use skill_session::SkillExecutionSession;
 pub use permission_callback::{
@@ -95,6 +99,10 @@ pub use permission_callback::{
     PermissionRequest, PermissionResponse, RiskLevel, get_risk_level, is_risky_tool,
 };
 pub use skill_parser::parse_skill_md;
+pub use actions::{
+    build_script_args, find_action_by_capability, find_action_by_id, list_skill_actions,
+    validate_action_input, SkillActionDescriptor,
+};
 pub use registry::{SkillDescriptor, SkillLocation};
 pub use validator::{analyze_skill_tokens, validate_skill_path, TokenAnalysis, ValidationResult, ValidationStats};
 
@@ -537,6 +545,77 @@ impl OpenSkillRuntime {
     /// List all discovered skills (progressive disclosure - descriptors only).
     pub fn list_skills(&self) -> Vec<SkillDescriptor> {
         self.registry.list()
+    }
+
+    /// List all declared actions from all skills (capability/action model).
+    pub fn list_skill_actions(&self) -> Vec<SkillActionDescriptor> {
+        actions::list_skill_actions(&self.registry)
+    }
+
+    /// Find a (skill_id, action_id) that provides the given capability (e.g. "skill.scaffold").
+    pub fn find_skill_for_capability(
+        &self,
+        capability: &str,
+    ) -> Option<(String, String)> {
+        actions::find_action_by_capability(&self.registry, capability)
+            .map(|(skill_id, action)| (skill_id, action.id.clone()))
+    }
+
+    /// Find skill_id that declares the given action id (e.g. "scaffold.create").
+    pub fn find_skill_for_action(&self, action_id: &str) -> Option<String> {
+        actions::find_action_by_id(&self.registry, action_id).map(|(skill_id, _)| skill_id)
+    }
+
+    /// Invoke a declared action by skill_id and action_id with validated input.
+    ///
+    /// Validates input against the action's schema (if any), builds script args or passes
+    /// JSON for WASM, then runs the target.
+    pub fn invoke_skill_action(
+        &mut self,
+        skill_id: &str,
+        action_id: &str,
+        input: Value,
+    ) -> Result<ExecutionResult, OpenSkillError> {
+        if self.registry.is_empty() {
+            self.discover_skills()?;
+        }
+        let metadata = self
+            .registry
+            .get(skill_id)
+            .ok_or_else(|| OpenSkillError::SkillNotFound(skill_id.to_string()))?;
+        let action = metadata
+            .manifest
+            .actions
+            .as_ref()
+            .and_then(|a| a.iter().find(|x| x.id == action_id))
+            .ok_or_else(|| {
+                OpenSkillError::ActionNotFound(format!("{} in skill {}", action_id, skill_id))
+            })?;
+        let schema = action.input.as_ref();
+        if let Some(s) = schema {
+            actions::validate_action_input(&input, s)?;
+        }
+        let (path, args, exec_input) = match &action.target {
+            manifest::ActionTarget::Script { path } => {
+                let args = schema
+                    .map(|s| actions::build_script_args(&input, s))
+                    .transpose()?
+                    .unwrap_or_default();
+                (path.clone(), args, None)
+            }
+            manifest::ActionTarget::Wasm { path } => (path.clone(), vec![], Some(input)),
+        };
+        let target = ExecutionTarget::Path {
+            path,
+            args,
+        };
+        self.run_skill_target(
+            skill_id,
+            target,
+            None,
+            exec_input,
+            None,
+        )
     }
 
     /// Validate a skill directory by reading and parsing SKILL.md.
