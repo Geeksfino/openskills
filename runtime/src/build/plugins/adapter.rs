@@ -79,8 +79,8 @@ fn download_adapter(verbose: bool) -> Result<PathBuf, OpenSkillError> {
         })?;
     }
 
-    let version =
-        std::env::var("WASI_ADAPTER_VERSION").unwrap_or_else(|_| DEFAULT_ADAPTER_VERSION.to_string());
+    let version = std::env::var("WASI_ADAPTER_VERSION")
+        .unwrap_or_else(|_| DEFAULT_ADAPTER_VERSION.to_string());
     let url = format!(
         "https://github.com/bytecodealliance/wasmtime/releases/download/v{}/wasi_snapshot_preview1.command.wasm",
         version
@@ -216,12 +216,10 @@ pub fn check_tool(name: &str) -> bool {
 /// Get installation instructions for a tool.
 pub fn tool_install_instructions(tool: &str) -> String {
     match tool {
-        "javy" => {
-            "Install javy CLI:\n  \
+        "javy" => "Install javy CLI:\n  \
              git clone https://github.com/bytecodealliance/javy.git /tmp/javy\n  \
              cd /tmp/javy && cargo install --path crates/cli"
-                .to_string()
-        }
+            .to_string(),
         "wasm-tools" => "Install wasm-tools:\n  cargo install wasm-tools".to_string(),
         "asc" => "Install AssemblyScript compiler:\n  npm install -g assemblyscript".to_string(),
         _ => format!("Install {}", tool),

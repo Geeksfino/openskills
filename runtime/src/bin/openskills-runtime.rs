@@ -3,17 +3,16 @@
 //! Claude Skills compatible runtime with WASM sandbox.
 
 use openskills_runtime::{
-    analyze_skill_tokens, validate_skill_path, ExecutionOptions,
-    OpenSkillRuntime,
+    analyze_skill_tokens, validate_skill_path, ExecutionOptions, OpenSkillRuntime,
 };
 #[cfg(feature = "build-tool")]
 use openskills_runtime::{build_skill, BuildConfig};
 use serde_json::Value;
 use std::env;
 use std::fs;
-use std::process;
 #[cfg(feature = "build-tool")]
 use std::path::PathBuf;
+use std::process;
 
 fn print_usage() {
     eprintln!("OpenSkills Runtime - Claude Skills compatible with WASM sandbox");
@@ -108,7 +107,10 @@ fn cmd_discover(args: &[String]) {
     match runtime.discover_skills() {
         Ok(skills) => {
             if json_output {
-                println!("{}", serde_json::to_string_pretty(&skills).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&skills).unwrap_or_default()
+                );
             } else {
                 if skills.is_empty() {
                     println!("No skills found.");
@@ -162,7 +164,10 @@ fn cmd_list(args: &[String]) {
     let skills = runtime.list_skills();
 
     if json_output {
-        println!("{}", serde_json::to_string_pretty(&skills).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&skills).unwrap_or_default()
+        );
     } else {
         if skills.is_empty() {
             println!("No skills found in {}", dir);
@@ -235,12 +240,18 @@ fn cmd_activate(args: &[String]) {
                     "location": loaded.location,
                     "instructions": loaded.instructions
                 });
-                println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&output).unwrap_or_default()
+                );
             } else {
                 println!("Skill: {}", loaded.id);
                 println!("Description: {}", loaded.manifest.description);
                 if !loaded.manifest.get_allowed_tools().is_empty() {
-                    println!("Allowed tools: {}", loaded.manifest.get_allowed_tools().join(", "));
+                    println!(
+                        "Allowed tools: {}",
+                        loaded.manifest.get_allowed_tools().join(", ")
+                    );
                 }
                 if let Some(ref model) = loaded.manifest.model {
                     println!("Model: {}", model);
@@ -342,7 +353,10 @@ fn cmd_execute(args: &[String]) {
 
     match runtime.execute_skill(&skill_id, options) {
         Ok(result) => {
-            println!("{}", serde_json::to_string_pretty(&result.output).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&result.output).unwrap_or_default()
+            );
             if !result.stdout.is_empty() {
                 eprintln!("[stdout]\n{}", result.stdout);
             }
@@ -365,7 +379,8 @@ fn cmd_build(args: &[String]) {
     let mut output_file: Option<String> = None;
     let mut plugin: Option<String> = None;
     let mut list_plugins = false;
-    let mut plugin_config: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut plugin_config: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -470,7 +485,11 @@ fn cmd_build(args: &[String]) {
         } else {
             eprintln!("Available build plugins:");
             for plugin in plugins {
-                let status = if plugin.available { "available" } else { "missing deps" };
+                let status = if plugin.available {
+                    "available"
+                } else {
+                    "missing deps"
+                };
                 eprintln!(
                     "  - {} ({}) [{}] extensions: {}",
                     plugin.name,
@@ -508,10 +527,12 @@ fn cmd_build(args: &[String]) {
         Ok(wasm_path) => {
             println!("Build successful: {}", wasm_path.display());
             if verbose {
-                let wasm_size = std::fs::metadata(&wasm_path)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
-                println!("WASM size: {} bytes ({:.2} KB)", wasm_size, wasm_size as f64 / 1024.0);
+                let wasm_size = std::fs::metadata(&wasm_path).map(|m| m.len()).unwrap_or(0);
+                println!(
+                    "WASM size: {} bytes ({:.2} KB)",
+                    wasm_size,
+                    wasm_size as f64 / 1024.0
+                );
             }
         }
         Err(err) => {
@@ -570,7 +591,10 @@ fn cmd_validate(args: &[String]) {
             "warnings": result.warnings,
             "stats": result.stats,
         });
-        println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output).unwrap_or_default()
+        );
     } else {
         if result.errors.is_empty() {
             println!("Validation passed: {}", skill_path);
@@ -580,14 +604,8 @@ fn cmd_validate(args: &[String]) {
 
         if let Some(ref stats) = result.stats {
             println!("Name: {} ({} chars)", stats.name, stats.name_len);
-            println!(
-                "Description: {} chars",
-                stats.description_len
-            );
-            println!(
-                "Instructions: {} chars",
-                stats.instructions_len
-            );
+            println!("Description: {} chars", stats.description_len);
+            println!("Instructions: {} chars", stats.instructions_len);
         }
 
         if !result.errors.is_empty() {
@@ -642,7 +660,10 @@ fn cmd_analyze(args: &[String]) {
     let analysis = analyze_skill_tokens(std::path::Path::new(&skill_path));
 
     if json_output {
-        println!("{}", serde_json::to_string_pretty(&analysis).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&analysis).unwrap_or_default()
+        );
     } else {
         println!("Token Analysis: {}", skill_path);
         println!();

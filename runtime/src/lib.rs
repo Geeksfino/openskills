@@ -38,12 +38,12 @@ mod executor;
 mod hook_runner;
 mod host_policy;
 mod manifest;
-mod skill_session;
 mod native_runner;
 mod permission_callback;
 mod permissions;
 mod registry;
 mod skill_parser;
+mod skill_session;
 mod validator;
 #[cfg(feature = "wasm")]
 mod wasm_runner;
@@ -72,7 +72,7 @@ fn get_default_workspace_root() -> PathBuf {
 use audit::{AuditRecord, AuditSink, NoopAuditSink};
 use errors::OpenSkillError;
 use executor::{
-    execute_skill, read_skill_file, run_skill_target, list_skill_files,
+    execute_skill, list_skill_files, read_skill_file, run_skill_target,
     ExecutionOptions as ExecOpts,
 };
 use permission_callback::PermissionManager;
@@ -84,26 +84,28 @@ use validator::validate_skill;
 // Re-exports for public API
 pub use audit::{AuditRecord as RuntimeAuditRecord, ExecutionStatus as RuntimeExecutionStatus};
 #[cfg(feature = "build-tool")]
-pub use build::{build_skill, BuildConfig, list_build_plugins};
-pub use errors::OpenSkillError as RuntimeError;
-pub use deps_check::MissingDependencies;
-pub use manifest::{constraints, HooksConfig, SkillManifest, SkillRequires, WasmConfig};
+pub use build::{build_skill, list_build_plugins, BuildConfig};
 pub use context::{ContextOutput, ExecutionContext, OutputType};
-pub use skill_session::SkillExecutionSession;
+pub use deps_check::MissingDependencies;
+pub use errors::OpenSkillError as RuntimeError;
+pub use manifest::{constraints, HooksConfig, SkillManifest, SkillRequires, WasmConfig};
 pub use permission_callback::{
-    CliPermissionCallback, DenyAllCallback, PermissionAuditEntry, PermissionCallback,
-    PermissionRequest, PermissionResponse, RiskLevel, get_risk_level, is_risky_tool,
+    get_risk_level, is_risky_tool, CliPermissionCallback, DenyAllCallback, PermissionAuditEntry,
+    PermissionCallback, PermissionRequest, PermissionResponse, RiskLevel,
 };
-pub use skill_parser::parse_skill_md;
 pub use registry::{SkillDescriptor, SkillLocation};
-pub use validator::{analyze_skill_tokens, validate_skill_path, TokenAnalysis, ValidationResult, ValidationStats};
+pub use skill_parser::parse_skill_md;
+pub use skill_session::SkillExecutionSession;
+pub use validator::{
+    analyze_skill_tokens, validate_skill_path, TokenAnalysis, ValidationResult, ValidationStats,
+};
 
 // Re-export execution target types for public API
 pub use executor::{ExecutionTarget, TargetExecutionOptions};
 pub use native_runner::NativeRunnerConfig;
 
 // Re-export sandboxed command execution API
-pub use executor::{CommandPermissions, CommandResult, run_sandboxed_command};
+pub use executor::{run_sandboxed_command, CommandPermissions, CommandResult};
 
 // Re-export hook execution API
 pub use hook_runner::{HookEvent, HookRunner};
@@ -170,8 +172,7 @@ pub struct LoadedSkill {
 
 impl From<&Skill> for LoadedSkill {
     fn from(skill: &Skill) -> Self {
-        let missing =
-            deps_check::check_requires(skill.manifest.requires.as_ref(), None);
+        let missing = deps_check::check_requires(skill.manifest.requires.as_ref(), None);
         let missing_dependencies = if missing.is_empty() {
             None
         } else {
@@ -295,9 +296,8 @@ impl OpenSkillRuntime {
     ///
     /// Skills from later directories override earlier ones if IDs conflict.
     pub fn with_custom_directories<P: AsRef<Path>>(mut self, dirs: Vec<P>) -> Self {
-        self.custom_directories.extend(
-            dirs.into_iter().map(|d| d.as_ref().to_path_buf())
-        );
+        self.custom_directories
+            .extend(dirs.into_iter().map(|d| d.as_ref().to_path_buf()));
         self
     }
 
@@ -345,14 +345,12 @@ impl OpenSkillRuntime {
     pub fn with_strict_permissions(mut self) -> Self {
         use permission_callback::DenyAllCallback;
         self.permission_manager = PermissionManager::with_callback(Arc::new(DenyAllCallback));
-        self.host_policy = HostPolicy::from_config(
-            PermissionsConfig {
-                trust_skill_allowed_tools: false,
-                fallback: Fallback::Deny,
-                deny: Vec::new(),
-                allow: Vec::new(),
-            },
-        );
+        self.host_policy = HostPolicy::from_config(PermissionsConfig {
+            trust_skill_allowed_tools: false,
+            fallback: Fallback::Deny,
+            deny: Vec::new(),
+            allow: Vec::new(),
+        });
         self
     }
 
@@ -469,9 +467,10 @@ impl OpenSkillRuntime {
     ///
     /// The directory is created if it doesn't exist.
     pub fn get_workspace_dir(&self) -> Result<PathBuf, OpenSkillError> {
-        let dir = self.workspace_dir.clone().unwrap_or_else(|| {
-            get_default_workspace_root().join(&self.session_id)
-        });
+        let dir = self
+            .workspace_dir
+            .clone()
+            .unwrap_or_else(|| get_default_workspace_root().join(&self.session_id));
 
         // Ensure the directory exists
         if !dir.exists() {
@@ -644,23 +643,25 @@ impl OpenSkillRuntime {
             .filter(|s| s.user_invocable)
             .cloned()
             .collect();
-        let always_skills: Vec<&SkillDescriptor> = all_skills
-            .iter()
-            .filter(|s| !s.user_invocable)
-            .collect();
+        let always_skills: Vec<&SkillDescriptor> =
+            all_skills.iter().filter(|s| !s.user_invocable).collect();
 
         if user_invocable.is_empty() && always_skills.is_empty() {
             return String::from("No skills are currently available.");
         }
 
-        let mut prompt = String::from(r#"You have access to Claude Skills that provide specialized capabilities.
+        let mut prompt = String::from(
+            r#"You have access to Claude Skills that provide specialized capabilities.
 
 ## Available Skills
 
-"#);
+"#,
+        );
 
         if user_invocable.is_empty() && !always_skills.is_empty() {
-            prompt.push_str("(No additional skills to activate - the following are always active.)\n\n");
+            prompt.push_str(
+                "(No additional skills to activate - the following are always active.)\n\n",
+            );
         } else {
             for skill in &user_invocable {
                 let req_note = skill
@@ -670,9 +671,7 @@ impl OpenSkillRuntime {
                     .unwrap_or_default();
                 prompt.push_str(&format!(
                     "- **{}**: {}{}\n",
-                    skill.id,
-                    skill.description,
-                    req_note
+                    skill.id, skill.description, req_note
                 ));
             }
         }
@@ -761,8 +760,7 @@ Example response:
                 if let Ok(loaded) = self.activate_skill(&skill.id) {
                     prompt.push_str(&format!(
                         "\n### Pre-loaded Skill: {}\n\n{}\n",
-                        loaded.manifest.name,
-                        loaded.instructions
+                        loaded.manifest.name, loaded.instructions
                     ));
                 }
             }
@@ -798,10 +796,8 @@ Example response:
             .native_runner_config
             .as_ref()
             .and_then(|c| c.python_interpreter.as_deref());
-        let missing = deps_check::check_requires(
-            skill.manifest.requires.as_ref(),
-            python_interpreter,
-        );
+        let missing =
+            deps_check::check_requires(skill.manifest.requires.as_ref(), python_interpreter);
         let missing_dependencies = if missing.is_empty() {
             None
         } else {
@@ -865,7 +861,9 @@ Example response:
         // This isolates execution outputs, not instruction comprehension
         let is_forked = skill.manifest.is_forked();
         let context = if is_forked {
-            let base_context = parent_context.cloned().unwrap_or_else(ExecutionContext::new);
+            let base_context = parent_context
+                .cloned()
+                .unwrap_or_else(ExecutionContext::new);
             Some(base_context.fork())
         } else {
             None
@@ -981,8 +979,7 @@ Example response:
         // Also include allow_overrides that aren't already in the list
         // (host may grant tools beyond what the skill declares)
         for tool in policy.allow_overrides() {
-            if !policy.deny_overrides().contains(tool)
-                && !effective_tools.iter().any(|t| t == tool)
+            if !policy.deny_overrides().contains(tool) && !effective_tools.iter().any(|t| t == tool)
             {
                 effective_tools.push(tool.clone());
             }
@@ -1021,10 +1018,14 @@ Example response:
             ))),
             ToolDecision::Prompt => {
                 if is_risky_tool(tool) {
-                    let desc = description
-                        .unwrap_or_else(|| format!("Execute {} operations", tool));
+                    let desc =
+                        description.unwrap_or_else(|| format!("Execute {} operations", tool));
                     self.permission_manager.check_permission(
-                        skill_id, tool, desc, get_risk_level(tool), context,
+                        skill_id,
+                        tool,
+                        desc,
+                        get_risk_level(tool),
+                        context,
                     )
                 } else {
                     Ok(true)
@@ -1143,8 +1144,8 @@ Example response:
                 fork.record_output(OutputType::Result, result_str.to_string());
             } else {
                 // Serialize JSON output to string
-                let result_str = serde_json::to_string(&execution.output)
-                    .unwrap_or_else(|_| "{}".to_string());
+                let result_str =
+                    serde_json::to_string(&execution.output).unwrap_or_else(|_| "{}".to_string());
                 fork.record_output(OutputType::Result, result_str);
             }
         }
@@ -1167,7 +1168,7 @@ Example response:
         // For forked contexts, return only the summary
         if let Some(mut fork) = fork_context {
             let summary = fork.summarize();
-            
+
             Ok(ExecutionResult {
                 output: serde_json::json!({
                     "summary": summary,
@@ -1310,7 +1311,11 @@ Example response:
     ///
     /// The path must be within the skill directory. Attempts to escape via
     /// `..` or symlinks are rejected.
-    pub fn read_skill_file(&self, skill_id: &str, relative_path: &str) -> Result<String, OpenSkillError> {
+    pub fn read_skill_file(
+        &self,
+        skill_id: &str,
+        relative_path: &str,
+    ) -> Result<String, OpenSkillError> {
         // Only need metadata (root path) for file reading
         let metadata = self
             .registry
@@ -1416,7 +1421,9 @@ mod tests {
         assert_eq!(runtime.get_system_prompt_metadata(), "");
         assert_eq!(runtime.get_system_prompt_summary(), "");
         assert_eq!(
-            runtime.get_system_prompt_metadata_json().unwrap_or_default(),
+            runtime
+                .get_system_prompt_metadata_json()
+                .unwrap_or_default(),
             ""
         );
     }

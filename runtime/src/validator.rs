@@ -11,7 +11,7 @@ use std::path::Path;
 /// Validate a skill's manifest against Claude Skills spec constraints.
 pub fn validate_skill(skill: &Skill) -> Result<(), OpenSkillError> {
     validate_manifest(&skill.manifest)?;
-    
+
     // Validate directory name matches manifest name
     if skill.id != skill.manifest.name {
         return Err(OpenSkillError::InvalidManifest(format!(
@@ -27,10 +27,10 @@ pub fn validate_skill(skill: &Skill) -> Result<(), OpenSkillError> {
 pub fn validate_manifest(manifest: &SkillManifest) -> Result<(), OpenSkillError> {
     // Validate name
     validate_name(&manifest.name)?;
-    
+
     // Validate description
     validate_description(&manifest.description)?;
-    
+
     // Validate context value if present
     if let Some(ref ctx) = manifest.context {
         if ctx != "fork" {
@@ -40,7 +40,7 @@ pub fn validate_manifest(manifest: &SkillManifest) -> Result<(), OpenSkillError>
             )));
         }
     }
-    
+
     Ok(())
 }
 
@@ -301,12 +301,7 @@ pub fn analyze_skill_tokens(path: &Path) -> TokenAnalysis {
 }
 
 fn find_wasm_module(skill_dir: &Path) -> bool {
-    let candidates = [
-        "skill.wasm",
-        "wasm/skill.wasm",
-        "module.wasm",
-        "main.wasm",
-    ];
+    let candidates = ["skill.wasm", "wasm/skill.wasm", "module.wasm", "main.wasm"];
 
     if candidates
         .iter()
@@ -372,7 +367,7 @@ mod tests {
     fn test_validate_description_max_length() {
         let max_desc = "x".repeat(1024);
         assert!(validate_description(&max_desc).is_ok());
-        
+
         let too_long = "x".repeat(1025);
         assert!(validate_description(&too_long).is_err());
     }
@@ -381,7 +376,7 @@ mod tests {
     fn test_validate_name_max_length() {
         let max_name = "x".repeat(64);
         assert!(validate_name(&max_name).is_ok());
-        
+
         let too_long = "x".repeat(65);
         assert!(validate_name(&too_long).is_err());
     }

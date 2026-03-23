@@ -1,4 +1,4 @@
-use openskills_runtime::{OpenSkillRuntime, ExecutionOptions, RuntimeExecutionStatus};
+use openskills_runtime::{ExecutionOptions, OpenSkillRuntime, RuntimeExecutionStatus};
 use serde_json::json;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -16,20 +16,25 @@ fn get_claude_skills_dir() -> PathBuf {
 fn test_load_all_claude_skills() {
     let skills_dir = get_claude_skills_dir();
     if !skills_dir.exists() {
-        println!("Skipping test: Claude official skills not found at {:?}", skills_dir);
+        println!(
+            "Skipping test: Claude official skills not found at {:?}",
+            skills_dir
+        );
         return;
     }
 
     let mut runtime = OpenSkillRuntime::from_directory(&skills_dir);
-    let skills = runtime.discover_skills().expect("Failed to discover skills");
-    
+    let skills = runtime
+        .discover_skills()
+        .expect("Failed to discover skills");
+
     println!("Discovered {} skills", skills.len());
     for skill in &skills {
         println!("- {} ({})", skill.id, skill.location);
     }
 
     assert!(!skills.is_empty(), "Should discover at least one skill");
-    
+
     // Verify some specific known skills exist
     assert!(skills.iter().any(|s| s.id == "skill-creator"));
     assert!(skills.iter().any(|s| s.id == "docx"));
@@ -50,7 +55,11 @@ fn test_seatbelt_python_init_skill() {
     runtime.discover_skills().unwrap();
 
     // Verify skill-creator is available
-    if !runtime.list_skills().iter().any(|s| s.id == "skill-creator") {
+    if !runtime
+        .list_skills()
+        .iter()
+        .any(|s| s.id == "skill-creator")
+    {
         panic!("skill-creator skill not found");
     }
 
@@ -58,7 +67,7 @@ fn test_seatbelt_python_init_skill() {
     let temp_dir = TempDir::new().unwrap();
     // unused output_path for now as we just check usage
     let _output_path = temp_dir.path().join("my-new-skill");
-    
+
     let options = ExecutionOptions {
         timeout_ms: Some(10000),
         input: Some(json!({})), // Empty input
@@ -66,13 +75,13 @@ fn test_seatbelt_python_init_skill() {
     };
 
     let result = runtime.execute_skill("skill-creator", options);
-    
+
     match result {
         Ok(exec_result) => {
             println!("Output: {}", exec_result.output);
             println!("Stdout: {}", exec_result.stdout);
             println!("Stderr: {}", exec_result.stderr);
-            
+
             // If seatbelt kills the interpreter, skip this test in restrictive environments.
             if let RuntimeExecutionStatus::Failed(msg) = &exec_result.audit.exit_status {
                 if msg.contains("sandbox-exec")
@@ -88,7 +97,9 @@ fn test_seatbelt_python_init_skill() {
             // If it executed, we expect "Usage: init_skill.py" in stdout/stderr.
             // Skip when the skill's script has import-path expectations (e.g. ModuleNotFoundError: scripts).
             let output_combined = format!("{}{}", exec_result.stdout, exec_result.stderr);
-            if output_combined.contains("ModuleNotFoundError") || output_combined.contains("No module named 'scripts'") {
+            if output_combined.contains("ModuleNotFoundError")
+                || output_combined.contains("No module named 'scripts'")
+            {
                 println!("Skipping: skill-creator script has import path expectations not met in this environment");
                 return;
             }
@@ -96,7 +107,7 @@ fn test_seatbelt_python_init_skill() {
                 output_combined.contains("Usage: init_skill.py"),
                 "Did not find Usage message, script might not have run"
             );
-        },
+        }
         Err(e) => {
             println!("Execution error: {:?}", e);
             // It might return an error if the exit code is non-zero, depending on runtime implementation details not fully visible here.

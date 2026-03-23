@@ -44,7 +44,9 @@ impl BuildConfigFile {
     }
 
     pub fn plugin_ref(&self) -> Option<&String> {
-        self.build.as_ref().and_then(|section| section.plugin.as_ref())
+        self.build
+            .as_ref()
+            .and_then(|section| section.plugin.as_ref())
     }
 
     pub fn plugin_options(&self) -> HashMap<String, String> {

@@ -370,6 +370,9 @@ user-invocable: false
 
     // listSkills should include always-loaded skills (they're still discoverable)
     let skill = skills.iter().find(|s| s.id == "listed-always");
-    assert!(skill.is_some(), "listSkills should include always-loaded skills");
+    assert!(
+        skill.is_some(),
+        "listSkills should include always-loaded skills"
+    );
     assert!(!skill.unwrap().user_invocable);
 }

@@ -20,11 +20,7 @@ pub struct PermissionEnforcer {
 
 impl PermissionEnforcer {
     /// Create a new permission enforcer.
-    pub fn new(
-        allowed_tools: Vec<String>,
-        wasm_config: WasmConfig,
-        skill_root: PathBuf,
-    ) -> Self {
+    pub fn new(allowed_tools: Vec<String>, wasm_config: WasmConfig, skill_root: PathBuf) -> Self {
         Self {
             allowed_tools: allowed_tools.into_iter().collect(),
             wasm_config,
@@ -79,9 +75,12 @@ impl PermissionEnforcer {
 
         let host = parsed.host_str().unwrap_or_default();
 
-        Ok(self.wasm_config.network.allow.iter().any(|allowed| {
-            host == allowed || host.ends_with(&format!(".{}", allowed))
-        }))
+        Ok(self
+            .wasm_config
+            .network
+            .allow
+            .iter()
+            .any(|allowed| host == allowed || host.ends_with(&format!(".{}", allowed))))
     }
 
     /// Get environment variable allowlist for WASI.
@@ -150,7 +149,7 @@ impl PermissionEnforcer {
 }
 
 /// Map Claude Skills tool names to WASI capabilities.
-/// 
+///
 /// This provides a mapping from high-level tool names (like "Read", "Write", "Bash")
 /// to WASI capability grants.
 pub fn map_tools_to_capabilities(tools: &[String]) -> WasmConfig {
@@ -221,11 +220,15 @@ mod tests {
     fn test_network_allowed() {
         let mut config = WasmConfig::default();
         config.network.allow = vec!["api.example.com".to_string()];
-        
+
         let enforcer = PermissionEnforcer::new(vec![], config, PathBuf::from("."));
-        
-        assert!(enforcer.is_network_allowed("https://api.example.com/v1").unwrap());
-        assert!(enforcer.is_network_allowed("https://sub.api.example.com/v1").unwrap());
+
+        assert!(enforcer
+            .is_network_allowed("https://api.example.com/v1")
+            .unwrap());
+        assert!(enforcer
+            .is_network_allowed("https://sub.api.example.com/v1")
+            .unwrap());
         assert!(!enforcer.is_network_allowed("https://other.com").unwrap());
     }
 

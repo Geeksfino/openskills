@@ -127,16 +127,24 @@ pub fn check_requires(
             }
         }
     } else if !requires.python_packages.is_empty() {
-        missing.unverified_python_packages.extend(requires.python_packages.clone());
+        missing
+            .unverified_python_packages
+            .extend(requires.python_packages.clone());
     }
     if !requires.node_packages.is_empty() {
-        missing.unverified_node_packages.extend(requires.node_packages.clone());
+        missing
+            .unverified_node_packages
+            .extend(requires.node_packages.clone());
     }
     if !requires.rust_crates.is_empty() {
-        missing.unverified_rust_crates.extend(requires.rust_crates.clone());
+        missing
+            .unverified_rust_crates
+            .extend(requires.rust_crates.clone());
     }
     if !requires.system_packages.is_empty() {
-        missing.unverified_system_packages.extend(requires.system_packages.clone());
+        missing
+            .unverified_system_packages
+            .extend(requires.system_packages.clone());
     }
     missing
 }
@@ -218,7 +226,9 @@ mod tests {
 
         assert!(check_python_package(&interpreter, malicious));
         assert_eq!(fs::read_to_string(&arg_capture).unwrap(), malicious);
-        assert!(!fs::read_to_string(&code_capture).unwrap().contains(malicious));
+        assert!(!fs::read_to_string(&code_capture)
+            .unwrap()
+            .contains(malicious));
 
         fs::remove_dir_all(temp_dir).unwrap();
     }

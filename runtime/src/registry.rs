@@ -101,7 +101,7 @@ impl SkillRegistry {
             loading_errors: HashMap::new(),
         }
     }
-    
+
     /// Get loading errors encountered during discovery.
     ///
     /// Returns a map of skill ID to error message for skills that failed to load.
@@ -190,7 +190,11 @@ impl SkillRegistry {
     }
 
     /// Scan a directory for skills.
-    fn scan_directory(&mut self, dir: &Path, location: SkillLocation) -> Result<(), OpenSkillError> {
+    fn scan_directory(
+        &mut self,
+        dir: &Path,
+        location: SkillLocation,
+    ) -> Result<(), OpenSkillError> {
         let entries = match fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => return Ok(()), // Directory not readable, skip
@@ -250,7 +254,7 @@ impl SkillRegistry {
         location: SkillLocation,
     ) -> Result<SkillMetadata, OpenSkillError> {
         let content = fs::read_to_string(skill_md_path)?;
-        let manifest = parse_frontmatter_only(&content)?;  // NEW: frontmatter only
+        let manifest = parse_frontmatter_only(&content)?; // NEW: frontmatter only
 
         // Validate skill ID matches name
         validate_skill_id(id, &manifest)?;
@@ -272,23 +276,25 @@ impl SkillRegistry {
     pub fn get(&self, id: &str) -> Option<&SkillMetadata> {
         self.skills.get(id)
     }
-    
+
     /// Load full skill content (including instructions) by ID.
     /// This is used when a skill is activated (progressive disclosure tier 2).
     pub fn load_full_skill(&self, id: &str) -> Result<Skill, OpenSkillError> {
-        let metadata = self.skills.get(id)
+        let metadata = self
+            .skills
+            .get(id)
             .ok_or_else(|| OpenSkillError::SkillNotFound(id.to_string()))?;
-        
+
         // Lazy load: read and parse full SKILL.md NOW (not at discovery)
         let skill_md_path = metadata.root.join("SKILL.md");
         let content = fs::read_to_string(&skill_md_path)?;
-        let parsed = parse_skill_md(&content)?;  // Full parse with body
-        
+        let parsed = parse_skill_md(&content)?; // Full parse with body
+
         Ok(Skill {
             id: metadata.id.clone(),
             root: metadata.root.clone(),
             manifest: parsed.manifest,
-            instructions: parsed.instructions,  // Body loaded here
+            instructions: parsed.instructions, // Body loaded here
             location: metadata.location.clone(),
         })
     }
@@ -298,16 +304,21 @@ impl SkillRegistry {
         self.skills
             .values()
             .map(|s| {
-                let requires_summary = s.manifest.requires.as_ref().map(|r| {
-                    let mut parts: Vec<String> = Vec::new();
-                    if !r.bins.is_empty() {
-                        parts.push(r.bins.join(", "));
-                    }
-                    if !r.env.is_empty() {
-                        parts.push(r.env.join(", "));
-                    }
-                    parts.join(", ")
-                }).filter(|s| !s.is_empty());
+                let requires_summary = s
+                    .manifest
+                    .requires
+                    .as_ref()
+                    .map(|r| {
+                        let mut parts: Vec<String> = Vec::new();
+                        if !r.bins.is_empty() {
+                            parts.push(r.bins.join(", "));
+                        }
+                        if !r.env.is_empty() {
+                            parts.push(r.env.join(", "));
+                        }
+                        parts.join(", ")
+                    })
+                    .filter(|s| !s.is_empty());
                 SkillDescriptor {
                     id: s.id.clone(),
                     description: s.manifest.description.clone(),

@@ -1,5 +1,5 @@
-use openskills_runtime::OpenSkillRuntime;
 use openskills_runtime::HookEvent;
+use openskills_runtime::OpenSkillRuntime;
 use serde_json::json;
 use std::fs;
 use tempfile::TempDir;
@@ -13,10 +13,14 @@ fn verify_hooks_parsed(runtime: &OpenSkillRuntime, skill_id: &str) -> bool {
     }
 }
 
-fn create_skill_with_hooks(temp_dir: &TempDir, skill_name: &str, hooks_yaml: &str) -> std::path::PathBuf {
+fn create_skill_with_hooks(
+    temp_dir: &TempDir,
+    skill_name: &str,
+    hooks_yaml: &str,
+) -> std::path::PathBuf {
     let skill_dir = temp_dir.path().join(skill_name);
     fs::create_dir_all(&skill_dir).unwrap();
-    
+
     let skill_md = format!(
         r#"---
 name: {}
@@ -55,7 +59,10 @@ fn test_pre_tool_use_hook_execution() {
     runtime.discover_skills().unwrap();
 
     // Verify hooks were parsed
-    assert!(verify_hooks_parsed(&runtime, "hook-test"), "Hooks should be parsed");
+    assert!(
+        verify_hooks_parsed(&runtime, "hook-test"),
+        "Hooks should be parsed"
+    );
 
     let event = HookEvent::PreToolUse {
         tool_name: "Read".to_string(),
@@ -73,7 +80,10 @@ fn test_pre_tool_use_hook_execution() {
             assert!(results[0].stdout.contains("PreRead hook executed"));
         } else {
             // Hook executed but failed - check if it's a sandbox issue
-            eprintln!("Hook exit code: {}, stderr: {}", results[0].exit_code, results[0].stderr);
+            eprintln!(
+                "Hook exit code: {}, stderr: {}",
+                results[0].exit_code, results[0].stderr
+            );
             // Still verify we got a result
             assert!(results.len() > 0);
         }
@@ -216,7 +226,11 @@ fn test_hook_matcher_no_matcher_matches_all() {
         tool_input: json!({}).to_string(),
     };
     let results = runtime.execute_hooks("hook-test", event).unwrap();
-    assert_eq!(results.len(), 1, "Hook without matcher should match all tools");
+    assert_eq!(
+        results.len(),
+        1,
+        "Hook without matcher should match all tools"
+    );
     // Verify hook executed (may fail due to sandbox restrictions)
     assert!(results.len() > 0);
 }
@@ -246,7 +260,7 @@ fn test_hook_multiple_hooks_same_event() {
     };
     let results = runtime.execute_hooks("hook-test", event).unwrap();
     assert_eq!(results.len(), 2, "Both hooks should execute"); // Both hooks should execute
-    // Verify hooks executed (may fail due to sandbox restrictions)
+                                                               // Verify hooks executed (may fail due to sandbox restrictions)
     assert!(results.len() >= 2);
 }
 

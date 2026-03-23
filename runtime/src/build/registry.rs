@@ -8,7 +8,9 @@ pub struct PluginRegistry {
 
 impl PluginRegistry {
     pub fn new() -> Self {
-        let mut registry = Self { plugins: Vec::new() };
+        let mut registry = Self {
+            plugins: Vec::new(),
+        };
         registry.register_builtin_plugins();
         registry
     }
@@ -19,7 +21,9 @@ impl PluginRegistry {
         #[cfg(feature = "plugin-quickjs")]
         self.register(Arc::new(plugins::quickjs::QuickJsBuildPlugin::new()));
         #[cfg(feature = "plugin-assemblyscript")]
-        self.register(Arc::new(plugins::assemblyscript::AssemblyScriptBuildPlugin::new()));
+        self.register(Arc::new(
+            plugins::assemblyscript::AssemblyScriptBuildPlugin::new(),
+        ));
     }
 
     pub fn register(&mut self, plugin: Arc<dyn BuildPlugin>) {

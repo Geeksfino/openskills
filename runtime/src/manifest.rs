@@ -288,8 +288,14 @@ mod tests {
     #[test]
     fn test_wasm_config_default_timeout_and_memory() {
         let config = WasmConfig::default();
-        assert_eq!(config.timeout_ms, 30_000, "WasmConfig::default() must use 30s timeout");
-        assert_eq!(config.memory_mb, 128, "WasmConfig::default() must use 128 MB");
+        assert_eq!(
+            config.timeout_ms, 30_000,
+            "WasmConfig::default() must use 30s timeout"
+        );
+        assert_eq!(
+            config.memory_mb, 128,
+            "WasmConfig::default() must use 128 MB"
+        );
     }
 
     #[test]
@@ -312,7 +318,11 @@ mod tests {
 
     #[test]
     fn test_allowed_tools_yaml_list() {
-        let tools = AllowedTools::List(vec!["Read".to_string(), "Write".to_string(), "Bash".to_string()]);
+        let tools = AllowedTools::List(vec![
+            "Read".to_string(),
+            "Write".to_string(),
+            "Bash".to_string(),
+        ]);
         assert_eq!(tools.to_vec(), vec!["Read", "Write", "Bash"]);
     }
 
@@ -376,7 +386,10 @@ compatibility:
         let compat = manifest.compatibility.unwrap();
         assert_eq!(compat.min_version, Some("1.0.0".to_string()));
         assert_eq!(compat.max_version, Some("2.0.0".to_string()));
-        assert_eq!(compat.platforms, Some(vec!["macos".to_string(), "linux".to_string()]));
+        assert_eq!(
+            compat.platforms,
+            Some(vec!["macos".to_string(), "linux".to_string()])
+        );
     }
 
     #[test]
@@ -430,8 +443,14 @@ metadata:
         assert!(manifest.metadata.is_some());
         let meta = manifest.metadata.unwrap();
         assert_eq!(meta.author, Some("Test Author".to_string()));
-        assert_eq!(meta.repository, Some("https://github.com/test/skill".to_string()));
-        assert_eq!(meta.keywords, Some(vec!["test".to_string(), "skill".to_string()]));
+        assert_eq!(
+            meta.repository,
+            Some("https://github.com/test/skill".to_string())
+        );
+        assert_eq!(
+            meta.keywords,
+            Some(vec!["test".to_string(), "skill".to_string()])
+        );
         assert_eq!(meta.homepage, Some("https://example.com".to_string()));
     }
 }

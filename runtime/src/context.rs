@@ -131,7 +131,7 @@ impl ExecutionContext {
             let stdout_outputs: Vec<String> = self
                 .intermediate_outputs
                 .iter()
-                               .filter(|o| matches!(o.output_type, OutputType::Stdout))
+                .filter(|o| matches!(o.output_type, OutputType::Stdout))
                 .map(|o| o.content.clone())
                 .collect();
 

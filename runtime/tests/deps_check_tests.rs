@@ -73,10 +73,15 @@ This won't work without the binary.
     let loaded = runtime.activate_skill("missing-bin-test").unwrap();
 
     // Should report missing binary
-    assert!(loaded.missing_dependencies.is_some(), "Should have missing dependencies");
+    assert!(
+        loaded.missing_dependencies.is_some(),
+        "Should have missing dependencies"
+    );
     let missing = loaded.missing_dependencies.unwrap();
     assert!(
-        missing.bins.contains(&"__nonexistent_binary_xyz_12345__".to_string()),
+        missing
+            .bins
+            .contains(&"__nonexistent_binary_xyz_12345__".to_string()),
         "Should report nonexistent binary as missing"
     );
 }
@@ -188,7 +193,9 @@ Needs the env var.
     assert!(loaded.missing_dependencies.is_some());
     let missing = loaded.missing_dependencies.unwrap();
     assert!(
-        missing.env.contains(&"__OPENSKILLS_TEST_MISSING_VAR__".to_string()),
+        missing
+            .env
+            .contains(&"__OPENSKILLS_TEST_MISSING_VAR__".to_string()),
         "Should report missing env var"
     );
 }
@@ -223,7 +230,9 @@ Needs non-empty env var.
     assert!(loaded.missing_dependencies.is_some());
     let missing = loaded.missing_dependencies.unwrap();
     assert!(
-        missing.env.contains(&"__OPENSKILLS_TEST_EMPTY_VAR__".to_string()),
+        missing
+            .env
+            .contains(&"__OPENSKILLS_TEST_EMPTY_VAR__".to_string()),
         "Empty env var should be reported as missing"
     );
 
@@ -350,13 +359,19 @@ requires:
     let skill = skills.iter().find(|s| s.id == "summary-test").unwrap();
 
     // Should have a requires_summary field
-    assert!(skill.requires_summary.is_some(), "Should have requires_summary");
+    assert!(
+        skill.requires_summary.is_some(),
+        "Should have requires_summary"
+    );
     let summary = skill.requires_summary.as_ref().unwrap();
 
     // Summary should mention the dependencies
     assert!(summary.contains("git"), "Summary should mention git");
     assert!(summary.contains("docker"), "Summary should mention docker");
-    assert!(summary.contains("GITHUB_TOKEN"), "Summary should mention GITHUB_TOKEN");
+    assert!(
+        summary.contains("GITHUB_TOKEN"),
+        "Summary should mention GITHUB_TOKEN"
+    );
 }
 
 #[test]
@@ -379,5 +394,8 @@ description: Test skill without requires.
     let skill = skills.iter().find(|s| s.id == "no-requires-test").unwrap();
 
     // Should not have a requires_summary
-    assert!(skill.requires_summary.is_none(), "Should not have requires_summary when no requires");
+    assert!(
+        skill.requires_summary.is_none(),
+        "Should not have requires_summary when no requires"
+    );
 }

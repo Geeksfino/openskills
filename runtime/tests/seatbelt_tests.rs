@@ -1,4 +1,4 @@
-use openskills_runtime::{OpenSkillRuntime, ExecutionOptions, RuntimeExecutionStatus};
+use openskills_runtime::{ExecutionOptions, OpenSkillRuntime, RuntimeExecutionStatus};
 use serde_json::json;
 use std::fs;
 use tempfile::TempDir;
@@ -28,7 +28,7 @@ echo '{"status": "success", "message": "hello from shell"}'
 "#;
     let script_path = skill_dir.join("script.sh");
     fs::write(&script_path, script_content).unwrap();
-    
+
     // Make it executable
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(&script_path).unwrap().permissions();
@@ -47,17 +47,24 @@ echo '{"status": "success", "message": "hello from shell"}'
     };
 
     let result = runtime.execute_skill("native-test-skill", options);
-    
+
     match result {
         Ok(exec_result) => {
             println!("Stdout: {}", exec_result.stdout);
             println!("Stderr: {}", exec_result.stderr);
-            assert!(matches!(exec_result.audit.exit_status, RuntimeExecutionStatus::Success), "Execution failed: {:?}", exec_result.audit.exit_status);
+            assert!(
+                matches!(
+                    exec_result.audit.exit_status,
+                    RuntimeExecutionStatus::Success
+                ),
+                "Execution failed: {:?}",
+                exec_result.audit.exit_status
+            );
             println!("Output: {}", exec_result.output);
-            
+
             // Check output content
             assert_eq!(exec_result.output["message"], "hello from shell");
-        },
+        }
         Err(e) => {
             panic!("Native execution failed: {:?}", e);
         }
@@ -86,9 +93,12 @@ description: Try to read file outside skill dir
 "#;
     fs::write(skill_dir.join("SKILL.md"), manifest).unwrap();
 
-    let script_content = format!(r#"#!/bin/bash
+    let script_content = format!(
+        r#"#!/bin/bash
 cat {}
-"#, secret_path.display());
+"#,
+        secret_path.display()
+    );
 
     let script_path = skill_dir.join("script.sh");
     fs::write(&script_path, script_content).unwrap();

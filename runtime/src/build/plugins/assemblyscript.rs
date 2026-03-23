@@ -38,9 +38,9 @@ impl AssemblyScriptBuildPlugin {
         if verbose {
             eprintln!("Running: {:?}", command);
         }
-        let status = command.status().map_err(|e| {
-            OpenSkillError::BuildError(format!("Failed to run {}: {}", label, e))
-        })?;
+        let status = command
+            .status()
+            .map_err(|e| OpenSkillError::BuildError(format!("Failed to run {}: {}", label, e)))?;
         if !status.success() {
             return Err(OpenSkillError::BuildError(format!(
                 "{} failed with exit code {:?}",
@@ -136,10 +136,7 @@ impl BuildPlugin for AssemblyScriptBuildPlugin {
             .arg("new")
             .arg(&core_wasm)
             .arg("--adapt")
-            .arg(format!(
-                "wasi_snapshot_preview1={}",
-                adapter_path.display()
-            ))
+            .arg(format!("wasi_snapshot_preview1={}", adapter_path.display()))
             .arg("-o")
             .arg(output_wasm);
         self.run_command("wasm-tools component new", wasm_tools_cmd, config.verbose)?;
@@ -148,10 +145,7 @@ impl BuildPlugin for AssemblyScriptBuildPlugin {
         let _ = std::fs::remove_file(&core_wasm);
 
         if config.verbose {
-            eprintln!(
-                "AssemblyScript: build complete: {}",
-                output_wasm.display()
-            );
+            eprintln!("AssemblyScript: build complete: {}", output_wasm.display());
         }
 
         Ok(())

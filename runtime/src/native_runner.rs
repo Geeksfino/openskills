@@ -217,13 +217,13 @@ mod macos {
         // Callers (executor) only pass timeout_ms from WasmConfig default or options.timeout_ms when > 0; 0 is never passed.
 
         let input_json = serde_json::to_string(&input)?;
-        let allow_network = allowed_tools.iter().any(|t| t == "WebSearch" || t == "Fetch");
+        let allow_network = allowed_tools
+            .iter()
+            .any(|t| t == "WebSearch" || t == "Fetch");
         // Only Shell scripts get process permissions by default.
         // Python scripts require explicit Bash/Terminal permission to spawn subprocesses.
         let allow_process = script_type == ScriptType::Shell
-            || allowed_tools
-                .iter()
-                .any(|t| t == "Bash" || t == "Terminal");
+            || allowed_tools.iter().any(|t| t == "Bash" || t == "Terminal");
 
         // Canonicalize skill_root first to ensure path consistency
         let skill_root = skill
@@ -235,27 +235,29 @@ mod macos {
         let read_paths: Vec<PathBuf> = enforcer
             .filesystem_read_paths()
             .iter()
-            .map(|p| {
-                p.canonicalize()
-                    .unwrap_or_else(|_| p.to_path_buf())
-            })
+            .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
             .collect();
         let mut write_paths: Vec<PathBuf> = enforcer
             .filesystem_write_paths()
             .iter()
-            .map(|p| {
-                p.canonicalize()
-                    .unwrap_or_else(|_| p.to_path_buf())
-            })
+            .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
             .collect();
 
         // Add workspace directory to write paths if configured (create if missing, for parity with Linux)
         if let Some(workspace) = workspace_dir {
             if workspace.exists() {
-                write_paths.push(workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf()));
+                write_paths.push(
+                    workspace
+                        .canonicalize()
+                        .unwrap_or_else(|_| workspace.to_path_buf()),
+                );
             } else {
                 let _ = std::fs::create_dir_all(workspace);
-                write_paths.push(workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf()));
+                write_paths.push(
+                    workspace
+                        .canonicalize()
+                        .unwrap_or_else(|_| workspace.to_path_buf()),
+                );
             }
         }
 
@@ -263,21 +265,19 @@ mod macos {
             command_for_script(script_type, script_path, native_config)?;
         // Canonicalize the executable path for the seatbelt profile
         // We need to pass the actual executable path (not its parent) to grant file-map-executable permission
-        let exec_path = program_path.as_ref().and_then(|p| {
-            p.canonicalize().ok().or_else(|| Some(p.clone()))
-        });
+        let exec_path = program_path
+            .as_ref()
+            .and_then(|p| p.canonicalize().ok().or_else(|| Some(p.clone())));
         // Also ensure the parent directory is accessible for traversal
         // This is needed even if the executable path itself is granted permission
         let mut read_paths_with_parent = read_paths.clone();
         // Track the parent directory separately if it needs file-map-executable permission
         let exec_parent_path = if let Some(path) = exec_path.as_ref().and_then(|p| p.parent()) {
-            let canonicalized_parent = path
-                .canonicalize()
-                .unwrap_or_else(|_| path.to_path_buf());
+            let canonicalized_parent = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
             // Only add to read_paths if not already covered by SYSTEM_READ_PATHS
-            let is_system_path = SYSTEM_READ_PATHS.iter().any(|&sys_path| {
-                canonicalized_parent.starts_with(sys_path)
-            });
+            let is_system_path = SYSTEM_READ_PATHS
+                .iter()
+                .any(|&sys_path| canonicalized_parent.starts_with(sys_path));
             if !is_system_path {
                 read_paths_with_parent.push(canonicalized_parent.clone());
                 Some(canonicalized_parent)
@@ -299,7 +299,11 @@ mod macos {
 
         let profile_path = write_profile(&profile)?;
         let mut cmd = Command::new("sandbox-exec");
-        cmd.arg("-f").arg(&profile_path).arg("--").arg(program).args(args);
+        cmd.arg("-f")
+            .arg(&profile_path)
+            .arg("--")
+            .arg(program)
+            .args(args);
         // Append user-provided script arguments (e.g., "my-test" for init-artifact.sh)
         if !script_args.is_empty() {
             cmd.args(script_args);
@@ -342,7 +346,7 @@ mod macos {
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        
+
         // Use panic-safe thread spawning with catch_unwind
         let stdout_handle = thread::spawn(move || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stdout)))
@@ -443,7 +447,9 @@ mod macos {
                                     .find(|candidate| candidate.exists())
                             })
                             .ok_or_else(|| {
-                                OpenSkillError::NativeExecutionError("python3 not found".to_string())
+                                OpenSkillError::NativeExecutionError(
+                                    "python3 not found".to_string(),
+                                )
                             })?
                     }
                 } else {
@@ -488,9 +494,8 @@ mod macos {
     ) {
         cmd.env_clear();
 
-        let path = std::env::var("PATH").unwrap_or_else(|_| {
-            "/usr/bin:/bin:/usr/sbin:/sbin".to_string()
-        });
+        let path =
+            std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin:/usr/sbin:/sbin".to_string());
         cmd.env("PATH", path);
 
         // Disable corepack's auto-pin feature to prevent it from traversing up
@@ -539,7 +544,9 @@ mod macos {
             cmd.env("PYTHONDONTWRITEBYTECODE", "1");
             // Only disable user site-packages when not explicitly allowed (conservative default).
             // When python_allow_user_site is true, host-provisioned packages (venv, pip --user) remain visible.
-            let allow_user_site = native_config.map(|c| c.python_allow_user_site).unwrap_or(false);
+            let allow_user_site = native_config
+                .map(|c| c.python_allow_user_site)
+                .unwrap_or(false);
             if !allow_user_site {
                 cmd.env("PYTHONNOUSERSITE", "1");
             }
@@ -569,7 +576,7 @@ mod macos {
         _exec_parent_path: Option<&Path>,
     ) -> String {
         let mut profile = String::new();
-        
+
         // Following Claude Code's model:
         // 1. Start with deny default
         // 2. Allow broad file reads (Python and other interpreters need this)
@@ -678,7 +685,7 @@ mod macos {
 
     fn write_profile(profile: &str) -> Result<PathBuf, OpenSkillError> {
         use rand::Rng;
-        
+
         let temp_dir = std::env::temp_dir();
         let pid = std::process::id();
         let timestamp = std::time::SystemTime::now()
@@ -686,24 +693,28 @@ mod macos {
             .unwrap_or_default()
             .as_millis();
         let random_suffix: u32 = rand::thread_rng().gen();
-        
+
         let filename = format!(
             "openskills-seatbelt-{}-{}-{}.sb",
             pid, timestamp, random_suffix
         );
         let path = temp_dir.join(filename);
-        
+
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&path)
-            .map_err(|e| OpenSkillError::SeatbeltError(format!(
-                "Failed to create seatbelt profile file: {}", e
-            )))?;
-        
-        file.write_all(profile.as_bytes()).map_err(OpenSkillError::Io)?;
+            .map_err(|e| {
+                OpenSkillError::SeatbeltError(format!(
+                    "Failed to create seatbelt profile file: {}",
+                    e
+                ))
+            })?;
+
+        file.write_all(profile.as_bytes())
+            .map_err(OpenSkillError::Io)?;
         file.flush().map_err(OpenSkillError::Io)?;
-        
+
         Ok(path)
     }
 }
@@ -725,8 +736,7 @@ mod linux {
     use std::time::Instant;
 
     use landlock::{
-        Access, AccessFs, PathBeneath, PathFd,
-        Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
+        Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
     };
 
     // System paths that should be readable for interpreter execution
@@ -786,9 +796,7 @@ mod linux {
             .iter()
             .any(|t| t == "WebSearch" || t == "Fetch");
         let _allow_process = script_type == ScriptType::Shell
-            || allowed_tools
-                .iter()
-                .any(|t| t == "Bash" || t == "Terminal");
+            || allowed_tools.iter().any(|t| t == "Bash" || t == "Terminal");
 
         // Canonicalize paths
         let skill_root = skill
@@ -811,8 +819,11 @@ mod linux {
         // Add workspace directory to write paths if configured
         if let Some(workspace) = workspace_dir {
             if workspace.exists() {
-                write_paths
-                    .push(workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf()));
+                write_paths.push(
+                    workspace
+                        .canonicalize()
+                        .unwrap_or_else(|_| workspace.to_path_buf()),
+                );
             } else {
                 // Create workspace if it doesn't exist
                 let _ = std::fs::create_dir_all(workspace);
@@ -820,8 +831,7 @@ mod linux {
             }
         }
 
-        let (program, args) =
-            command_for_script(script_type, script_path, native_config)?;
+        let (program, args) = command_for_script(script_type, script_path, native_config)?;
 
         // --- Collect Landlock path sets ---
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
@@ -889,9 +899,7 @@ mod linux {
         let rw_clone = rw_paths;
         let deny_clone = deny_paths;
         unsafe {
-            cmd.pre_exec(move || {
-                apply_landlock(&ro_clone, &rw_clone, &deny_clone)
-            });
+            cmd.pre_exec(move || apply_landlock(&ro_clone, &rw_clone, &deny_clone));
         }
 
         let mut child = match cmd.spawn() {
@@ -1022,7 +1030,10 @@ mod linux {
             // Add read-only rules (excluding denied paths)
             for path in ro_paths {
                 // Skip if this path overlaps with a deny path
-                if deny_paths.iter().any(|d| path.starts_with(d) || d.starts_with(path)) {
+                if deny_paths
+                    .iter()
+                    .any(|d| path.starts_with(d) || d.starts_with(path))
+                {
                     continue;
                 }
                 if let Ok(fd) = PathFd::new(path) {
@@ -1085,7 +1096,9 @@ mod linux {
                             })
                             .map(|p| p.to_string_lossy().to_string())
                             .ok_or_else(|| {
-                                OpenSkillError::NativeExecutionError("python3 not found".to_string())
+                                OpenSkillError::NativeExecutionError(
+                                    "python3 not found".to_string(),
+                                )
                             })?
                     }
                 } else {
@@ -1101,10 +1114,7 @@ mod linux {
                             OpenSkillError::NativeExecutionError("python3 not found".to_string())
                         })?
                 };
-                Ok((
-                    resolved,
-                    vec![script_path.to_string_lossy().to_string()],
-                ))
+                Ok((resolved, vec![script_path.to_string_lossy().to_string()]))
             }
             ScriptType::Shell => Ok((
                 "/bin/bash".to_string(),
@@ -1168,7 +1178,9 @@ mod linux {
         if script_type == ScriptType::Python {
             cmd.env("PYTHONUNBUFFERED", "1");
             cmd.env("PYTHONDONTWRITEBYTECODE", "1");
-            let allow_user_site = native_config.map(|c| c.python_allow_user_site).unwrap_or(false);
+            let allow_user_site = native_config
+                .map(|c| c.python_allow_user_site)
+                .unwrap_or(false);
             if !allow_user_site {
                 cmd.env("PYTHONNOUSERSITE", "1");
             }

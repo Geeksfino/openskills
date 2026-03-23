@@ -38,9 +38,9 @@ impl QuickJsBuildPlugin {
         if verbose {
             eprintln!("Running: {:?}", command);
         }
-        let status = command.status().map_err(|e| {
-            OpenSkillError::BuildError(format!("Failed to run {}: {}", label, e))
-        })?;
+        let status = command
+            .status()
+            .map_err(|e| OpenSkillError::BuildError(format!("Failed to run {}: {}", label, e)))?;
         if !status.success() {
             return Err(OpenSkillError::BuildError(format!(
                 "{} failed with exit code {:?}",
@@ -130,10 +130,7 @@ impl BuildPlugin for QuickJsBuildPlugin {
             .arg("new")
             .arg(&core_wasm)
             .arg("--adapt")
-            .arg(format!(
-                "wasi_snapshot_preview1={}",
-                adapter_path.display()
-            ))
+            .arg(format!("wasi_snapshot_preview1={}", adapter_path.display()))
             .arg("-o")
             .arg(output_wasm);
         self.run_command("wasm-tools component new", wasm_tools_cmd, config.verbose)?;

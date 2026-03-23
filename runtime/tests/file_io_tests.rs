@@ -31,7 +31,11 @@ Read helper.md for more info.
     .unwrap();
 
     // Create a helper file
-    fs::write(skill_dir.join("helper.md"), "# Helper Documentation\n\nThis is helper content.").unwrap();
+    fs::write(
+        skill_dir.join("helper.md"),
+        "# Helper Documentation\n\nThis is helper content.",
+    )
+    .unwrap();
 
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
     runtime.discover_skills().unwrap();
@@ -59,12 +63,18 @@ description: Skill with subdirectory.
     )
     .unwrap();
 
-    fs::write(skill_dir.join("docs").join("guide.md"), "# Guide\n\nDetailed guide content.").unwrap();
+    fs::write(
+        skill_dir.join("docs").join("guide.md"),
+        "# Guide\n\nDetailed guide content.",
+    )
+    .unwrap();
 
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
     runtime.discover_skills().unwrap();
 
-    let content = runtime.read_skill_file("subdir-skill", "docs/guide.md").unwrap();
+    let content = runtime
+        .read_skill_file("subdir-skill", "docs/guide.md")
+        .unwrap();
 
     assert!(content.contains("Detailed guide content"));
 }
@@ -226,7 +236,9 @@ description: Skill with subdirs.
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
     runtime.discover_skills().unwrap();
 
-    let files = runtime.list_skill_files("recursive-skill", None, true).unwrap();
+    let files = runtime
+        .list_skill_files("recursive-skill", None, true)
+        .unwrap();
 
     // Should include files from subdirectories
     assert!(
@@ -256,8 +268,16 @@ description: Test subdir listing.
     )
     .unwrap();
 
-    fs::write(skill_dir.join("examples").join("example1.js"), "// example 1").unwrap();
-    fs::write(skill_dir.join("examples").join("example2.js"), "// example 2").unwrap();
+    fs::write(
+        skill_dir.join("examples").join("example1.js"),
+        "// example 1",
+    )
+    .unwrap();
+    fs::write(
+        skill_dir.join("examples").join("example2.js"),
+        "// example 2",
+    )
+    .unwrap();
     fs::write(skill_dir.join("other.txt"), "other file").unwrap();
 
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
@@ -293,7 +313,9 @@ description: Minimal skill.
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
     runtime.discover_skills().unwrap();
 
-    let files = runtime.list_skill_files("minimal-skill", None, false).unwrap();
+    let files = runtime
+        .list_skill_files("minimal-skill", None, false)
+        .unwrap();
 
     // Should only have SKILL.md
     assert_eq!(files.len(), 1);

@@ -76,7 +76,10 @@ impl std::fmt::Debug for PermissionManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PermissionManager")
             .field("has_callback", &self.callback.is_some())
-            .field("always_allowed_count", &self.always_allowed.lock().unwrap().len())
+            .field(
+                "always_allowed_count",
+                &self.always_allowed.lock().unwrap().len(),
+            )
             .field("audit_log_count", &self.audit_log.lock().unwrap().len())
             .finish()
     }
@@ -237,9 +240,9 @@ impl PermissionCallback for CliPermissionCallback {
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
-        io::stdin().read_line(&mut input).map_err(|e| {
-            OpenSkillError::PermissionDenied(format!("Failed to read input: {e}"))
-        })?;
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| OpenSkillError::PermissionDenied(format!("Failed to read input: {e}")))?;
 
         match input.trim() {
             "1" => Ok(PermissionResponse::AllowOnce),

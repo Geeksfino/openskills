@@ -92,11 +92,9 @@ impl HookRunner {
                     .filter(|entry| {
                         match (&entry.matcher, tool_name) {
                             (None, _) => true, // No matcher = match all
-                            (Some(pattern), Some(name)) => {
-                                Pattern::new(pattern)
-                                    .map(|p| p.matches(name))
-                                    .unwrap_or(false)
-                            }
+                            (Some(pattern), Some(name)) => Pattern::new(pattern)
+                                .map(|p| p.matches(name))
+                                .unwrap_or(false),
                             (Some(_), None) => true, // Stop events match all
                         }
                     })

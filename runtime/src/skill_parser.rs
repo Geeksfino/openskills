@@ -56,9 +56,8 @@ pub fn parse_skill_md(content: &str) -> Result<ParsedSkillMd, OpenSkillError> {
     };
 
     // Parse YAML frontmatter
-    let manifest: SkillManifest = serde_yaml::from_str(yaml_content).map_err(|e| {
-        OpenSkillError::InvalidManifest(format!("Invalid YAML frontmatter: {e}"))
-    })?;
+    let manifest: SkillManifest = serde_yaml::from_str(yaml_content)
+        .map_err(|e| OpenSkillError::InvalidManifest(format!("Invalid YAML frontmatter: {e}")))?;
 
     Ok(ParsedSkillMd {
         manifest,
@@ -93,9 +92,8 @@ pub fn parse_frontmatter_only(content: &str) -> Result<SkillManifest, OpenSkillE
     let yaml_content = &after_first[..closing_idx].trim();
 
     // Parse YAML frontmatter only
-    let manifest: SkillManifest = serde_yaml::from_str(yaml_content).map_err(|e| {
-        OpenSkillError::InvalidManifest(format!("Invalid YAML frontmatter: {e}"))
-    })?;
+    let manifest: SkillManifest = serde_yaml::from_str(yaml_content)
+        .map_err(|e| OpenSkillError::InvalidManifest(format!("Invalid YAML frontmatter: {e}")))?;
 
     Ok(manifest)
 }
@@ -117,7 +115,10 @@ Follow these steps...
 "#;
         let parsed = parse_skill_md(content).unwrap();
         assert_eq!(parsed.manifest.name, "test-skill");
-        assert_eq!(parsed.manifest.description, "A test skill for unit testing.");
+        assert_eq!(
+            parsed.manifest.description,
+            "A test skill for unit testing."
+        );
         assert!(parsed.instructions.contains("# Instructions"));
     }
 

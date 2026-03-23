@@ -3,7 +3,9 @@
 //! Tests for host policy configuration, tool permission checking,
 //! and permission callback modes.
 
-use openskills_runtime::{OpenSkillRuntime, Fallback, HostPolicy, PermissionsConfig, is_risky_tool};
+use openskills_runtime::{
+    is_risky_tool, Fallback, HostPolicy, OpenSkillRuntime, PermissionsConfig,
+};
 use std::collections::HashMap;
 use std::fs;
 use tempfile::TempDir;
@@ -43,12 +45,7 @@ fn test_check_tool_allowed_by_skill() {
     runtime.discover_skills().unwrap();
 
     // Read is in allowed-tools
-    let result = runtime.check_tool_permission(
-        "read-skill",
-        "Read",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("read-skill", "Read", None, HashMap::new());
 
     assert!(result.is_ok(), "Read should be allowed");
 }
@@ -62,15 +59,13 @@ fn test_check_tool_not_in_allowed_tools() {
     runtime.discover_skills().unwrap();
 
     // Write is NOT in allowed-tools
-    let result = runtime.check_tool_permission(
-        "limited-skill",
-        "Write",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("limited-skill", "Write", None, HashMap::new());
 
     // Should be denied (not in skill's allowed-tools)
-    assert!(result.is_err(), "Write should be denied - not in allowed-tools");
+    assert!(
+        result.is_err(),
+        "Write should be denied - not in allowed-tools"
+    );
 }
 
 #[test]
@@ -92,12 +87,7 @@ description: Skill with no allowed tools specified.
     runtime.discover_skills().unwrap();
 
     // When allowed-tools is empty/not specified, behavior depends on host policy
-    let result = runtime.check_tool_permission(
-        "no-tools-skill",
-        "Read",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("no-tools-skill", "Read", None, HashMap::new());
 
     // Result depends on default host policy
     assert!(result.is_ok() || result.is_err());
@@ -125,14 +115,12 @@ fn test_host_policy_deny_list() {
     runtime.set_host_policy(policy);
 
     // Bash should be denied even though it's in skill's allowed-tools
-    let result = runtime.check_tool_permission(
-        "policy-skill",
-        "Bash",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("policy-skill", "Bash", None, HashMap::new());
 
-    assert!(result.is_err(), "Bash should be denied by host policy deny list");
+    assert!(
+        result.is_err(),
+        "Bash should be denied by host policy deny list"
+    );
 }
 
 #[test]
@@ -153,14 +141,12 @@ fn test_host_policy_allow_list() {
     runtime.set_host_policy(policy);
 
     // Write should be allowed by host policy even if skill doesn't list it
-    let result = runtime.check_tool_permission(
-        "policy-skill",
-        "Write",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("policy-skill", "Write", None, HashMap::new());
 
-    assert!(result.is_ok(), "Write should be allowed by host policy allow list");
+    assert!(
+        result.is_ok(),
+        "Write should be allowed by host policy allow list"
+    );
 }
 
 #[test]
@@ -180,12 +166,7 @@ fn test_host_policy_trust_skill_true() {
     });
     runtime.set_host_policy(policy);
 
-    let result = runtime.check_tool_permission(
-        "trusted-skill",
-        "Read",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("trusted-skill", "Read", None, HashMap::new());
 
     assert!(result.is_ok(), "Read should be allowed when trusting skill");
 }
@@ -207,15 +188,13 @@ fn test_host_policy_trust_skill_false() {
     });
     runtime.set_host_policy(policy);
 
-    let result = runtime.check_tool_permission(
-        "untrusted-skill",
-        "Read",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("untrusted-skill", "Read", None, HashMap::new());
 
     // Read is in skill's list but trust=false, so fallback applies
-    assert!(result.is_err(), "Read should be denied when not trusting skill");
+    assert!(
+        result.is_err(),
+        "Read should be denied when not trusting skill"
+    );
 }
 
 #[test]
@@ -235,12 +214,7 @@ fn test_host_policy_fallback_deny() {
     runtime.set_host_policy(policy);
 
     // Tool not in skill's allowed-tools, should hit fallback
-    let result = runtime.check_tool_permission(
-        "fallback-skill",
-        "Execute",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("fallback-skill", "Execute", None, HashMap::new());
 
     assert!(result.is_err(), "Unknown tool should be denied by fallback");
 }
@@ -262,12 +236,8 @@ fn test_host_policy_fallback_allow() {
     runtime.set_host_policy(policy);
 
     // Tool not in skill's allowed-tools, but fallback is allow
-    let result = runtime.check_tool_permission(
-        "permissive-skill",
-        "SomeRandomTool",
-        None,
-        HashMap::new(),
-    );
+    let result =
+        runtime.check_tool_permission("permissive-skill", "SomeRandomTool", None, HashMap::new());
 
     assert!(result.is_ok(), "Unknown tool should be allowed by fallback");
 }
@@ -293,12 +263,7 @@ fn test_permission_mode_deny_all_via_policy() {
     });
     runtime.set_host_policy(policy);
 
-    let result = runtime.check_tool_permission(
-        "mode-skill",
-        "Read",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("mode-skill", "Read", None, HashMap::new());
 
     // Should be denied since we don't trust skill's allowed-tools and fallback is deny
     assert!(result.is_err(), "Should be denied in deny-all mode");
@@ -321,12 +286,7 @@ fn test_permission_mode_allow_all_via_policy() {
     });
     runtime.set_host_policy(policy);
 
-    let result = runtime.check_tool_permission(
-        "mode-skill",
-        "AnyTool",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("mode-skill", "AnyTool", None, HashMap::new());
 
     // Should be allowed since fallback is allow
     assert!(result.is_ok(), "Should be allowed in allow-all mode");
@@ -363,7 +323,10 @@ fn test_is_risky_tool_grep() {
 
 #[test]
 fn test_is_risky_tool_list() {
-    assert!(!is_risky_tool("LS") && !is_risky_tool("Glob"), "List/Glob should not be risky");
+    assert!(
+        !is_risky_tool("LS") && !is_risky_tool("Glob"),
+        "List/Glob should not be risky"
+    );
 }
 
 // =============================================================================
@@ -375,8 +338,7 @@ fn test_with_strict_permissions() {
     let temp_dir = TempDir::new().unwrap();
     create_skill_with_allowed_tools(&temp_dir, "strict-skill", "Read, Write");
 
-    let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path())
-        .with_strict_permissions();
+    let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path()).with_strict_permissions();
     runtime.discover_skills().unwrap();
 
     // In strict mode, even allowed tools may be denied
@@ -412,12 +374,7 @@ fn test_policy_priority_deny_overrides_allow() {
     });
     runtime.set_host_policy(policy);
 
-    let result = runtime.check_tool_permission(
-        "priority-skill",
-        "Read",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("priority-skill", "Read", None, HashMap::new());
 
     assert!(result.is_err(), "Deny should override allow");
 }
@@ -432,12 +389,7 @@ fn test_check_permission_skill_not_found() {
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
     runtime.discover_skills().unwrap();
 
-    let result = runtime.check_tool_permission(
-        "nonexistent-skill",
-        "Read",
-        None,
-        HashMap::new(),
-    );
+    let result = runtime.check_tool_permission("nonexistent-skill", "Read", None, HashMap::new());
 
     assert!(result.is_err(), "Should error for nonexistent skill");
 }
@@ -455,13 +407,19 @@ fn test_check_multiple_tools_same_skill() {
     runtime.discover_skills().unwrap();
 
     // Check multiple tools
-    let read_result = runtime.check_tool_permission("multi-tool-skill", "Read", None, HashMap::new());
-    let grep_result = runtime.check_tool_permission("multi-tool-skill", "Grep", None, HashMap::new());
+    let read_result =
+        runtime.check_tool_permission("multi-tool-skill", "Read", None, HashMap::new());
+    let grep_result =
+        runtime.check_tool_permission("multi-tool-skill", "Grep", None, HashMap::new());
     let ls_result = runtime.check_tool_permission("multi-tool-skill", "LS", None, HashMap::new());
-    let write_result = runtime.check_tool_permission("multi-tool-skill", "Write", None, HashMap::new());
+    let write_result =
+        runtime.check_tool_permission("multi-tool-skill", "Write", None, HashMap::new());
 
     assert!(read_result.is_ok(), "Read should be allowed");
     assert!(grep_result.is_ok(), "Grep should be allowed");
     assert!(ls_result.is_ok(), "LS should be allowed");
-    assert!(write_result.is_err(), "Write should be denied - not in allowed-tools");
+    assert!(
+        write_result.is_err(),
+        "Write should be denied - not in allowed-tools"
+    );
 }
