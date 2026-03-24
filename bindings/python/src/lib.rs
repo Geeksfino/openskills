@@ -77,6 +77,7 @@ impl OpenSkillRuntimeWrapper {
             use_standard_locations,
             project_root: project_root.map(PathBuf::from),
             workspace_dir: None,
+            native_runner_config: None,
         };
         Self {
             inner: Mutex::new(OpenSkillRuntime::from_config(config)),
