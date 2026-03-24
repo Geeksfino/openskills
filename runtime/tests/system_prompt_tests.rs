@@ -326,7 +326,9 @@ description: Test.
 
     // Should include code generation guidance
     assert!(
-        prompt.contains("Code Generation") || prompt.contains("CommonJS") || prompt.contains("ES modules"),
+        prompt.contains("Code Generation")
+            || prompt.contains("CommonJS")
+            || prompt.contains("ES modules"),
         "Should include code generation instructions"
     );
 }
@@ -451,7 +453,9 @@ description: Test.
 
     // Should include file output guidance
     assert!(
-        prompt.contains("File Output") || prompt.contains("list_workspace_files") || prompt.contains("get_file_info"),
+        prompt.contains("File Output")
+            || prompt.contains("list_workspace_files")
+            || prompt.contains("get_file_info"),
         "Should include file output instructions"
     );
 }

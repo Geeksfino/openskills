@@ -169,7 +169,10 @@ mod tests {
     fn deny_override_wins_over_everything() {
         // Tool in both deny and allow → denied (step 1 beats step 2)
         let p = policy(true, Fallback::Allow, vec!["Bash"], vec!["Bash"]);
-        assert_eq!(p.resolve_tool("Bash", &tools(&["Bash"])), ToolDecision::Denied);
+        assert_eq!(
+            p.resolve_tool("Bash", &tools(&["Bash"])),
+            ToolDecision::Denied
+        );
     }
 
     #[test]
@@ -181,14 +184,20 @@ mod tests {
     #[test]
     fn trust_approves_skill_allowed_tools() {
         let p = policy(true, Fallback::Deny, vec![], vec![]);
-        assert_eq!(p.resolve_tool("Read", &tools(&["Read", "Grep"])), ToolDecision::Approved);
+        assert_eq!(
+            p.resolve_tool("Read", &tools(&["Read", "Grep"])),
+            ToolDecision::Approved
+        );
     }
 
     #[test]
     fn trust_false_skips_step3() {
         let p = policy(false, Fallback::Deny, vec![], vec![]);
         // Even though Read is in allowed-tools, trust=false means step 3 is skipped
-        assert_eq!(p.resolve_tool("Read", &tools(&["Read"])), ToolDecision::Denied);
+        assert_eq!(
+            p.resolve_tool("Read", &tools(&["Read"])),
+            ToolDecision::Denied
+        );
     }
 
     #[test]
@@ -201,34 +210,51 @@ mod tests {
     #[test]
     fn fallback_allow() {
         let p = policy(true, Fallback::Allow, vec![], vec![]);
-        assert_eq!(p.resolve_tool("Unknown", &tools(&["Read"])), ToolDecision::Approved);
+        assert_eq!(
+            p.resolve_tool("Unknown", &tools(&["Read"])),
+            ToolDecision::Approved
+        );
     }
 
     #[test]
     fn fallback_deny() {
         let p = policy(true, Fallback::Deny, vec![], vec![]);
-        assert_eq!(p.resolve_tool("Unknown", &tools(&["Read"])), ToolDecision::Denied);
+        assert_eq!(
+            p.resolve_tool("Unknown", &tools(&["Read"])),
+            ToolDecision::Denied
+        );
     }
 
     #[test]
     fn fallback_prompt() {
         let p = policy(true, Fallback::Prompt, vec![], vec![]);
-        assert_eq!(p.resolve_tool("Unknown", &tools(&["Read"])), ToolDecision::Prompt);
+        assert_eq!(
+            p.resolve_tool("Unknown", &tools(&["Read"])),
+            ToolDecision::Prompt
+        );
     }
 
     #[test]
     fn deny_override_blocks_skill_declared_tool() {
         let p = policy(true, Fallback::Allow, vec!["Bash"], vec![]);
         // Bash is in skill's allowed-tools but denied by host
-        assert_eq!(p.resolve_tool("Bash", &tools(&["Read", "Bash"])), ToolDecision::Denied);
+        assert_eq!(
+            p.resolve_tool("Bash", &tools(&["Read", "Bash"])),
+            ToolDecision::Denied
+        );
     }
 
     #[test]
     fn default_policy() {
         let p = HostPolicy::default();
         // Default: trust=true, fallback=deny, no overrides
-        assert_eq!(p.resolve_tool("Read", &tools(&["Read"])), ToolDecision::Approved);
-        assert_eq!(p.resolve_tool("Write", &tools(&["Read"])), ToolDecision::Denied);
+        assert_eq!(
+            p.resolve_tool("Read", &tools(&["Read"])),
+            ToolDecision::Approved
+        );
+        assert_eq!(
+            p.resolve_tool("Write", &tools(&["Read"])),
+            ToolDecision::Denied
+        );
     }
-
 }

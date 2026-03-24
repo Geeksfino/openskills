@@ -1,6 +1,6 @@
-use sha2::{Digest, Sha256};
-use serde_json::Value;
 use crate::errors::OpenSkillError;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
 pub enum ExecutionStatus {
@@ -35,8 +35,9 @@ impl AuditSink for NoopAuditSink {
 }
 
 pub fn hash_json(value: &Value) -> Result<String, OpenSkillError> {
-    let bytes = serde_json::to_vec(value)
-        .map_err(|e| OpenSkillError::InvalidManifest(format!("Failed to serialize value for hashing: {}", e)))?;
+    let bytes = serde_json::to_vec(value).map_err(|e| {
+        OpenSkillError::InvalidManifest(format!("Failed to serialize value for hashing: {}", e))
+    })?;
     Ok(hash_bytes(&bytes))
 }
 

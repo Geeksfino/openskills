@@ -72,15 +72,10 @@ pub enum ExecutionTarget {
     },
     /// Run a specific script (relative path within skill directory).
     /// Deprecated: Use `Path` instead for transparent sandbox selection.
-    Script {
-        path: String,
-        args: Vec<String>,
-    },
+    Script { path: String, args: Vec<String> },
     /// Run a specific WASM module (relative path within skill directory).
     /// Deprecated: Use `Path` instead for transparent sandbox selection.
-    Wasm {
-        path: String,
-    },
+    Wasm { path: String },
 }
 
 impl Default for ExecutionTarget {
@@ -116,8 +111,13 @@ pub struct TargetExecutionOptions {
 
 #[derive(Debug)]
 enum ExecutionMode {
-    Wasm { wasm_module: String },
-    Native { script_path: PathBuf, script_type: ScriptType },
+    Wasm {
+        wasm_module: String,
+    },
+    Native {
+        script_path: PathBuf,
+        script_type: ScriptType,
+    },
 }
 
 /// Execute a skill's WASM module or native script in a sandbox.
@@ -308,7 +308,7 @@ pub fn run_skill_target(
                     e
                 ))
             })?;
-            
+
             // Check if path exists before canonicalization to avoid race conditions
             if !full_path.exists() {
                 return Err(OpenSkillError::NativeExecutionError(format!(
@@ -316,14 +316,14 @@ pub fn run_skill_target(
                     full_path.display()
                 )));
             }
-            
+
             let canonical_file = full_path.canonicalize().map_err(|e| {
                 OpenSkillError::NativeExecutionError(format!(
                     "Failed to canonicalize file path: {}",
                     e
                 ))
             })?;
-            
+
             // Use proper path comparison that handles edge cases
             if !canonical_file.starts_with(&canonical_skill) {
                 return Err(OpenSkillError::NativeExecutionError(format!(
@@ -358,9 +358,10 @@ pub fn run_skill_target(
                         Value::Object(map) => map,
                         _ => serde_json::Map::new(),
                     };
-                    obj.insert("args".to_string(), Value::Array(
-                        args.iter().map(|a| Value::String(a.clone())).collect()
-                    ));
+                    obj.insert(
+                        "args".to_string(),
+                        Value::Array(args.iter().map(|a| Value::String(a.clone())).collect()),
+                    );
                     Value::Object(obj)
                 };
                 execute_native(
@@ -393,7 +394,7 @@ pub fn run_skill_target(
                     e
                 ))
             })?;
-            
+
             // Verify script exists before canonicalization
             if !script_path.exists() {
                 return Err(OpenSkillError::NativeExecutionError(format!(
@@ -401,14 +402,14 @@ pub fn run_skill_target(
                     script_path.display()
                 )));
             }
-            
+
             let canonical_script = script_path.canonicalize().map_err(|e| {
                 OpenSkillError::NativeExecutionError(format!(
                     "Failed to canonicalize script path: {}",
                     e
                 ))
             })?;
-            
+
             // Use proper path comparison that handles edge cases
             if !canonical_script.starts_with(&canonical_skill) {
                 return Err(OpenSkillError::NativeExecutionError(format!(
@@ -427,9 +428,10 @@ pub fn run_skill_target(
                     Value::Object(map) => map,
                     _ => serde_json::Map::new(),
                 };
-                obj.insert("args".to_string(), Value::Array(
-                    args.iter().map(|a| Value::String(a.clone())).collect()
-                ));
+                obj.insert(
+                    "args".to_string(),
+                    Value::Array(args.iter().map(|a| Value::String(a.clone())).collect()),
+                );
                 Value::Object(obj)
             };
 
@@ -457,16 +459,10 @@ pub fn run_skill_target(
 
             // Validate WASM is within skill directory (security)
             let canonical_skill = skill.root.canonicalize().map_err(|e| {
-                OpenSkillError::WasmError(format!(
-                    "Failed to canonicalize skill root: {}",
-                    e
-                ))
+                OpenSkillError::WasmError(format!("Failed to canonicalize skill root: {}", e))
             })?;
             let canonical_wasm = wasm_path.canonicalize().map_err(|e| {
-                OpenSkillError::WasmError(format!(
-                    "Failed to canonicalize WASM path: {}",
-                    e
-                ))
+                OpenSkillError::WasmError(format!("Failed to canonicalize WASM path: {}", e))
             })?;
             if !canonical_wasm.starts_with(&canonical_skill) {
                 return Err(OpenSkillError::WasmError(format!(
@@ -504,10 +500,7 @@ pub fn read_skill_file(skill_root: &Path, relative_path: &str) -> Result<String,
 
     // Validate path is within skill directory
     let canonical_skill = skill_root.canonicalize().map_err(|e| {
-        OpenSkillError::NativeExecutionError(format!(
-            "Failed to canonicalize skill root: {}",
-            e
-        ))
+        OpenSkillError::NativeExecutionError(format!("Failed to canonicalize skill root: {}", e))
     })?;
     let canonical_file = file_path.canonicalize().map_err(|e| {
         OpenSkillError::NativeExecutionError(format!(
@@ -558,10 +551,7 @@ pub fn list_skill_files(
             ))
         })?;
         let canonical_sub = base_path.canonicalize().map_err(|e| {
-            OpenSkillError::NativeExecutionError(format!(
-                "Subdirectory not found: {} ({})",
-                sub, e
-            ))
+            OpenSkillError::NativeExecutionError(format!("Subdirectory not found: {} ({})", sub, e))
         })?;
         if !canonical_sub.starts_with(&canonical_skill) {
             return Err(OpenSkillError::NativeExecutionError(format!(
@@ -638,12 +628,7 @@ fn detect_execution_mode(
 /// Find a WASM module in the skill directory.
 fn find_wasm_module(skill_root: &PathBuf) -> Option<String> {
     // Look for common patterns
-    let candidates = [
-        "skill.wasm",
-        "wasm/skill.wasm",
-        "module.wasm",
-        "main.wasm",
-    ];
+    let candidates = ["skill.wasm", "wasm/skill.wasm", "module.wasm", "main.wasm"];
 
     for candidate in candidates {
         if skill_root.join(candidate).exists() {
@@ -693,7 +678,11 @@ fn find_native_script(skill_root: &PathBuf) -> Option<PathBuf> {
         }
     }
 
-    for dir in [skill_root.to_path_buf(), skill_root.join("src"), skill_root.join("scripts")] {
+    for dir in [
+        skill_root.to_path_buf(),
+        skill_root.join("src"),
+        skill_root.join("scripts"),
+    ] {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -803,10 +792,7 @@ pub fn run_sandboxed_command(
     })?;
 
     // Build seatbelt profile
-    let profile = build_command_seatbelt_profile(
-        &canonical_working_dir,
-        &permissions,
-    );
+    let profile = build_command_seatbelt_profile(&canonical_working_dir, &permissions);
 
     // Write profile to temp file
     let profile_path = write_temp_profile(&profile)?;
@@ -829,7 +815,10 @@ pub fn run_sandboxed_command(
     if let Ok(path) = std::env::var("PATH") {
         cmd.env("PATH", path);
     } else {
-        cmd.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin");
+        cmd.env(
+            "PATH",
+            "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
+        );
     }
     if let Ok(lang) = std::env::var("LANG") {
         cmd.env("LANG", lang);
@@ -856,12 +845,16 @@ pub fn run_sandboxed_command(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let stdout_handle = thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stdout)))
-            .unwrap_or_else(|_| String::new())
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            read_stream_to_string(stdout)
+        }))
+        .unwrap_or_else(|_| String::new())
     });
     let stderr_handle = thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stderr)))
-            .unwrap_or_else(|_| String::new())
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            read_stream_to_string(stderr)
+        }))
+        .unwrap_or_else(|_| String::new())
     });
 
     // Wait with timeout
@@ -953,7 +946,10 @@ fn run_command_fallback(
     if let Ok(path) = std::env::var("PATH") {
         cmd.env("PATH", path);
     } else {
-        cmd.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin");
+        cmd.env(
+            "PATH",
+            "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
+        );
     }
     if let Ok(lang) = std::env::var("LANG") {
         cmd.env("LANG", lang);
@@ -968,22 +964,23 @@ fn run_command_fallback(
 
     // Spawn the process
     let mut child = cmd.spawn().map_err(|e| {
-        OpenSkillError::NativeExecutionError(format!(
-            "Failed to execute command: {}",
-            e
-        ))
+        OpenSkillError::NativeExecutionError(format!("Failed to execute command: {}", e))
     })?;
 
     // Read stdout/stderr
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let stdout_handle = thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stdout)))
-            .unwrap_or_else(|_| String::new())
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            read_stream_to_string(stdout)
+        }))
+        .unwrap_or_else(|_| String::new())
     });
     let stderr_handle = thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stderr)))
-            .unwrap_or_else(|_| String::new())
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            read_stream_to_string(stderr)
+        }))
+        .unwrap_or_else(|_| String::new())
     });
 
     // Wait with timeout
@@ -1024,10 +1021,7 @@ fn run_command_fallback(
 }
 
 #[cfg(target_os = "macos")]
-fn build_command_seatbelt_profile(
-    working_dir: &Path,
-    permissions: &CommandPermissions,
-) -> String {
+fn build_command_seatbelt_profile(working_dir: &Path, permissions: &CommandPermissions) -> String {
     let mut profile = String::from("(version 1)\n(deny default)\n");
 
     // Basic system access for running shell commands
@@ -1066,7 +1060,12 @@ fn build_command_seatbelt_profile(
     }
 
     // Temp directories - read and write
-    let temp_paths = ["/tmp", "/private/tmp", "/private/var/tmp", "/private/var/folders"];
+    let temp_paths = [
+        "/tmp",
+        "/private/tmp",
+        "/private/var/tmp",
+        "/private/var/folders",
+    ];
     for path in temp_paths {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
@@ -1135,25 +1134,26 @@ fn escape_seatbelt_path(path: &str) -> String {
 #[cfg(target_os = "macos")]
 fn write_temp_profile(profile: &str) -> Result<PathBuf, OpenSkillError> {
     use std::io::Write;
-    
+
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
     let pid = std::process::id();
     let random_suffix = rand::random::<u32>();
-    let path = std::env::temp_dir().join(format!("openskills_cmd_{}_{}_{}.sb", pid, timestamp, random_suffix));
-    
+    let path = std::env::temp_dir().join(format!(
+        "openskills_cmd_{}_{}_{}.sb",
+        pid, timestamp, random_suffix
+    ));
+
     let mut file = std::fs::File::create(&path).map_err(|e| {
         OpenSkillError::SeatbeltError(format!("Failed to create profile file: {}", e))
     })?;
-    file.write_all(profile.as_bytes()).map_err(|e| {
-        OpenSkillError::SeatbeltError(format!("Failed to write profile: {}", e))
-    })?;
-    file.flush().map_err(|e| {
-        OpenSkillError::SeatbeltError(format!("Failed to flush profile: {}", e))
-    })?;
-    
+    file.write_all(profile.as_bytes())
+        .map_err(|e| OpenSkillError::SeatbeltError(format!("Failed to write profile: {}", e)))?;
+    file.flush()
+        .map_err(|e| OpenSkillError::SeatbeltError(format!("Failed to flush profile: {}", e)))?;
+
     Ok(path)
 }
 
@@ -1205,8 +1205,7 @@ pub fn run_sandboxed_command(
     use std::time::Instant;
 
     use landlock::{
-        Access, AccessFs, PathBeneath, PathFd,
-        Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
+        Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
     };
 
     // Validate working directory exists
@@ -1227,11 +1226,22 @@ pub fn run_sandboxed_command(
     // --- Collect Landlock path sets ---
     // System paths needed for basic command execution
     let system_ro_paths: &[&str] = &[
-        "/usr/lib", "/usr/lib64", "/usr/libexec",
-        "/usr/bin", "/usr/sbin", "/usr/share", "/usr/local",
-        "/bin", "/sbin", "/lib", "/lib64",
-        "/etc", "/proc/self",
-        "/dev/null", "/dev/urandom", "/dev/zero",
+        "/usr/lib",
+        "/usr/lib64",
+        "/usr/libexec",
+        "/usr/bin",
+        "/usr/sbin",
+        "/usr/share",
+        "/usr/local",
+        "/bin",
+        "/sbin",
+        "/lib",
+        "/lib64",
+        "/etc",
+        "/proc/self",
+        "/dev/null",
+        "/dev/urandom",
+        "/dev/zero",
     ];
 
     let mut ro_paths: Vec<PathBuf> = system_ro_paths
@@ -1246,10 +1256,7 @@ pub fn run_sandboxed_command(
         }
     }
 
-    let mut rw_paths: Vec<PathBuf> = vec![
-        PathBuf::from("/tmp"),
-        PathBuf::from("/var/tmp"),
-    ];
+    let mut rw_paths: Vec<PathBuf> = vec![PathBuf::from("/tmp"), PathBuf::from("/var/tmp")];
     for p in &permissions.write_paths {
         if !rw_paths.contains(p) {
             rw_paths.push(p.clone());
@@ -1296,13 +1303,15 @@ pub fn run_sandboxed_command(
 
                 for path in &ro_clone {
                     if let Ok(fd) = PathFd::new(path) {
-                        ruleset = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)))?;
+                        ruleset =
+                            ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_read(abi)))?;
                     }
                 }
 
                 for path in &rw_clone {
                     if let Ok(fd) = PathFd::new(path) {
-                        ruleset = ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)))?;
+                        ruleset =
+                            ruleset.add_rule(PathBeneath::new(fd, AccessFs::from_all(abi)))?;
                     }
                 }
 
@@ -1335,12 +1344,16 @@ pub fn run_sandboxed_command(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let stdout_handle = thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stdout)))
-            .unwrap_or_else(|_| String::new())
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            read_stream_to_string(stdout)
+        }))
+        .unwrap_or_else(|_| String::new())
     });
     let stderr_handle = thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stderr)))
-            .unwrap_or_else(|_| String::new())
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            read_stream_to_string(stderr)
+        }))
+        .unwrap_or_else(|_| String::new())
     });
 
     // Wait with timeout

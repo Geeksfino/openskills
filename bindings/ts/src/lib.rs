@@ -1,10 +1,10 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use openskills_runtime::{
-    CliPermissionCallback, CommandPermissions, DenyAllCallback, ExecutionContext, ExecutionOptions,
-    ExecutionTarget, Fallback, HostPolicy, OpenSkillRuntime, OutputType, PermissionCallback,
-    PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
-    run_sandboxed_command,
+    run_sandboxed_command, CliPermissionCallback, CommandPermissions, DenyAllCallback,
+    ExecutionContext, ExecutionOptions, ExecutionTarget, Fallback, HostPolicy, OpenSkillRuntime,
+    OutputType, PermissionCallback, PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus,
+    SkillExecutionSession, SkillLocation,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -151,11 +151,9 @@ fn parse_execution_status(status: Option<String>) -> openskills_runtime::Runtime
     match status.as_deref() {
         Some("timeout") => openskills_runtime::RuntimeExecutionStatus::Timeout,
         Some("permission_denied") => openskills_runtime::RuntimeExecutionStatus::PermissionDenied,
-        Some(s) if s.starts_with("failed:") => {
-            openskills_runtime::RuntimeExecutionStatus::Failed(
-                s.trim_start_matches("failed:").to_string(),
-            )
-        }
+        Some(s) if s.starts_with("failed:") => openskills_runtime::RuntimeExecutionStatus::Failed(
+            s.trim_start_matches("failed:").to_string(),
+        ),
         _ => openskills_runtime::RuntimeExecutionStatus::Success,
     }
 }
@@ -273,11 +271,7 @@ impl ExecutionContextWrapper {
 
     #[napi]
     pub fn summary(&self) -> Option<String> {
-        self.inner
-            .lock()
-            .unwrap()
-            .summary()
-            .map(|s| s.to_string())
+        self.inner.lock().unwrap().summary().map(|s| s.to_string())
     }
 
     #[napi]
@@ -332,10 +326,7 @@ impl OpenSkillRuntimeWrapper {
         project_root: Option<String>,
     ) -> Self {
         let config = RuntimeConfig {
-            custom_directories: custom_directories
-                .into_iter()
-                .map(|s| s.into())
-                .collect(),
+            custom_directories: custom_directories.into_iter().map(|s| s.into()).collect(),
             use_standard_locations: use_standard_locations.unwrap_or(true),
             project_root: project_root.map(|s| s.into()),
             workspace_dir: None,
@@ -344,7 +335,6 @@ impl OpenSkillRuntimeWrapper {
             inner: Mutex::new(OpenSkillRuntime::from_config(config)),
         }
     }
-
 
     /// Discover skills from standard locations (~/.claude/skills/, .claude/skills/, nested)
     #[napi]
@@ -438,10 +428,14 @@ impl OpenSkillRuntimeWrapper {
             bins: r.bins.clone(),
             env: r.env.clone(),
         });
-        let missing_dependencies = loaded.missing_dependencies.as_ref().map(|m| MissingDependenciesJs {
-            bins: m.bins.clone(),
-            env: m.env.clone(),
-        });
+        let missing_dependencies =
+            loaded
+                .missing_dependencies
+                .as_ref()
+                .map(|m| MissingDependenciesJs {
+                    bins: m.bins.clone(),
+                    env: m.env.clone(),
+                });
 
         Ok(LoadedSkillJs {
             id: loaded.id.clone(),
@@ -477,9 +471,7 @@ impl OpenSkillRuntimeWrapper {
             ExecutionOptions {
                 timeout_ms: safe_timeout_ms(opts.timeout_ms),
                 memory_mb: opts.memory_mb.map(|m| if m < 0 { 0 } else { m as u64 }),
-                input: opts.input.and_then(|s| {
-                    serde_json::from_str(&s).ok()
-                }),
+                input: opts.input.and_then(|s| serde_json::from_str(&s).ok()),
             }
         } else {
             ExecutionOptions::default()
@@ -489,8 +481,8 @@ impl OpenSkillRuntimeWrapper {
             .execute_skill(&skill_id, exec_options)
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
-        let output_json = serde_json::to_string(&result.output)
-            .map_err(|e| Error::from_reason(e.to_string()))?;
+        let output_json =
+            serde_json::to_string(&result.output).map_err(|e| Error::from_reason(e.to_string()))?;
 
         let exit_status = match result.audit.exit_status {
             RuntimeExecutionStatus::Success => "success".to_string(),
@@ -530,8 +522,7 @@ impl OpenSkillRuntimeWrapper {
         let input = input_json
             .as_deref()
             .and_then(|s| serde_json::from_str(s).ok());
-        let parent = parent_context
-            .map(|ctx| ctx.inner.lock().unwrap().clone());
+        let parent = parent_context.map(|ctx| ctx.inner.lock().unwrap().clone());
         let parent_ref = parent.as_ref();
 
         let session = runtime
@@ -560,17 +551,11 @@ impl OpenSkillRuntimeWrapper {
 
         let session = session.inner.lock().unwrap();
         let result = runtime
-            .finish_skill_session(
-                session.clone(),
-                output,
-                stdout,
-                stderr,
-                status,
-            )
+            .finish_skill_session(session.clone(), output, stdout, stderr, status)
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
-        let output_json = serde_json::to_string(&result.output)
-            .map_err(|e| Error::from_reason(e.to_string()))?;
+        let output_json =
+            serde_json::to_string(&result.output).map_err(|e| Error::from_reason(e.to_string()))?;
 
         let exit_status = match result.audit.exit_status {
             RuntimeExecutionStatus::Success => "success".to_string(),
@@ -617,7 +602,12 @@ impl OpenSkillRuntimeWrapper {
     ) -> Result<bool> {
         let runtime = self.inner.lock().unwrap();
         runtime
-            .check_tool_permission(&skill_id, &tool, description, std::collections::HashMap::new())
+            .check_tool_permission(
+                &skill_id,
+                &tool,
+                description,
+                std::collections::HashMap::new(),
+            )
             .map_err(|e| Error::from_reason(e.to_string()))
     }
 
@@ -741,8 +731,8 @@ impl OpenSkillRuntimeWrapper {
             .run_skill_target(&skill_id, target, timeout_ms, input, workspace_dir)
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
-        let output_json = serde_json::to_string(&result.output)
-            .map_err(|e| Error::from_reason(e.to_string()))?;
+        let output_json =
+            serde_json::to_string(&result.output).map_err(|e| Error::from_reason(e.to_string()))?;
 
         let exit_status = match result.audit.exit_status {
             RuntimeExecutionStatus::Success => "success".to_string(),
@@ -824,7 +814,7 @@ pub fn run_sandboxed_shell_command(
     permissions: Option<CommandPermissionsJs>,
 ) -> Result<CommandResultJs> {
     let perms = permissions.unwrap_or_default();
-    
+
     let rust_perms = CommandPermissions {
         allow_network: perms.allow_network.unwrap_or(false),
         allow_process: perms.allow_process.unwrap_or(false),

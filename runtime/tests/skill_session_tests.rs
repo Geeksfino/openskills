@@ -26,7 +26,10 @@ fn test_skill_session_forked_context_summary() {
         .expect("start skill session");
 
     assert!(session.is_forked(), "code-review should be forked");
-    assert!(session.context_id().is_some(), "forked session should have context");
+    assert!(
+        session.context_id().is_some(),
+        "forked session should have context"
+    );
 
     session.record_tool_call("Read", &json!({ "path": "src/lib.rs" }));
 
@@ -66,7 +69,10 @@ fn test_skill_session_non_forked_returns_full_output() {
         .expect("start skill session");
 
     assert!(!session.is_forked(), "explaining-code should not be forked");
-    assert!(session.context_id().is_none(), "non-forked session has no context");
+    assert!(
+        session.context_id().is_none(),
+        "non-forked session has no context"
+    );
 
     let final_output = json!({ "review": "OK" });
     let result = runtime
@@ -248,11 +254,7 @@ fn test_fork_test_skill() {
 
     // Start fork-test session
     let mut session = runtime
-        .start_skill_session(
-            "fork-test",
-            Some(json!({ "test": "data" })),
-            None,
-        )
+        .start_skill_session("fork-test", Some(json!({ "test": "data" })), None)
         .expect("start fork-test skill session");
 
     assert!(session.is_forked(), "fork-test should be forked");

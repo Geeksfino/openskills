@@ -92,7 +92,9 @@ description: {}
     for name in ["skill-alpha", "skill-beta", "skill-gamma"] {
         let loaded = runtime.activate_skill(name).unwrap();
         assert_eq!(loaded.id, name);
-        assert!(loaded.instructions.contains(&format!("{} Instructions", name)));
+        assert!(loaded
+            .instructions
+            .contains(&format!("{} Instructions", name)));
     }
 }
 
@@ -190,7 +192,11 @@ allowed-tools: Read, Grep
     // Start session
     let parent = ExecutionContext::new();
     let mut session = runtime
-        .start_skill_session("session-skill", Some(json!({"query": "test"})), Some(&parent))
+        .start_skill_session(
+            "session-skill",
+            Some(json!({"query": "test"})),
+            Some(&parent),
+        )
         .unwrap();
 
     assert!(session.is_forked(), "Session should be forked");
@@ -257,10 +263,14 @@ requires:
     let missing = loaded.missing_dependencies.unwrap();
 
     // __missing_integration_tool__ should be missing
-    assert!(missing.bins.contains(&"__missing_integration_tool__".to_string()));
+    assert!(missing
+        .bins
+        .contains(&"__missing_integration_tool__".to_string()));
 
     // __INTEGRATION_TEST_TOKEN__ should be missing
-    assert!(missing.env.contains(&"__INTEGRATION_TEST_TOKEN__".to_string()));
+    assert!(missing
+        .env
+        .contains(&"__INTEGRATION_TEST_TOKEN__".to_string()));
 
     // sh and PATH should NOT be missing
     assert!(!missing.bins.contains(&"sh".to_string()));

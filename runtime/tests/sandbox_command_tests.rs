@@ -64,12 +64,8 @@ fn test_sandbox_command_stderr() {
 fn test_sandbox_command_exit_code() {
     let temp_dir = TempDir::new().unwrap();
 
-    let result = run_sandboxed_command(
-        "exit 42",
-        temp_dir.path(),
-        CommandPermissions::default(),
-    )
-    .unwrap();
+    let result =
+        run_sandboxed_command("exit 42", temp_dir.path(), CommandPermissions::default()).unwrap();
 
     assert_eq!(result.exit_code, 42);
 }
@@ -108,12 +104,7 @@ fn test_sandbox_command_completes_before_timeout() {
         ..Default::default()
     };
 
-    let result = run_sandboxed_command(
-        "echo 'quick'",
-        temp_dir.path(),
-        permissions,
-    )
-    .unwrap();
+    let result = run_sandboxed_command("echo 'quick'", temp_dir.path(), permissions).unwrap();
 
     assert!(!result.timed_out);
     assert_eq!(result.exit_code, 0);
@@ -198,12 +189,7 @@ fn test_sandbox_read_denied_path() {
         ..Default::default()
     };
 
-    let result = run_sandboxed_command(
-        "cat /etc/passwd",
-        temp_dir.path(),
-        permissions,
-    )
-    .unwrap();
+    let result = run_sandboxed_command("cat /etc/passwd", temp_dir.path(), permissions).unwrap();
 
     // Should fail to read /etc/passwd (not in allowed paths)
     // The sandbox should block this
@@ -250,7 +236,9 @@ fn test_sandbox_network_denied() {
 
     // Network should be blocked, command should fail or echo 'network blocked'
     assert!(
-        result.exit_code != 0 || result.stdout.contains("network blocked") || result.stderr.len() > 0,
+        result.exit_code != 0
+            || result.stdout.contains("network blocked")
+            || result.stderr.len() > 0,
         "Network access should be denied"
     );
 }
@@ -270,12 +258,8 @@ fn test_sandbox_process_allowed() {
     };
 
     // Should be able to spawn subprocess
-    let result = run_sandboxed_command(
-        "sh -c 'echo subprocess'",
-        temp_dir.path(),
-        permissions,
-    )
-    .unwrap();
+    let result =
+        run_sandboxed_command("sh -c 'echo subprocess'", temp_dir.path(), permissions).unwrap();
 
     assert!(
         result.exit_code == 0 && result.stdout.contains("subprocess"),
@@ -294,12 +278,8 @@ fn test_sandbox_process_denied() {
     };
 
     // Try to spawn a subprocess when process spawning is denied
-    let result = run_sandboxed_command(
-        "sh -c 'echo subprocess'",
-        temp_dir.path(),
-        permissions,
-    )
-    .unwrap();
+    let result =
+        run_sandboxed_command("sh -c 'echo subprocess'", temp_dir.path(), permissions).unwrap();
 
     // May fail or succeed depending on sandbox implementation
     // Just verify it doesn't crash
@@ -323,12 +303,8 @@ fn test_sandbox_env_vars_passthrough() {
         ..Default::default()
     };
 
-    let result = run_sandboxed_command(
-        "echo $TEST_VAR $ANOTHER_VAR",
-        temp_dir.path(),
-        permissions,
-    )
-    .unwrap();
+    let result =
+        run_sandboxed_command("echo $TEST_VAR $ANOTHER_VAR", temp_dir.path(), permissions).unwrap();
 
     assert!(
         result.stdout.contains("test_value") || result.exit_code == 0,
@@ -370,12 +346,7 @@ fn test_sandbox_working_directory() {
     let work_dir = temp_dir.path().join("workdir");
     fs::create_dir_all(&work_dir).unwrap();
 
-    let result = run_sandboxed_command(
-        "pwd",
-        &work_dir,
-        CommandPermissions::default(),
-    )
-    .unwrap();
+    let result = run_sandboxed_command("pwd", &work_dir, CommandPermissions::default()).unwrap();
 
     assert!(
         result.stdout.contains("workdir") || result.exit_code == 0,
@@ -392,11 +363,7 @@ fn test_sandbox_working_directory() {
 fn test_sandbox_empty_command() {
     let temp_dir = TempDir::new().unwrap();
 
-    let result = run_sandboxed_command(
-        "",
-        temp_dir.path(),
-        CommandPermissions::default(),
-    );
+    let result = run_sandboxed_command("", temp_dir.path(), CommandPermissions::default());
 
     // Empty command should fail or be handled gracefully
     assert!(result.is_ok() || result.is_err());
@@ -445,6 +412,12 @@ fn test_command_permissions_default() {
     let perms = CommandPermissions::default();
 
     // Verify default values are safe (restrictive by default)
-    assert!(!perms.allow_network, "Network access should be denied by default");
-    assert!(!perms.allow_process, "Process spawning should be denied by default");
+    assert!(
+        !perms.allow_network,
+        "Network access should be denied by default"
+    );
+    assert!(
+        !perms.allow_process,
+        "Process spawning should be denied by default"
+    );
 }

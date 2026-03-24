@@ -1,7 +1,7 @@
 use openskills_runtime::{
-    CommandPermissions, ExecutionContext, ExecutionOptions, ExecutionTarget, Fallback, HostPolicy,
-    OpenSkillRuntime, OutputType, PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus,
-    SkillExecutionSession, SkillLocation, run_sandboxed_command,
+    run_sandboxed_command, CommandPermissions, ExecutionContext, ExecutionOptions, ExecutionTarget,
+    Fallback, HostPolicy, OpenSkillRuntime, OutputType, PermissionsConfig, RuntimeConfig,
+    RuntimeExecutionStatus, SkillExecutionSession, SkillLocation,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -70,10 +70,7 @@ impl OpenSkillRuntimeWrapper {
         project_root: Option<String>,
     ) -> Self {
         let config = RuntimeConfig {
-            custom_directories: custom_directories
-                .into_iter()
-                .map(PathBuf::from)
-                .collect(),
+            custom_directories: custom_directories.into_iter().map(PathBuf::from).collect(),
             use_standard_locations,
             project_root: project_root.map(PathBuf::from),
             workspace_dir: None,
@@ -218,11 +215,9 @@ impl OpenSkillRuntimeWrapper {
             let json_module = py.import("json")?;
             let json_dumps = json_module.getattr("dumps")?;
             let json_str: String = json_dumps.call1((input_obj,))?.extract()?;
-            Some(
-                serde_json::from_str(&json_str).map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
-                })?,
-            )
+            Some(serde_json::from_str(&json_str).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
+            })?)
         } else {
             None
         };
@@ -238,13 +233,12 @@ impl OpenSkillRuntimeWrapper {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         // Convert Value to JSON string, then parse to Python object
-        let json_str = serde_json::to_string(&result.output)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Serialization error: {e}"
-            )))?;
-            let json_module = py.import("json")?;
-            let json_loads = json_module.getattr("loads")?;
-            let output: Py<PyAny> = json_loads.call1((json_str,))?.into();
+        let json_str = serde_json::to_string(&result.output).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Serialization error: {e}"))
+        })?;
+        let json_module = py.import("json")?;
+        let json_loads = json_module.getattr("loads")?;
+        let output: Py<PyAny> = json_loads.call1((json_str,))?.into();
 
         let exit_status = match result.audit.exit_status {
             RuntimeExecutionStatus::Success => "success".to_string(),
@@ -297,17 +291,14 @@ impl OpenSkillRuntimeWrapper {
             let json_module = py.import("json")?;
             let json_dumps = json_module.getattr("dumps")?;
             let json_str: String = json_dumps.call1((input_obj,))?.extract()?;
-            Some(
-                serde_json::from_str(&json_str).map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
-                })?,
-            )
+            Some(serde_json::from_str(&json_str).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
+            })?)
         } else {
             None
         };
 
-        let parent = parent_context
-            .map(|ctx| ctx.inner.lock().unwrap().clone());
+        let parent = parent_context.map(|ctx| ctx.inner.lock().unwrap().clone());
         let parent_ref = parent.as_ref();
 
         let session = runtime
@@ -352,10 +343,9 @@ impl OpenSkillRuntimeWrapper {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         // Convert Value to JSON string, then parse to Python object
-        let result_json = serde_json::to_string(&result.output)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Serialization error: {e}"
-            )))?;
+        let result_json = serde_json::to_string(&result.output).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Serialization error: {e}"))
+        })?;
         let json_loads = json_module.getattr("loads")?;
         let output_obj: Py<PyAny> = json_loads.call1((result_json,))?.into();
 
@@ -397,7 +387,12 @@ impl OpenSkillRuntimeWrapper {
     ) -> PyResult<bool> {
         let runtime = self.inner.lock().unwrap();
         runtime
-            .check_tool_permission(&skill_id, &tool, description, std::collections::HashMap::new())
+            .check_tool_permission(
+                &skill_id,
+                &tool,
+                description,
+                std::collections::HashMap::new(),
+            )
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
@@ -477,26 +472,33 @@ impl OpenSkillRuntimeWrapper {
 
         // Parse options from Python dict
         let (target, timeout_ms, input_val, workspace_dir) = if let Some(opts) = options {
-            let target_type: Option<String> = opts.get_item("target_type")?
-                .and_then(|v| v.extract().ok());
-            
+            let target_type: Option<String> =
+                opts.get_item("target_type")?.and_then(|v| v.extract().ok());
+
             let target = match target_type.as_deref() {
                 Some("script") => {
-                    let path: String = opts.get_item("path")?
-                        .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                            "path is required for script target"
-                        ))?
+                    let path: String = opts
+                        .get_item("path")?
+                        .ok_or_else(|| {
+                            PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                                "path is required for script target",
+                            )
+                        })?
                         .extract()?;
-                    let args: Vec<String> = opts.get_item("args")?
+                    let args: Vec<String> = opts
+                        .get_item("args")?
                         .and_then(|v| v.extract::<Vec<String>>().ok())
                         .unwrap_or_default();
                     ExecutionTarget::Script { path, args }
                 }
                 Some("wasm") => {
-                    let path: String = opts.get_item("path")?
-                        .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                            "path is required for wasm target"
-                        ))?
+                    let path: String = opts
+                        .get_item("path")?
+                        .ok_or_else(|| {
+                            PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                                "path is required for wasm target",
+                            )
+                        })?
                         .extract()?;
                     ExecutionTarget::Wasm { path }
                 }
@@ -505,7 +507,8 @@ impl OpenSkillRuntimeWrapper {
                     // Uses ExecutionTarget::Path for transparent WASM vs native sandbox selection
                     if let Some(path_obj) = opts.get_item("path")? {
                         let path: String = path_obj.extract()?;
-                        let args: Vec<String> = opts.get_item("args")?
+                        let args: Vec<String> = opts
+                            .get_item("args")?
                             .and_then(|v| v.extract::<Vec<String>>().ok())
                             .unwrap_or_default();
                         ExecutionTarget::Path { path, args }
@@ -518,19 +521,20 @@ impl OpenSkillRuntimeWrapper {
 
             // Extract as i64 first, then apply safety conversion (clamp negative to 0)
             // This matches TypeScript behavior and prevents silent failures
-            let timeout: Option<u64> = opts.get_item("timeout_ms")?
+            let timeout: Option<u64> = opts
+                .get_item("timeout_ms")?
                 .and_then(|v| v.extract::<i64>().ok())
                 .and_then(|t| safe_timeout_ms(Some(t)));
 
-            let input_val: Option<Value> = opts.get_item("input")?
-                .and_then(|input_obj| {
-                    let json_module = py.import("json").ok()?;
-                    let json_dumps = json_module.getattr("dumps").ok()?;
-                    let json_str: String = json_dumps.call1((input_obj,)).ok()?.extract().ok()?;
-                    serde_json::from_str(&json_str).ok()
-                });
+            let input_val: Option<Value> = opts.get_item("input")?.and_then(|input_obj| {
+                let json_module = py.import("json").ok()?;
+                let json_dumps = json_module.getattr("dumps").ok()?;
+                let json_str: String = json_dumps.call1((input_obj,)).ok()?.extract().ok()?;
+                serde_json::from_str(&json_str).ok()
+            });
 
-            let workspace_dir: Option<std::path::PathBuf> = opts.get_item("workspace_dir")?
+            let workspace_dir: Option<std::path::PathBuf> = opts
+                .get_item("workspace_dir")?
                 .and_then(|v| v.extract::<String>().ok())
                 .map(std::path::PathBuf::from);
 
@@ -544,10 +548,9 @@ impl OpenSkillRuntimeWrapper {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         // Convert Value to JSON string, then parse to Python object
-        let json_str = serde_json::to_string(&result.output)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Serialization error: {e}"
-            )))?;
+        let json_str = serde_json::to_string(&result.output).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Serialization error: {e}"))
+        })?;
         let json_module = py.import("json")?;
         let json_loads = json_module.getattr("loads")?;
         let output: Py<PyAny> = json_loads.call1((json_str,))?.into();
@@ -596,14 +599,22 @@ impl SkillExecutionSessionWrapper {
             .map(|id| id.to_string()))
     }
 
-    fn record_tool_call(&self, py: Python<'_>, tool: String, output: Bound<'_, PyAny>) -> PyResult<()> {
+    fn record_tool_call(
+        &self,
+        py: Python<'_>,
+        tool: String,
+        output: Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let json_module = py.import("json")?;
         let json_dumps = json_module.getattr("dumps")?;
         let json_str: String = json_dumps.call1((output,))?.extract()?;
         let output_val: Value = serde_json::from_str(&json_str).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid JSON: {e}"))
         })?;
-        self.inner.lock().unwrap().record_tool_call(&tool, &output_val);
+        self.inner
+            .lock()
+            .unwrap()
+            .record_tool_call(&tool, &output_val);
         Ok(())
     }
 
@@ -665,12 +676,7 @@ impl ExecutionContextWrapper {
     }
 
     fn summary(&self) -> PyResult<Option<String>> {
-        Ok(self
-            .inner
-            .lock()
-            .unwrap()
-            .summary()
-            .map(|s| s.to_string()))
+        Ok(self.inner.lock().unwrap().summary().map(|s| s.to_string()))
     }
 
     fn record_output(&self, output_type: String, content: String) -> PyResult<()> {
@@ -773,11 +779,9 @@ fn parse_execution_status(status: Option<String>) -> openskills_runtime::Runtime
     match status.as_deref() {
         Some("timeout") => openskills_runtime::RuntimeExecutionStatus::Timeout,
         Some("permission_denied") => openskills_runtime::RuntimeExecutionStatus::PermissionDenied,
-        Some(s) if s.starts_with("failed:") => {
-            openskills_runtime::RuntimeExecutionStatus::Failed(
-                s.trim_start_matches("failed:").to_string(),
-            )
-        }
+        Some(s) if s.starts_with("failed:") => openskills_runtime::RuntimeExecutionStatus::Failed(
+            s.trim_start_matches("failed:").to_string(),
+        ),
         _ => openskills_runtime::RuntimeExecutionStatus::Success,
     }
 }

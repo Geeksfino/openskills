@@ -3,7 +3,7 @@
 //! Tests for runSkillTarget (script/WASM execution).
 //! Verifies auto-detection of execution type, argument passing, and workspace handling.
 
-use openskills_runtime::{OpenSkillRuntime, ExecutionTarget};
+use openskills_runtime::{ExecutionTarget, OpenSkillRuntime};
 use std::fs;
 use tempfile::TempDir;
 
@@ -11,7 +11,12 @@ use tempfile::TempDir;
 // Helper Functions
 // =============================================================================
 
-fn create_skill_with_script(temp_dir: &TempDir, name: &str, script_name: &str, script_content: &str) {
+fn create_skill_with_script(
+    temp_dir: &TempDir,
+    name: &str,
+    script_name: &str,
+    script_content: &str,
+) {
     let skill_dir = temp_dir.path().join(name);
     fs::create_dir_all(&skill_dir).unwrap();
 
@@ -213,7 +218,8 @@ echo "workspace: $SKILL_WORKSPACE"
         args: vec![],
     };
 
-    let result = runtime.run_skill_target("workspace-skill", target, Some(5000), None, Some(workspace));
+    let result =
+        runtime.run_skill_target("workspace-skill", target, Some(5000), None, Some(workspace));
 
     match result {
         Ok(exec_result) => {
@@ -391,7 +397,11 @@ description: Test path traversal protection.
     .unwrap();
 
     // Create a script outside the skill directory
-    fs::write(temp_dir.path().join("outside.sh"), "#!/bin/bash\necho secret").unwrap();
+    fs::write(
+        temp_dir.path().join("outside.sh"),
+        "#!/bin/bash\necho secret",
+    )
+    .unwrap();
 
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
     runtime.discover_skills().unwrap();

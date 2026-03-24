@@ -6,10 +6,10 @@
 //!
 //! Build backends are plugin-based so developers can choose compilers.
 
-use crate::errors::OpenSkillError;
 use crate::build::config::BuildConfigFile;
 use crate::build::plugin::PluginConfig;
 use crate::build::registry::PluginRegistry;
+use crate::errors::OpenSkillError;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -93,7 +93,7 @@ pub fn transpile_typescript(
             ts_file.display()
         )));
     }
-    
+
     // Sanitize paths for command line use
     let ts_file_str = ts_file.to_str().ok_or_else(|| {
         OpenSkillError::BuildError("Invalid TypeScript file path encoding".to_string())
@@ -258,14 +258,15 @@ pub fn build_skill(config: BuildConfig) -> Result<PathBuf, OpenSkillError> {
             OpenSkillError::BuildError(format!(
                 "Build plugin '{}' not found. Available: {}",
                 name,
-                if available.is_empty() { "(none)".to_string() } else { available }
+                if available.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    available
+                }
             ))
         })?,
         None => {
-            let ext = js_file
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("js");
+            let ext = js_file.extension().and_then(|s| s.to_str()).unwrap_or("js");
             let candidates = registry.find_by_extension(ext);
             candidates
                 .into_iter()

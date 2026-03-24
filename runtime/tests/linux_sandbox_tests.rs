@@ -4,7 +4,7 @@
 //! They are only compiled and run on Linux systems.
 
 #[cfg(target_os = "linux")]
-use openskills_runtime::{OpenSkillRuntime, ExecutionOptions, RuntimeExecutionStatus};
+use openskills_runtime::{ExecutionOptions, OpenSkillRuntime, RuntimeExecutionStatus};
 #[cfg(target_os = "linux")]
 use serde_json::json;
 #[cfg(target_os = "linux")]
@@ -36,12 +36,12 @@ fn is_landlock_supported() -> bool {
             }
         }
     }
-    
+
     // Check if Landlock is enabled in LSM
     if let Ok(lsm) = std::fs::read_to_string("/sys/kernel/security/lsm") {
         return lsm.contains("landlock");
     }
-    
+
     false
 }
 
@@ -69,7 +69,7 @@ echo '{"status": "success", "message": "hello from linux shell"}'
 "#;
     let script_path = skill_dir.join("script.sh");
     fs::write(&script_path, script_content).unwrap();
-    
+
     // Make it executable
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(&script_path).unwrap().permissions();
@@ -88,18 +88,21 @@ echo '{"status": "success", "message": "hello from linux shell"}'
     };
 
     let result = runtime.execute_skill("native-test-skill", options);
-    
+
     match result {
         Ok(exec_result) => {
             println!("Stdout: {}", exec_result.stdout);
             println!("Stderr: {}", exec_result.stderr);
             assert!(
-                matches!(exec_result.audit.exit_status, RuntimeExecutionStatus::Success),
+                matches!(
+                    exec_result.audit.exit_status,
+                    RuntimeExecutionStatus::Success
+                ),
                 "Execution failed: {:?}",
                 exec_result.audit.exit_status
             );
             println!("Output: {}", exec_result.output);
-            
+
             // Check output content
             assert_eq!(exec_result.output["message"], "hello from linux shell");
         }
@@ -151,7 +154,7 @@ print(json.dumps({
 "#;
     let script_path = skill_dir.join("script.py");
     fs::write(&script_path, script_content).unwrap();
-    
+
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(&script_path).unwrap().permissions();
     perms.set_mode(0o755);
@@ -167,17 +170,20 @@ print(json.dumps({
     };
 
     let result = runtime.execute_skill("python-test-skill", options);
-    
+
     match result {
         Ok(exec_result) => {
             println!("Stdout: {}", exec_result.stdout);
             println!("Stderr: {}", exec_result.stderr);
             assert!(
-                matches!(exec_result.audit.exit_status, RuntimeExecutionStatus::Success),
+                matches!(
+                    exec_result.audit.exit_status,
+                    RuntimeExecutionStatus::Success
+                ),
                 "Execution failed: {:?}",
                 exec_result.audit.exit_status
             );
-            
+
             assert_eq!(exec_result.output["message"], "hello from python");
             assert_eq!(exec_result.output["received"], "hello_world");
         }
@@ -202,7 +208,7 @@ fn test_linux_sandbox_blocks_sensitive_paths() {
     // Create a fake sensitive file to test access denial
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let sensitive_dir = format!("{}/.ssh", home);
-    
+
     // Only test if .ssh directory exists
     if !std::path::Path::new(&sensitive_dir).exists() {
         println!("Skipping test: ~/.ssh does not exist");
@@ -219,17 +225,20 @@ allowed_tools: []
     fs::write(skill_dir.join("SKILL.md"), manifest).unwrap();
 
     // Script attempts to list ~/.ssh contents
-    let script_content = format!(r#"#!/bin/bash
+    let script_content = format!(
+        r#"#!/bin/bash
 if ls -la {} 2>/dev/null; then
     echo '{{"status": "error", "message": "sandbox failed - could read sensitive directory"}}'
 else
     echo '{{"status": "success", "message": "sandbox blocked access as expected"}}'
 fi
-"#, sensitive_dir);
-    
+"#,
+        sensitive_dir
+    );
+
     let script_path = skill_dir.join("script.sh");
     fs::write(&script_path, script_content).unwrap();
-    
+
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
 
@@ -237,12 +246,12 @@ fi
     runtime.discover_skills().unwrap();
 
     let result = runtime.execute_skill("security-test-skill", Default::default());
-    
+
     match result {
         Ok(exec_result) => {
             println!("Stdout: {}", exec_result.stdout);
             println!("Stderr: {}", exec_result.stderr);
-            
+
             // With Landlock, the script should report that access was blocked
             // OR the script itself might fail
             if exec_result.output["message"] == "sandbox failed - could read sensitive directory" {
@@ -287,12 +296,12 @@ fi
 "#;
     let script_path = skill_dir.join("script.sh");
     fs::write(&script_path, script_content).unwrap();
-    
+
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path())
-        .with_workspace_dir(&workspace_dir);
+    let mut runtime =
+        OpenSkillRuntime::from_directory(temp_dir.path()).with_workspace_dir(&workspace_dir);
     runtime.discover_skills().unwrap();
 
     let options = ExecutionOptions {
@@ -301,19 +310,22 @@ fi
     };
 
     let result = runtime.execute_skill("write-test-skill", options);
-    
+
     match result {
         Ok(exec_result) => {
             println!("Stdout: {}", exec_result.stdout);
             println!("Stderr: {}", exec_result.stderr);
             assert!(
-                matches!(exec_result.audit.exit_status, RuntimeExecutionStatus::Success),
+                matches!(
+                    exec_result.audit.exit_status,
+                    RuntimeExecutionStatus::Success
+                ),
                 "Execution failed: {:?}",
                 exec_result.audit.exit_status
             );
-            
+
             assert_eq!(exec_result.output["message"], "file written successfully");
-            
+
             // Verify the file was actually created
             let output_file = workspace_dir.join("output.txt");
             assert!(output_file.exists(), "Output file was not created");
@@ -349,7 +361,7 @@ echo '{"status": "success"}'
 "#;
     let script_path = skill_dir.join("script.sh");
     fs::write(&script_path, script_content).unwrap();
-    
+
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
 
@@ -362,12 +374,15 @@ echo '{"status": "success"}'
     };
 
     let result = runtime.execute_skill("timeout-test-skill", options);
-    
+
     match result {
         Ok(exec_result) => {
             // Should report timeout
             assert!(
-                matches!(exec_result.audit.exit_status, RuntimeExecutionStatus::Timeout),
+                matches!(
+                    exec_result.audit.exit_status,
+                    RuntimeExecutionStatus::Timeout
+                ),
                 "Expected timeout, got: {:?}",
                 exec_result.audit.exit_status
             );
@@ -397,7 +412,7 @@ fn test_run_sandboxed_command() {
     };
 
     let result = run_sandboxed_command("echo 'hello from sandbox'", working_dir, permissions);
-    
+
     match result {
         Ok(cmd_result) => {
             assert_eq!(cmd_result.exit_code, 0);

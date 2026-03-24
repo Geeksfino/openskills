@@ -5,7 +5,7 @@ mod javy_impl {
     // rust-analyzer may show false positive here when feature is disabled
     // This is safe - the entire module is conditionally compiled
     #[allow(unused_imports)]
-    use javy_codegen::{Generator, JS, LinkingKind, Plugin, SourceEmbedding};
+    use javy_codegen::{Generator, LinkingKind, Plugin, SourceEmbedding, JS};
     use std::path::{Path, PathBuf};
 
     pub struct JavyBuildPlugin;
@@ -16,19 +16,16 @@ mod javy_impl {
         }
 
         fn locate_plugin_path(&self, config: &PluginConfig) -> Option<PathBuf> {
-            let custom_path = config
-                .custom
-                .get("plugin_path")
-                .map(|value| {
-                    // Expand ~ in custom paths
-                    if value.starts_with("~/") {
-                        dirs::home_dir()
-                            .map(|home| home.join(&value[2..]))
-                            .unwrap_or_else(|| PathBuf::from(value))
-                    } else {
-                        PathBuf::from(value)
-                    }
-                });
+            let custom_path = config.custom.get("plugin_path").map(|value| {
+                // Expand ~ in custom paths
+                if value.starts_with("~/") {
+                    dirs::home_dir()
+                        .map(|home| home.join(&value[2..]))
+                        .unwrap_or_else(|| PathBuf::from(value))
+                } else {
+                    PathBuf::from(value)
+                }
+            });
             custom_path
                 .or_else(|| {
                     std::env::var("JAVY_PLUGIN_PATH").ok().map(|path| {
@@ -142,7 +139,10 @@ mod javy_impl {
                 .linking(LinkingKind::Static);
 
             let wasm = generator.generate(&js).map_err(|e| {
-                OpenSkillError::BuildError(format!("Failed to generate WASM from JavaScript: {}", e))
+                OpenSkillError::BuildError(format!(
+                    "Failed to generate WASM from JavaScript: {}",
+                    e
+                ))
             })?;
 
             std::fs::write(output_wasm, wasm).map_err(|e| {
@@ -158,7 +158,8 @@ mod javy_impl {
 
         fn requirements(&self) -> Vec<String> {
             vec![
-                "Set JAVY_PLUGIN_PATH or place plugin_wizened.wasm in the current directory".to_string(),
+                "Set JAVY_PLUGIN_PATH or place plugin_wizened.wasm in the current directory"
+                    .to_string(),
                 "Build plugin via scripts/build_javy_plugin.sh".to_string(),
             ]
         }
