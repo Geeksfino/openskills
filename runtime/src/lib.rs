@@ -521,6 +521,7 @@ impl OpenSkillRuntime {
     /// Returns skill descriptors (name + description only) for progressive disclosure.
     /// Skills from later directories override earlier ones if IDs conflict.
     pub fn discover_skills(&mut self) -> Result<Vec<SkillDescriptor>, OpenSkillError> {
+        self.registry.clear_discovery_diagnostics();
         // Scan standard locations if enabled
         if self.use_standard_locations {
             self.registry.discover()?;
@@ -539,6 +540,7 @@ impl OpenSkillRuntime {
         &mut self,
         dir: P,
     ) -> Result<Vec<SkillDescriptor>, OpenSkillError> {
+        self.registry.clear_discovery_diagnostics();
         self.registry.scan_explicit(dir)?;
         Ok(self.registry.list())
     }

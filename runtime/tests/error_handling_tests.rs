@@ -67,10 +67,14 @@ description: "Unclosed quote
     let result = runtime.discover_skills();
     assert!(result.is_ok());
     let skills = result.unwrap();
-    // Tolerant discovery: skill is loaded using directory name as ID
+    let recovered = skills
+        .iter()
+        .find(|s| s.id == "invalid-skill")
+        .expect("Invalid YAML should be recovered via fallback parser");
     assert!(
-        skills.iter().any(|s| s.id == "invalid-skill"),
-        "Invalid YAML should be recovered via fallback parser"
+        recovered.description.contains("Unclosed quote"),
+        "Fallback should recover description text from frontmatter; got {:?}",
+        recovered.description
     );
 }
 

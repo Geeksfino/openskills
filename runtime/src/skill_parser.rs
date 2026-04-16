@@ -90,6 +90,8 @@ pub fn parse_frontmatter_only(content: &str) -> Result<SkillManifest, OpenSkillE
 }
 
 /// Line-by-line `key: value` fallback when YAML parsing fails (inspired by Hermes Agent).
+///
+/// Only reads `name` and `description`; other frontmatter keys are ignored (no full YAML).
 fn parse_frontmatter_fallback(yaml_content: &str) -> SkillManifest {
     let mut manifest = SkillManifest::default();
     for line in yaml_content.lines() {
@@ -121,7 +123,7 @@ pub fn extract_description_from_body(content: &str) -> Option<String> {
                     ""
                 }
             }
-            None => content,
+            None => "",
         }
     } else {
         content
@@ -129,7 +131,10 @@ pub fn extract_description_from_body(content: &str) -> Option<String> {
 
     for line in body.lines() {
         let trimmed = line.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('#') {
+        if !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && trimmed != "---"
+        {
             return Some(truncate_to_max_description_bytes(trimmed));
         }
     }
@@ -306,6 +311,15 @@ This skill does something useful.
         let content = "# Title\n\nA paragraph of text.";
         let desc = extract_description_from_body(content);
         assert_eq!(desc, Some("A paragraph of text.".to_string()));
+    }
+
+    #[test]
+    fn test_extract_description_from_body_unclosed_frontmatter() {
+        let content = "---\nname: broken\n\nNo closing delimiter.";
+        let desc = extract_description_from_body(content);
+        assert_ne!(desc.as_deref(), Some("---"));
+        // Malformed frontmatter: no usable body slice, so we do not invent a description.
+        assert!(desc.is_none());
     }
 
     #[test]

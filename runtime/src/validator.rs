@@ -3,7 +3,7 @@
 use crate::errors::OpenSkillError;
 use crate::manifest::{constraints, SkillManifest};
 use crate::registry::Skill;
-use crate::skill_parser::parse_skill_md;
+use crate::skill_parser::{extract_description_from_body, parse_skill_md};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -190,22 +190,50 @@ pub fn validate_skill_path(path: &Path) -> ValidationResult {
         }
     };
 
-    let name_len = parsed.manifest.name.len();
+    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let effective_name = if !dir_name.is_empty() {
+        dir_name
+    } else {
+        parsed.manifest.name.as_str()
+    };
+
+    let body_description = extract_description_from_body(&content);
+    let effective_description = if !parsed.manifest.description.is_empty() {
+        parsed.manifest.description.as_str()
+    } else {
+        body_description.as_deref().unwrap_or("")
+    };
+
+    let name_len = effective_name.len();
     if name_len == 0 {
-        warnings.push("Frontmatter name is missing; directory name will be used as ID".to_string());
+        warnings.push(
+            "Skill name is missing; set a directory name or frontmatter name".to_string(),
+        );
     } else if name_len > constraints::MAX_NAME_LENGTH {
         errors.push(format!(
             "Skill name must be 1-{} characters",
             constraints::MAX_NAME_LENGTH
         ));
-    } else if let Err(err) = validate_name(&parsed.manifest.name) {
-        warnings.push(format!("Frontmatter name issue (directory name will be used): {}", err));
+    } else if let Err(err) = validate_name(effective_name) {
+        errors.push(err.to_string());
     }
 
-    let description_len = parsed.manifest.description.len();
-    if description_len == 0 {
-        warnings.push("Description is missing; will attempt extraction from body text".to_string());
-    } else if let Err(err) = validate_description(&parsed.manifest.description) {
+    if !dir_name.is_empty()
+        && !parsed.manifest.name.is_empty()
+        && dir_name != parsed.manifest.name
+    {
+        warnings.push(format!(
+            "Directory '{}' differs from manifest name '{}'; directory name is the skill ID",
+            dir_name, parsed.manifest.name
+        ));
+    }
+
+    let description_len = effective_description.len();
+    if parsed.manifest.description.is_empty() && body_description.is_none() {
+        warnings.push("Description is missing; could not infer from body text".to_string());
+    } else if parsed.manifest.description.is_empty() && body_description.is_some() {
+        warnings.push("Description is missing from frontmatter; using first body line".to_string());
+    } else if let Err(err) = validate_description(effective_description) {
         errors.push(err.to_string());
     }
 
@@ -220,17 +248,9 @@ pub fn validate_skill_path(path: &Path) -> ValidationResult {
         warnings.push("Description is long; consider shortening for better discovery".to_string());
     }
 
-    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if !dir_name.is_empty() && !parsed.manifest.name.is_empty() && dir_name != parsed.manifest.name {
-        warnings.push(format!(
-            "Directory '{}' differs from manifest name '{}'; directory name will be used as ID",
-            dir_name, parsed.manifest.name
-        ));
-    }
-
     let has_wasm = find_wasm_module(path);
     let stats = ValidationStats {
-        name: parsed.manifest.name,
+        name: effective_name.to_string(),
         name_len,
         description_len,
         instructions_len,

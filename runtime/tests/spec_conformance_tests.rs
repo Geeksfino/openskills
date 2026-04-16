@@ -125,18 +125,18 @@ description: A skill with a too-long name.
 #[test]
 fn spec_name_lowercase_alphanumeric_hyphens_only() {
     let test_cases = vec![
-        ("valid-name", true, false),     // (name, no errors, no warnings)
+        ("valid-name", true, false), // (name, no errors, optional warnings)
         ("valid123", true, false),
-        ("UPPERCASE", true, true),       // now a warning, not an error
-        ("has_underscore", true, true),
-        ("has.dot", true, true),
-        ("has space", true, true),
-        ("-leading-hyphen", true, true),
-        ("trailing-hyphen-", true, true),
-        ("double--hyphen", true, true),
+        ("UPPERCASE", false, false), // directory ID must satisfy validate_name
+        ("has_underscore", false, false),
+        ("has.dot", false, false),
+        ("has space", false, false),
+        ("-leading-hyphen", false, false),
+        ("trailing-hyphen-", false, false),
+        ("double--hyphen", false, false),
     ];
     
-    for (name, should_have_no_errors, should_have_warnings) in test_cases {
+    for (name, should_have_no_errors, _should_have_warnings) in test_cases {
         let content = format!(
             r#"---
 name: {}
@@ -157,18 +157,11 @@ description: Testing name format.
             "Name '{}': expected errors.is_empty()={}, got errors={:?}",
             name, should_have_no_errors, result.errors
         );
-        if should_have_warnings {
-            assert!(
-                !result.warnings.is_empty(),
-                "Name '{}' should produce warnings",
-                name,
-            );
-        }
     }
 }
 
 #[test]
-fn spec_name_reserved_words_warned() {
+fn spec_name_reserved_words_rejected() {
     let reserved_names = vec!["anthropic", "claude", "skill", "system"];
     
     for name in reserved_names {
@@ -187,8 +180,8 @@ description: Testing reserved name.
         
         let result = validate_skill_path(&skill_dir);
         assert!(
-            !result.warnings.is_empty(),
-            "Reserved name '{}' should produce a warning",
+            !result.errors.is_empty(),
+            "Reserved directory name '{}' should be rejected (same as runtime discovery)",
             name
         );
     }

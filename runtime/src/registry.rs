@@ -104,6 +104,12 @@ impl SkillRegistry {
             discovery_warnings: Vec::new(),
         }
     }
+
+    /// Reset discovery diagnostics so each scan does not accumulate stale entries.
+    pub fn clear_discovery_diagnostics(&mut self) {
+        self.loading_errors.clear();
+        self.discovery_warnings.clear();
+    }
     
     /// Get loading errors encountered during discovery.
     ///
@@ -374,38 +380,16 @@ impl Default for SkillRegistry {
     }
 }
 
-/// Validate that the skill directory name conforms to the character-set safety rules.
+/// Validate the canonical skill ID (directory name) and manifest fields used at runtime.
 ///
-/// After tolerant discovery the manifest name is already aligned with the directory
-/// name, so this function only checks the directory-name format and description length.
+/// After tolerant discovery the manifest `name` is aligned with the directory name;
+/// [`crate::validator::validate_name`] and [`crate::validator::validate_description`] match
+/// activation-time checks so discovered skills are activatable.
 fn validate_skill_id(id: &str, manifest: &SkillManifest) -> Result<(), OpenSkillError> {
-    use crate::manifest::constraints::*;
+    use crate::validator::{validate_description, validate_name};
 
-    if id.is_empty() || id.len() > MAX_NAME_LENGTH {
-        return Err(OpenSkillError::InvalidManifest(format!(
-            "Skill name must be 1-{} characters, got {}",
-            MAX_NAME_LENGTH,
-            id.len()
-        )));
-    }
-
-    if !id
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        return Err(OpenSkillError::InvalidManifest(format!(
-            "Skill name '{}' must contain only lowercase letters, numbers, and hyphens",
-            id
-        )));
-    }
-
-    if manifest.description.len() > MAX_DESCRIPTION_LENGTH {
-        return Err(OpenSkillError::InvalidManifest(format!(
-            "Skill description exceeds {} characters",
-            MAX_DESCRIPTION_LENGTH
-        )));
-    }
-
+    validate_name(id)?;
+    validate_description(&manifest.description)?;
     Ok(())
 }
 
@@ -487,5 +471,15 @@ mod tests {
             actions: None,
         };
         assert!(validate_skill_id("My_Skill", &manifest).is_err());
+    }
+
+    #[test]
+    fn test_validate_skill_id_reserved_word_rejected() {
+        let manifest = SkillManifest {
+            name: "claude".to_string(),
+            description: "x".to_string(),
+            ..Default::default()
+        };
+        assert!(validate_skill_id("claude", &manifest).is_err());
     }
 }
