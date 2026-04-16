@@ -391,6 +391,11 @@ description: "Description with special chars: &\"' and unicode: 日本語"
         prompt.contains("special-skill"),
         "Should include skill despite special chars"
     );
+    assert!(
+        prompt.contains("Description with special chars")
+            && prompt.contains("日本語"),
+        "Should preserve description text and unicode in prompt output"
+    );
 }
 
 #[test]

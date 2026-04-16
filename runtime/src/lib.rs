@@ -274,16 +274,21 @@ impl OpenSkillRuntime {
 
     /// Create a runtime that only scans a specific directory.
     ///
+    /// The directory is registered as a custom discovery root so later
+    /// [`Self::discover_skills`] runs rescan it after clearing the registry.
+    ///
     /// Uses default host policy. Use `with_host_policy()` to override.
     pub fn from_directory<P: AsRef<Path>>(dir: P) -> Self {
+        let dir = dir.as_ref().to_path_buf();
         let mut registry = SkillRegistry::new();
-        let _ = registry.scan_explicit(dir);
+        let _ = registry.scan_explicit(&dir);
         Self {
             registry,
             audit_sink: Box::new(NoopAuditSink {}),
             permission_manager: PermissionManager::new(),
             host_policy: HostPolicy::default(),
-            custom_directories: Vec::new(),
+            // Keep the root so `discover_skills()` can rescan after `SkillRegistry::clear()`.
+            custom_directories: vec![dir],
             use_standard_locations: false,
             workspace_dir: None,
             session_id: generate_session_id(),
@@ -521,7 +526,7 @@ impl OpenSkillRuntime {
     /// Returns skill descriptors (name + description only) for progressive disclosure.
     /// Skills from later directories override earlier ones if IDs conflict.
     pub fn discover_skills(&mut self) -> Result<Vec<SkillDescriptor>, OpenSkillError> {
-        self.registry.clear_discovery_diagnostics();
+        self.registry.clear();
         // Scan standard locations if enabled
         if self.use_standard_locations {
             self.registry.discover()?;
@@ -540,7 +545,7 @@ impl OpenSkillRuntime {
         &mut self,
         dir: P,
     ) -> Result<Vec<SkillDescriptor>, OpenSkillError> {
-        self.registry.clear_discovery_diagnostics();
+        self.registry.clear();
         self.registry.scan_explicit(dir)?;
         Ok(self.registry.list())
     }

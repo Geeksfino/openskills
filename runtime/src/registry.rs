@@ -105,10 +105,19 @@ impl SkillRegistry {
         }
     }
 
-    /// Reset discovery diagnostics so each scan does not accumulate stale entries.
-    pub fn clear_discovery_diagnostics(&mut self) {
+    /// Clear all discovered skills and diagnostics. Used before a full rescan so removed
+    /// skills are not left listed and [`get_loading_errors`] / [`get_discovery_warnings`]
+    /// reflect only the latest run.
+    pub fn clear(&mut self) {
+        self.skills.clear();
         self.loading_errors.clear();
         self.discovery_warnings.clear();
+    }
+
+    fn clear_skill_diagnostics_for_id(&mut self, id: &str) {
+        self.loading_errors.remove(id);
+        let prefix = format!("Skill '{}':", id);
+        self.discovery_warnings.retain(|w| !w.starts_with(&prefix));
     }
     
     /// Get loading errors encountered during discovery.
@@ -268,6 +277,7 @@ impl SkillRegistry {
         skill_md_path: &Path,
         location: SkillLocation,
     ) -> Result<SkillMetadata, OpenSkillError> {
+        self.clear_skill_diagnostics_for_id(id);
         let content = fs::read_to_string(skill_md_path)?;
         let mut manifest = parse_frontmatter_only(&content)?;
 
