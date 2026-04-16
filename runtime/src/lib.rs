@@ -49,6 +49,7 @@ mod validator;
 #[cfg(feature = "wasm")]
 mod wasm_runner;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -545,6 +546,16 @@ impl OpenSkillRuntime {
     /// List all discovered skills (progressive disclosure - descriptors only).
     pub fn list_skills(&self) -> Vec<SkillDescriptor> {
         self.registry.list()
+    }
+
+    /// Get discovery warnings (name overrides, description fallbacks, etc.).
+    pub fn get_discovery_warnings(&self) -> &[String] {
+        self.registry.get_discovery_warnings()
+    }
+
+    /// Get loading errors encountered during discovery.
+    pub fn get_loading_errors(&self) -> &HashMap<String, String> {
+        self.registry.get_loading_errors()
     }
 
     /// List all declared actions from all skills (capability/action model).

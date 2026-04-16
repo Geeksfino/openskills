@@ -48,12 +48,12 @@ fn test_load_skill_io_error() {
 }
 
 #[test]
-fn test_skill_with_invalid_yaml() {
+fn test_skill_with_invalid_yaml_recovered() {
     let temp_dir = TempDir::new().unwrap();
     let skill_dir = temp_dir.path().join("invalid-skill");
     fs::create_dir_all(&skill_dir).unwrap();
     
-    // Invalid YAML (missing closing quote)
+    // Invalid YAML (missing closing quote) — fallback parser extracts name
     fs::write(
         skill_dir.join("SKILL.md"),
         r#"---
@@ -65,15 +65,17 @@ description: "Unclosed quote
     
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
     let result = runtime.discover_skills();
-    // Should handle gracefully - invalid skills are skipped with warning
     assert!(result.is_ok());
     let skills = result.unwrap();
-    // Invalid skill should not be in the list
-    assert!(!skills.iter().any(|s| s.id == "invalid-skill"));
+    // Tolerant discovery: skill is loaded using directory name as ID
+    assert!(
+        skills.iter().any(|s| s.id == "invalid-skill"),
+        "Invalid YAML should be recovered via fallback parser"
+    );
 }
 
 #[test]
-fn test_skill_directory_name_mismatch() {
+fn test_skill_directory_name_overrides_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let skill_dir = temp_dir.path().join("wrong-name");
     fs::create_dir_all(&skill_dir).unwrap();
@@ -90,12 +92,17 @@ description: Name mismatch
     
     let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
     let result = runtime.discover_skills();
-    // Should handle gracefully - mismatched names are rejected
     assert!(result.is_ok());
     let skills = result.unwrap();
-    // Skill with mismatched name should not be in the list
-    assert!(!skills.iter().any(|s| s.id == "wrong-name"));
-    assert!(!skills.iter().any(|s| s.id == "different-name"));
+    // Tolerant discovery: directory name is the authoritative ID
+    assert!(
+        skills.iter().any(|s| s.id == "wrong-name"),
+        "Skill should be discovered using directory name"
+    );
+    assert!(
+        !skills.iter().any(|s| s.id == "different-name"),
+        "Manifest name should NOT be used as ID"
+    );
 }
 
 #[test]

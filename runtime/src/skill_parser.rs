@@ -4,6 +4,7 @@
 //! followed by Markdown instructions.
 
 use crate::errors::OpenSkillError;
+use crate::manifest::constraints::MAX_DESCRIPTION_LENGTH;
 use crate::manifest::SkillManifest;
 
 /// Parsed SKILL.md file.
@@ -17,48 +18,42 @@ pub struct ParsedSkillMd {
 
 /// Parse a SKILL.md file content into manifest and instructions.
 ///
-/// The file format is:
-/// ```text
-/// ---
-/// name: my-skill
-/// description: What the skill does and when to use it.
-/// allowed-tools: Read, Write
-/// ---
-///
-/// # Instructions
-///
-/// Markdown content here...
-/// ```
+/// Tolerant parsing: if frontmatter is missing or malformed, returns a default
+/// manifest with empty name/description (the caller is expected to fill them in
+/// from directory name and body text).
 pub fn parse_skill_md(content: &str) -> Result<ParsedSkillMd, OpenSkillError> {
     let content = content.trim();
 
-    // Must start with ---
     if !content.starts_with("---") {
-        return Err(OpenSkillError::InvalidManifest(
-            "SKILL.md must start with YAML frontmatter (---)".to_string(),
-        ));
+        return Ok(ParsedSkillMd {
+            manifest: SkillManifest::default(),
+            instructions: content.to_string(),
+        });
     }
 
-    // Find the closing ---
     let after_first = &content[3..];
-    let closing_idx = after_first.find("\n---").ok_or_else(|| {
-        OpenSkillError::InvalidManifest(
-            "SKILL.md frontmatter not properly closed (missing ---)".to_string(),
-        )
-    })?;
+    let closing_idx = match after_first.find("\n---") {
+        Some(idx) => idx,
+        None => {
+            return Ok(ParsedSkillMd {
+                manifest: SkillManifest::default(),
+                instructions: content.to_string(),
+            });
+        }
+    };
 
     let yaml_content = &after_first[..closing_idx].trim();
-    let rest_start = closing_idx + 4; // skip \n---
+    let rest_start = closing_idx + 4;
     let instructions = if rest_start < after_first.len() {
         after_first[rest_start..].trim().to_string()
     } else {
         String::new()
     };
 
-    // Parse YAML frontmatter
-    let manifest: SkillManifest = serde_yaml::from_str(yaml_content).map_err(|e| {
-        OpenSkillError::InvalidManifest(format!("Invalid YAML frontmatter: {e}"))
-    })?;
+    let manifest: SkillManifest = match serde_yaml::from_str(yaml_content) {
+        Ok(m) => m,
+        Err(_) => parse_frontmatter_fallback(yaml_content),
+    };
 
     Ok(ParsedSkillMd {
         manifest,
@@ -69,35 +64,88 @@ pub fn parse_skill_md(content: &str) -> Result<ParsedSkillMd, OpenSkillError> {
 /// Parse only the YAML frontmatter from SKILL.md content, discarding body.
 /// Used for discovery phase to minimize memory usage.
 ///
-/// This function extracts and parses only the YAML frontmatter between `---` markers,
-/// without reading the Markdown body. This enables progressive disclosure where
-/// only metadata is loaded at discovery time.
+/// Tolerant: returns a default manifest when frontmatter is missing or broken,
+/// so the caller can fill in defaults from the directory name and body.
 pub fn parse_frontmatter_only(content: &str) -> Result<SkillManifest, OpenSkillError> {
     let content = content.trim();
 
-    // Must start with ---
     if !content.starts_with("---") {
-        return Err(OpenSkillError::InvalidManifest(
-            "SKILL.md must start with YAML frontmatter (---)".to_string(),
-        ));
+        return Ok(SkillManifest::default());
     }
 
-    // Find the closing ---
     let after_first = &content[3..];
-    let closing_idx = after_first.find("\n---").ok_or_else(|| {
-        OpenSkillError::InvalidManifest(
-            "SKILL.md frontmatter not properly closed (missing ---)".to_string(),
-        )
-    })?;
+    let closing_idx = match after_first.find("\n---") {
+        Some(idx) => idx,
+        None => return Ok(SkillManifest::default()),
+    };
 
     let yaml_content = &after_first[..closing_idx].trim();
 
-    // Parse YAML frontmatter only
-    let manifest: SkillManifest = serde_yaml::from_str(yaml_content).map_err(|e| {
-        OpenSkillError::InvalidManifest(format!("Invalid YAML frontmatter: {e}"))
-    })?;
+    let manifest: SkillManifest = match serde_yaml::from_str(yaml_content) {
+        Ok(m) => m,
+        Err(_) => parse_frontmatter_fallback(yaml_content),
+    };
 
     Ok(manifest)
+}
+
+/// Line-by-line `key: value` fallback when YAML parsing fails (inspired by Hermes Agent).
+fn parse_frontmatter_fallback(yaml_content: &str) -> SkillManifest {
+    let mut manifest = SkillManifest::default();
+    for line in yaml_content.lines() {
+        let line = line.trim();
+        if let Some(idx) = line.find(':') {
+            let key = line[..idx].trim();
+            let value = line[idx + 1..].trim().trim_matches('"').trim_matches('\'');
+            match key {
+                "name" => manifest.name = value.to_string(),
+                "description" => manifest.description = value.to_string(),
+                _ => {}
+            }
+        }
+    }
+    manifest
+}
+
+/// Extract a description from the Markdown body when frontmatter lacks one.
+/// Returns the first non-empty, non-heading line, truncated to 1024 chars.
+pub fn extract_description_from_body(content: &str) -> Option<String> {
+    let body = if content.trim().starts_with("---") {
+        let after_first = &content.trim()[3..];
+        match after_first.find("\n---") {
+            Some(idx) => {
+                let rest_start = idx + 4;
+                if rest_start < after_first.len() {
+                    &after_first[rest_start..]
+                } else {
+                    ""
+                }
+            }
+            None => content,
+        }
+    } else {
+        content
+    };
+
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() && !trimmed.starts_with('#') {
+            return Some(truncate_to_max_description_bytes(trimmed));
+        }
+    }
+    None
+}
+
+/// Truncate to [`MAX_DESCRIPTION_LENGTH`] bytes without splitting a UTF-8 codepoint.
+fn truncate_to_max_description_bytes(s: &str) -> String {
+    if s.len() <= MAX_DESCRIPTION_LENGTH {
+        return s.to_string();
+    }
+    let mut end = MAX_DESCRIPTION_LENGTH;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
 }
 
 #[cfg(test)]
@@ -172,17 +220,19 @@ Explore systematically.
     }
 
     #[test]
-    fn test_parse_skill_md_missing_frontmatter() {
+    fn test_parse_skill_md_missing_frontmatter_tolerant() {
         let content = "# Just markdown\n\nNo frontmatter here.";
-        let result = parse_skill_md(content);
-        assert!(result.is_err());
+        let parsed = parse_skill_md(content).unwrap();
+        assert_eq!(parsed.manifest.name, "");
+        assert!(parsed.instructions.contains("Just markdown"));
     }
 
     #[test]
-    fn test_parse_skill_md_unclosed_frontmatter() {
+    fn test_parse_skill_md_unclosed_frontmatter_tolerant() {
         let content = "---\nname: broken\n\nNo closing delimiter.";
-        let result = parse_skill_md(content);
-        assert!(result.is_err());
+        let parsed = parse_skill_md(content).unwrap();
+        assert_eq!(parsed.manifest.name, "");
+        assert!(parsed.instructions.contains("---"));
     }
 
     #[test]
@@ -205,34 +255,75 @@ This is the body that should be ignored.
     }
 
     #[test]
-    fn test_parse_invalid_yaml() {
+    fn test_parse_invalid_yaml_fallback() {
         let content = r#"---
 name: test-skill
 description: [invalid yaml
 ---
 "#;
-        let result = parse_skill_md(content);
-        assert!(result.is_err());
+        let parsed = parse_skill_md(content).unwrap();
+        assert_eq!(parsed.manifest.name, "test-skill");
     }
 
     #[test]
-    fn test_parse_missing_name_field() {
+    fn test_parse_missing_name_field_tolerant() {
         let content = r#"---
 description: A test skill without name
 ---
 "#;
-        let result = parse_skill_md(content);
-        assert!(result.is_err());
+        let parsed = parse_skill_md(content).unwrap();
+        assert_eq!(parsed.manifest.name, "");
+        assert_eq!(parsed.manifest.description, "A test skill without name");
     }
 
     #[test]
-    fn test_parse_missing_description_field() {
+    fn test_parse_missing_description_field_tolerant() {
         let content = r#"---
 name: test-skill
 ---
 "#;
-        let result = parse_skill_md(content);
-        assert!(result.is_err());
+        let parsed = parse_skill_md(content).unwrap();
+        assert_eq!(parsed.manifest.name, "test-skill");
+        assert_eq!(parsed.manifest.description, "");
+    }
+
+    #[test]
+    fn test_extract_description_from_body() {
+        let content = r#"---
+name: test-skill
+---
+
+# My Skill
+
+This skill does something useful.
+"#;
+        let desc = extract_description_from_body(content);
+        assert_eq!(desc, Some("This skill does something useful.".to_string()));
+    }
+
+    #[test]
+    fn test_extract_description_from_body_no_frontmatter() {
+        let content = "# Title\n\nA paragraph of text.";
+        let desc = extract_description_from_body(content);
+        assert_eq!(desc, Some("A paragraph of text.".to_string()));
+    }
+
+    #[test]
+    fn test_extract_description_from_body_empty() {
+        let content = "# Title only\n";
+        let desc = extract_description_from_body(content);
+        assert_eq!(desc, None);
+    }
+
+    #[test]
+    fn test_extract_description_truncates_utf8_safe() {
+        use crate::manifest::constraints::MAX_DESCRIPTION_LENGTH;
+        let filler = "à".repeat(700);
+        assert!(filler.len() > MAX_DESCRIPTION_LENGTH);
+        let content = format!("---\nname: t\n---\n\n{filler}");
+        let desc = extract_description_from_body(&content).expect("desc");
+        assert!(desc.len() <= MAX_DESCRIPTION_LENGTH);
+        assert!(desc.is_char_boundary(desc.len()));
     }
 
     #[test]

@@ -500,7 +500,7 @@ description: Valid skill.
     )
     .unwrap();
 
-    // Create one invalid skill (bad YAML)
+    // Create one skill with bad YAML (fallback parser recovers it)
     let invalid_dir = temp_dir.path().join("invalid-skill");
     fs::create_dir_all(&invalid_dir).unwrap();
     fs::write(
@@ -519,8 +519,11 @@ description: "Unclosed quote
     // Valid skill should be discovered
     assert!(skills.iter().any(|s| s.id == "valid-skill"));
 
-    // Invalid skill should be skipped
-    assert!(!skills.iter().any(|s| s.id == "invalid-skill"));
+    // With tolerant discovery, even the "invalid" skill is recovered
+    assert!(
+        skills.iter().any(|s| s.id == "invalid-skill"),
+        "Fallback parser should recover skills with bad YAML"
+    );
 
     // Valid skill should still work
     let loaded = runtime.activate_skill("valid-skill").unwrap();

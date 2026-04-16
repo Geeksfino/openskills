@@ -96,3 +96,38 @@ description: A test skill.
     assert_eq!(loaded.id, "test-skill");
     assert!(loaded.instructions.contains("This is the full instruction body"));
 }
+
+#[test]
+fn test_activation_preserves_discovery_canonical_name_and_description() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp = TempDir::new().unwrap();
+    let skill_dir = temp.path().join("canonical-dir-id");
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        r#"---
+name: wrong-frontmatter-name
+description: Kept from frontmatter.
+---
+
+# Instructions
+
+Body line for the model.
+"#,
+    )
+    .unwrap();
+
+    let mut runtime = OpenSkillRuntime::from_directory(temp.path());
+    runtime.load_from_directory(temp.path()).unwrap();
+
+    let loaded = runtime.activate_skill("canonical-dir-id").unwrap();
+    assert_eq!(loaded.id, "canonical-dir-id");
+    assert_eq!(
+        loaded.manifest.name, "canonical-dir-id",
+        "activate must keep directory-based name from discovery, not frontmatter"
+    );
+    assert_eq!(loaded.manifest.description, "Kept from frontmatter.");
+    assert!(loaded.instructions.contains("Body line for the model."));
+}

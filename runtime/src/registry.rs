@@ -7,7 +7,7 @@
 
 use crate::errors::OpenSkillError;
 use crate::manifest::SkillManifest;
-use crate::skill_parser::{parse_frontmatter_only, parse_skill_md};
+use crate::skill_parser::{extract_description_from_body, parse_frontmatter_only, parse_skill_md};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -19,7 +19,7 @@ use walkdir::WalkDir;
 /// Does NOT include instructions - those are loaded on activation.
 #[derive(Debug, Clone)]
 pub struct SkillMetadata {
-    /// Skill ID (directory name, must match manifest name).
+    /// Skill ID (directory name — the authoritative identifier).
     pub id: String,
     /// Root directory of the skill.
     pub root: PathBuf,
@@ -33,7 +33,7 @@ pub struct SkillMetadata {
 /// This is created when a skill is activated (progressive disclosure tier 2).
 #[derive(Debug, Clone)]
 pub struct Skill {
-    /// Skill ID (directory name, must match manifest name).
+    /// Skill ID (directory name — the authoritative identifier).
     pub id: String,
     /// Root directory of the skill.
     pub root: PathBuf,
@@ -90,6 +90,8 @@ pub struct SkillRegistry {
     project_root: Option<PathBuf>,
     /// Loading errors encountered during discovery (skill_id -> error message)
     loading_errors: HashMap<String, String>,
+    /// Warnings from tolerant discovery (name overrides, description fallbacks, etc.)
+    discovery_warnings: Vec<String>,
 }
 
 impl SkillRegistry {
@@ -99,6 +101,7 @@ impl SkillRegistry {
             skills: HashMap::new(),
             project_root: None,
             loading_errors: HashMap::new(),
+            discovery_warnings: Vec::new(),
         }
     }
     
@@ -109,6 +112,12 @@ impl SkillRegistry {
     #[allow(dead_code)]
     pub fn get_loading_errors(&self) -> &HashMap<String, String> {
         &self.loading_errors
+    }
+
+    /// Get discovery warnings (name overrides, description fallbacks, etc.).
+    #[allow(dead_code)]
+    pub fn get_discovery_warnings(&self) -> &[String] {
+        &self.discovery_warnings
     }
 
     /// Set the project root for relative path resolution.
@@ -242,17 +251,43 @@ impl SkillRegistry {
 
     /// Load skill metadata from a SKILL.md file (frontmatter only).
     /// This implements progressive disclosure - only metadata is loaded at discovery time.
+    ///
+    /// Tolerant discovery: the directory name is the authoritative skill ID.
+    /// If the frontmatter `name` differs, it is overwritten with the directory name.
+    /// If the frontmatter `description` is missing, the first body line is used.
     fn load_skill_metadata(
-        &self,
+        &mut self,
         id: &str,
         root: &Path,
         skill_md_path: &Path,
         location: SkillLocation,
     ) -> Result<SkillMetadata, OpenSkillError> {
         let content = fs::read_to_string(skill_md_path)?;
-        let manifest = parse_frontmatter_only(&content)?;  // NEW: frontmatter only
+        let mut manifest = parse_frontmatter_only(&content)?;
 
-        // Validate skill ID matches name
+        // Directory name is the authoritative ID (inspired by OpenClaw).
+        if manifest.name.is_empty() || manifest.name != id {
+            if !manifest.name.is_empty() {
+                self.discovery_warnings.push(format!(
+                    "Skill '{}': frontmatter name '{}' differs from directory; using directory name",
+                    id, manifest.name
+                ));
+            }
+            manifest.name = id.to_string();
+        }
+
+        // Description fallback from body (inspired by Hermes Agent).
+        if manifest.description.is_empty() {
+            if let Some(desc) = extract_description_from_body(&content) {
+                let msg = format!(
+                    "Skill '{}': description inferred from body text",
+                    id
+                );
+                self.discovery_warnings.push(msg);
+                manifest.description = desc;
+            }
+        }
+
         validate_skill_id(id, &manifest)?;
 
         Ok(SkillMetadata {
@@ -275,6 +310,9 @@ impl SkillRegistry {
     
     /// Load full skill content (including instructions) by ID.
     /// This is used when a skill is activated (progressive disclosure tier 2).
+    ///
+    /// `name` and `description` always match discovery-time normalization (directory ID,
+    /// body-derived description). Other manifest fields come from the fresh full parse.
     pub fn load_full_skill(&self, id: &str) -> Result<Skill, OpenSkillError> {
         let metadata = self.skills.get(id)
             .ok_or_else(|| OpenSkillError::SkillNotFound(id.to_string()))?;
@@ -283,11 +321,15 @@ impl SkillRegistry {
         let skill_md_path = metadata.root.join("SKILL.md");
         let content = fs::read_to_string(&skill_md_path)?;
         let parsed = parse_skill_md(&content)?;  // Full parse with body
+
+        let mut manifest = parsed.manifest;
+        manifest.name = metadata.manifest.name.clone();
+        manifest.description = metadata.manifest.description.clone();
         
         Ok(Skill {
             id: metadata.id.clone(),
             root: metadata.root.clone(),
-            manifest: parsed.manifest,
+            manifest,
             instructions: parsed.instructions,  // Body loaded here
             location: metadata.location.clone(),
         })
@@ -332,19 +374,13 @@ impl Default for SkillRegistry {
     }
 }
 
-/// Validate that the skill ID conforms to Claude Skills spec.
+/// Validate that the skill directory name conforms to the character-set safety rules.
+///
+/// After tolerant discovery the manifest name is already aligned with the directory
+/// name, so this function only checks the directory-name format and description length.
 fn validate_skill_id(id: &str, manifest: &SkillManifest) -> Result<(), OpenSkillError> {
     use crate::manifest::constraints::*;
 
-    // ID must match manifest name
-    if manifest.name != id {
-        return Err(OpenSkillError::InvalidManifest(format!(
-            "Skill directory '{}' does not match manifest name '{}'",
-            id, manifest.name
-        )));
-    }
-
-    // Validate name format
     if id.is_empty() || id.len() > MAX_NAME_LENGTH {
         return Err(OpenSkillError::InvalidManifest(format!(
             "Skill name must be 1-{} characters, got {}",
@@ -353,7 +389,6 @@ fn validate_skill_id(id: &str, manifest: &SkillManifest) -> Result<(), OpenSkill
         )));
     }
 
-    // Validate name characters (lowercase, numbers, hyphens)
     if !id
         .chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
@@ -362,13 +397,6 @@ fn validate_skill_id(id: &str, manifest: &SkillManifest) -> Result<(), OpenSkill
             "Skill name '{}' must contain only lowercase letters, numbers, and hyphens",
             id
         )));
-    }
-
-    // Validate description
-    if manifest.description.is_empty() {
-        return Err(OpenSkillError::InvalidManifest(
-            "Skill description is required".to_string(),
-        ));
     }
 
     if manifest.description.len() > MAX_DESCRIPTION_LENGTH {
@@ -406,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_skill_id_mismatch() {
+    fn test_validate_skill_id_name_mismatch_ok() {
         let manifest = SkillManifest {
             name: "other-name".to_string(),
             description: "A valid skill".to_string(),
@@ -422,7 +450,23 @@ mod tests {
             requires: None,
             actions: None,
         };
-        assert!(validate_skill_id("my-skill", &manifest).is_err());
+        assert!(
+            validate_skill_id("my-skill", &manifest).is_ok(),
+            "name mismatch should NOT be an error after tolerant discovery"
+        );
+    }
+
+    #[test]
+    fn test_validate_skill_id_empty_description_ok() {
+        let manifest = SkillManifest {
+            name: "my-skill".to_string(),
+            description: "".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            validate_skill_id("my-skill", &manifest).is_ok(),
+            "empty description should be allowed"
+        );
     }
 
     #[test]
