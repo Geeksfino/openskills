@@ -24,34 +24,35 @@ use tempfile::TempDir;
 // =============================================================================
 
 #[test]
-fn spec_skill_md_requires_yaml_frontmatter() {
+fn spec_skill_md_no_frontmatter_tolerant() {
     let content = r#"# Instructions
 This file has no frontmatter.
 "#;
-    let result = parse_skill_md(content);
-    assert!(result.is_err(), "SKILL.md without frontmatter should fail");
+    let parsed = parse_skill_md(content).unwrap();
+    assert_eq!(parsed.manifest.name, "", "Missing frontmatter yields empty name");
+    assert!(parsed.instructions.contains("Instructions"));
 }
 
 #[test]
-fn spec_skill_md_frontmatter_must_start_with_triple_dash() {
+fn spec_skill_md_frontmatter_no_leading_dash_tolerant() {
     let content = r#"name: test
 description: test
 ---
 # Instructions
 "#;
-    let result = parse_skill_md(content);
-    assert!(result.is_err(), "Frontmatter must start with ---");
+    let parsed = parse_skill_md(content).unwrap();
+    assert_eq!(parsed.manifest.name, "", "No leading --- yields empty name");
 }
 
 #[test]
-fn spec_skill_md_frontmatter_must_be_closed() {
+fn spec_skill_md_frontmatter_unclosed_tolerant() {
     let content = r#"---
 name: test
 description: test
 # Instructions
 "#;
-    let result = parse_skill_md(content);
-    assert!(result.is_err(), "Frontmatter must be closed with ---");
+    let parsed = parse_skill_md(content).unwrap();
+    assert_eq!(parsed.manifest.name, "", "Unclosed frontmatter yields empty name");
 }
 
 #[test]
@@ -78,25 +79,27 @@ Follow these steps.
 // =============================================================================
 
 #[test]
-fn spec_name_is_required() {
+fn spec_name_missing_tolerant() {
     let content = r#"---
 description: A skill without a name.
 ---
 # Instructions
 "#;
-    let result = parse_skill_md(content);
-    assert!(result.is_err(), "name field is required");
+    let parsed = parse_skill_md(content).unwrap();
+    assert_eq!(parsed.manifest.name, "", "Missing name defaults to empty");
+    assert_eq!(parsed.manifest.description, "A skill without a name.");
 }
 
 #[test]
-fn spec_description_is_required() {
+fn spec_description_missing_tolerant() {
     let content = r#"---
 name: test-skill
 ---
 # Instructions
 "#;
-    let result = parse_skill_md(content);
-    assert!(result.is_err(), "description field is required");
+    let parsed = parse_skill_md(content).unwrap();
+    assert_eq!(parsed.manifest.name, "test-skill");
+    assert_eq!(parsed.manifest.description, "", "Missing description defaults to empty");
 }
 
 #[test]
@@ -122,18 +125,18 @@ description: A skill with a too-long name.
 #[test]
 fn spec_name_lowercase_alphanumeric_hyphens_only() {
     let test_cases = vec![
-        ("valid-name", true),
-        ("valid123", true),
-        ("UPPERCASE", false),
-        ("has_underscore", false),
-        ("has.dot", false),
-        ("has space", false),
-        ("-leading-hyphen", false),
-        ("trailing-hyphen-", false),
-        ("double--hyphen", false),
+        ("valid-name", true, false), // (name, no errors, optional warnings)
+        ("valid123", true, false),
+        ("UPPERCASE", false, false), // directory ID must satisfy validate_name
+        ("has_underscore", false, false),
+        ("has.dot", false, false),
+        ("has space", false, false),
+        ("-leading-hyphen", false, false),
+        ("trailing-hyphen-", false, false),
+        ("double--hyphen", false, false),
     ];
     
-    for (name, should_be_valid) in test_cases {
+    for (name, should_have_no_errors, _should_have_warnings) in test_cases {
         let content = format!(
             r#"---
 name: {}
@@ -150,17 +153,15 @@ description: Testing name format.
         let result = validate_skill_path(&skill_dir);
         assert_eq!(
             result.errors.is_empty(),
-            should_be_valid,
-            "Name '{}' should be {}",
-            name,
-            if should_be_valid { "valid" } else { "invalid" }
+            should_have_no_errors,
+            "Name '{}': expected errors.is_empty()={}, got errors={:?}",
+            name, should_have_no_errors, result.errors
         );
     }
 }
 
 #[test]
 fn spec_name_reserved_words_rejected() {
-    // These are the actual reserved words from validator.rs
     let reserved_names = vec!["anthropic", "claude", "skill", "system"];
     
     for name in reserved_names {
@@ -178,7 +179,11 @@ description: Testing reserved name.
         fs::write(skill_dir.join("SKILL.md"), content).unwrap();
         
         let result = validate_skill_path(&skill_dir);
-        assert!(!result.errors.is_empty(), "Reserved name '{}' should be rejected", name);
+        assert!(
+            !result.errors.is_empty(),
+            "Reserved directory name '{}' should be rejected (same as runtime discovery)",
+            name
+        );
     }
 }
 
@@ -389,7 +394,7 @@ description: Custom directory skill.
 }
 
 #[test]
-fn spec_discovery_directory_name_must_match_manifest_name() {
+fn spec_discovery_directory_name_overrides_manifest_name() {
     let temp = TempDir::new().unwrap();
     let skill_dir = temp.path().join("wrong-name");
     fs::create_dir_all(&skill_dir).unwrap();
@@ -406,8 +411,15 @@ description: Directory name doesn't match.
     let mut runtime = OpenSkillRuntime::from_directory(temp.path());
     let skills = runtime.discover_skills().unwrap();
     
-    // The skill should not be loaded because directory name doesn't match
-    assert!(skills.is_empty() || !skills.iter().any(|s| s.id == "correct-name"));
+    // The skill is loaded using the directory name as ID
+    assert!(
+        skills.iter().any(|s| s.id == "wrong-name"),
+        "Skill should be discovered with directory name as ID"
+    );
+    assert!(
+        !skills.iter().any(|s| s.id == "correct-name"),
+        "Skill should NOT use manifest name as ID"
+    );
 }
 
 #[test]

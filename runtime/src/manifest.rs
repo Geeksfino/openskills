@@ -7,17 +7,24 @@ use serde::{Deserialize, Serialize};
 
 /// Claude Skill manifest parsed from SKILL.md YAML frontmatter.
 ///
-/// Required fields: `name`, `description`
+/// The upstream spec treats `name` and `description` as required; this runtime allows them
+/// to be omitted in the file and fills them during discovery (directory name, body text).
+///
 /// Optional fields: `allowed_tools`, `model`, `context`, `agent`, `hooks`, `user_invocable`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SkillManifest {
-    /// Skill name. Must use lowercase letters, numbers, and hyphens only (max 64 characters).
-    /// Should match the directory name.
+    /// Skill name (lowercase letters, numbers, hyphens; max 64 characters).
+    /// At discovery time, the directory name is the authoritative ID; this field
+    /// is populated from the directory name if the frontmatter value is missing or
+    /// does not match.
+    #[serde(default)]
     pub name: String,
 
     /// What the Skill does and when to use it (max 1024 characters).
-    /// Claude uses this to decide when to apply the Skill.
+    /// If missing from frontmatter, discovery will attempt to extract from the
+    /// Markdown body (first non-heading, non-empty line).
+    #[serde(default)]
     pub description: String,
 
     /// Tools Claude can use without asking permission when this Skill is active.

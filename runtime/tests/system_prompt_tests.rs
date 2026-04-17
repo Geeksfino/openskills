@@ -375,7 +375,7 @@ fn test_system_prompt_skill_with_special_characters_in_description() {
         skill_dir.join("SKILL.md"),
         r#"---
 name: special-skill
-description: "Description with special chars: <>&\"' and unicode: 日本語"
+description: "Description with special chars: &\"' and unicode: 日本語"
 ---
 "#,
     )
@@ -390,6 +390,11 @@ description: "Description with special chars: <>&\"' and unicode: 日本語"
     assert!(
         prompt.contains("special-skill"),
         "Should include skill despite special chars"
+    );
+    assert!(
+        prompt.contains("Description with special chars")
+            && prompt.contains("日本語"),
+        "Should preserve description text and unicode in prompt output"
     );
 }
 

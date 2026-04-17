@@ -3,7 +3,7 @@
 use crate::errors::OpenSkillError;
 use crate::manifest::{constraints, SkillManifest};
 use crate::registry::Skill;
-use crate::skill_parser::parse_skill_md;
+use crate::skill_parser::{extract_description_from_body, parse_skill_md};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -11,15 +11,6 @@ use std::path::Path;
 /// Validate a skill's manifest against Claude Skills spec constraints.
 pub fn validate_skill(skill: &Skill) -> Result<(), OpenSkillError> {
     validate_manifest(&skill.manifest)?;
-    
-    // Validate directory name matches manifest name
-    if skill.id != skill.manifest.name {
-        return Err(OpenSkillError::InvalidManifest(format!(
-            "Directory name '{}' must match skill name '{}'",
-            skill.id, skill.manifest.name
-        )));
-    }
-
     Ok(())
 }
 
@@ -111,13 +102,8 @@ pub fn validate_name(name: &str) -> Result<(), OpenSkillError> {
 }
 
 /// Validate skill description according to Claude Skills spec.
+/// Empty description is allowed (discovery will attempt body-text fallback).
 pub fn validate_description(description: &str) -> Result<(), OpenSkillError> {
-    if description.is_empty() {
-        return Err(OpenSkillError::InvalidManifest(
-            "Skill description is required".to_string(),
-        ));
-    }
-
     if description.len() > constraints::MAX_DESCRIPTION_LENGTH {
         return Err(OpenSkillError::InvalidManifest(format!(
             "Skill description exceeds {} characters",
@@ -125,7 +111,6 @@ pub fn validate_description(description: &str) -> Result<(), OpenSkillError> {
         )));
     }
 
-    // Cannot contain XML-like tags
     if description.contains('<') || description.contains('>') {
         return Err(OpenSkillError::InvalidManifest(
             "Skill description cannot contain XML tags".to_string(),
@@ -205,20 +190,50 @@ pub fn validate_skill_path(path: &Path) -> ValidationResult {
         }
     };
 
-    let name_len = parsed.manifest.name.len();
-    if name_len == 0 || name_len > constraints::MAX_NAME_LENGTH {
+    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let effective_name = if !dir_name.is_empty() {
+        dir_name
+    } else {
+        parsed.manifest.name.as_str()
+    };
+
+    let body_description = extract_description_from_body(&content);
+    let effective_description = if !parsed.manifest.description.is_empty() {
+        parsed.manifest.description.as_str()
+    } else {
+        body_description.as_deref().unwrap_or("")
+    };
+
+    let name_len = effective_name.len();
+    if name_len == 0 {
+        warnings.push(
+            "Skill name is missing; set a directory name or frontmatter name".to_string(),
+        );
+    } else if name_len > constraints::MAX_NAME_LENGTH {
         errors.push(format!(
             "Skill name must be 1-{} characters",
             constraints::MAX_NAME_LENGTH
         ));
-    }
-
-    if let Err(err) = validate_name(&parsed.manifest.name) {
+    } else if let Err(err) = validate_name(effective_name) {
         errors.push(err.to_string());
     }
 
-    let description_len = parsed.manifest.description.len();
-    if let Err(err) = validate_description(&parsed.manifest.description) {
+    if !dir_name.is_empty()
+        && !parsed.manifest.name.is_empty()
+        && dir_name != parsed.manifest.name
+    {
+        warnings.push(format!(
+            "Directory '{}' differs from manifest name '{}'; directory name is the skill ID",
+            dir_name, parsed.manifest.name
+        ));
+    }
+
+    let description_len = effective_description.len();
+    if parsed.manifest.description.is_empty() && body_description.is_none() {
+        warnings.push("Description is missing; could not infer from body text".to_string());
+    } else if parsed.manifest.description.is_empty() && body_description.is_some() {
+        warnings.push("Description is missing from frontmatter; using first body line".to_string());
+    } else if let Err(err) = validate_description(effective_description) {
         errors.push(err.to_string());
     }
 
@@ -233,17 +248,9 @@ pub fn validate_skill_path(path: &Path) -> ValidationResult {
         warnings.push("Description is long; consider shortening for better discovery".to_string());
     }
 
-    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if !dir_name.is_empty() && dir_name != parsed.manifest.name {
-        errors.push(format!(
-            "Skill directory '{}' does not match manifest name '{}'",
-            dir_name, parsed.manifest.name
-        ));
-    }
-
     let has_wasm = find_wasm_module(path);
     let stats = ValidationStats {
-        name: parsed.manifest.name,
+        name: effective_name.to_string(),
         name_len,
         description_len,
         instructions_len,
@@ -448,8 +455,12 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_description_invalid() {
-        assert!(validate_description("").is_err());
+    fn test_validate_description_empty_allowed() {
+        assert!(validate_description("").is_ok());
+    }
+
+    #[test]
+    fn test_validate_description_xml_rejected() {
         assert!(validate_description("<script>bad</script>").is_err());
     }
 }
