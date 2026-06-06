@@ -19,6 +19,7 @@
 
 use crate::audit::ExecutionStatus;
 use crate::errors::OpenSkillError;
+use crate::sandbox_mode::SandboxMode;
 use crate::executor::ExecutionArtifacts;
 use crate::permissions::PermissionEnforcer;
 use crate::registry::Skill;
@@ -38,6 +39,8 @@ pub struct NativeRunnerConfig {
     /// When true, do not set PYTHONNOUSERSITE=1, so user-site and venv
     /// packages are visible. Default is false (conservative: user site disabled).
     pub python_allow_user_site: bool,
+    /// OS sandbox enforcement for native script execution (default: enforce).
+    pub sandbox_mode: SandboxMode,
 }
 
 /// Supported native script types.
@@ -259,8 +262,48 @@ mod macos {
             }
         }
 
+        let sandbox_mode = native_config
+            .map(|c| c.sandbox_mode)
+            .unwrap_or(SandboxMode::Enforce);
+
         let (program, args, program_path) =
             command_for_script(script_type, script_path, native_config)?;
+
+        if sandbox_mode == SandboxMode::Disabled {
+            let mut cmd = Command::new(&program);
+            cmd.args(&args);
+            if !script_args.is_empty() {
+                cmd.args(script_args);
+            }
+            cmd.current_dir(&skill_root);
+            cmd.stdin(Stdio::piped());
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+            apply_environment(
+                &mut cmd,
+                skill,
+                &input_json,
+                timeout_ms,
+                enforcer,
+                script_type,
+                workspace_dir,
+                native_config,
+            );
+            let child = cmd.spawn().map_err(|e| {
+                OpenSkillError::NativeExecutionError(format!(
+                    "Failed to execute without sandbox: {e}"
+                ))
+            })?;
+            return run_native_child(
+                child,
+                &input_json,
+                timeout_ms,
+                enforcer,
+                None,
+                sandbox_mode,
+            );
+        }
+
         // Canonicalize the executable path for the seatbelt profile
         // We need to pass the actual executable path (not its parent) to grant file-map-executable permission
         let exec_path = program_path.as_ref().and_then(|p| {
@@ -333,8 +376,26 @@ mod macos {
             }
         };
 
+        run_native_child(
+            child,
+            &input_json,
+            timeout_ms,
+            enforcer,
+            Some(profile_path),
+            sandbox_mode,
+        )
+    }
+
+    fn run_native_child(
+        mut child: std::process::Child,
+        input_json: &str,
+        timeout_ms: u64,
+        enforcer: &PermissionEnforcer,
+        profile_path: Option<PathBuf>,
+        sandbox_mode: SandboxMode,
+    ) -> Result<ExecutionArtifacts, OpenSkillError> {
         if let Some(mut stdin) = child.stdin.take() {
-            let input_clone = input_json.clone();
+            let input_clone = input_json.to_string();
             thread::spawn(move || {
                 let _ = stdin.write_all(input_clone.as_bytes());
             });
@@ -342,8 +403,7 @@ mod macos {
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        
-        // Use panic-safe thread spawning with catch_unwind
+
         let stdout_handle = thread::spawn(move || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stdout)))
                 .unwrap_or_else(|_| Vec::new())
@@ -367,7 +427,6 @@ mod macos {
             thread::sleep(Duration::from_millis(10));
         };
 
-        // Safely join threads with timeout to prevent indefinite blocking
         let stdout_bytes = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
             .unwrap_or_else(|_| Vec::new());
         let stderr_bytes = join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
@@ -406,7 +465,9 @@ mod macos {
             )
         };
 
-        let _ = std::fs::remove_file(&profile_path);
+        if let Some(path) = profile_path {
+            let _ = std::fs::remove_file(path);
+        }
 
         Ok(ExecutionArtifacts {
             output,
@@ -414,6 +475,7 @@ mod macos {
             stderr,
             permissions_used: enforcer.permissions_used(),
             exit_status,
+            sandbox_mode,
         })
     }
 
@@ -820,8 +882,40 @@ mod linux {
             }
         }
 
+        let sandbox_mode = native_config
+            .map(|c| c.sandbox_mode)
+            .unwrap_or(SandboxMode::Enforce);
+
         let (program, args) =
             command_for_script(script_type, script_path, native_config)?;
+
+        if sandbox_mode == SandboxMode::Disabled {
+            let mut cmd = Command::new(&program);
+            cmd.args(&args);
+            if !script_args.is_empty() {
+                cmd.args(script_args);
+            }
+            cmd.current_dir(&skill_root);
+            cmd.stdin(Stdio::piped());
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+            apply_environment(
+                &mut cmd,
+                skill,
+                &input_json,
+                timeout_ms,
+                enforcer,
+                script_type,
+                workspace_dir,
+                native_config,
+            );
+            let child = cmd.spawn().map_err(|e| {
+                OpenSkillError::NativeExecutionError(format!(
+                    "Failed to execute without sandbox: {e}"
+                ))
+            })?;
+            return run_native_child(child, &input_json, timeout_ms, enforcer, sandbox_mode);
+        }
 
         // --- Collect Landlock path sets ---
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
@@ -894,18 +988,24 @@ mod linux {
             });
         }
 
-        let mut child = match cmd.spawn() {
-            Ok(child) => child,
-            Err(e) => {
-                return Err(OpenSkillError::LinuxSandboxError(format!(
-                    "Failed to execute with Landlock sandbox: {e}"
-                )));
-            }
-        };
+        let child = cmd.spawn().map_err(|e| {
+            OpenSkillError::LinuxSandboxError(format!(
+                "Failed to execute with Landlock sandbox: {e}"
+            ))
+        })?;
 
-        // Write input to stdin
+        run_native_child(child, &input_json, timeout_ms, enforcer, SandboxMode::Enforce)
+    }
+
+    fn run_native_child(
+        mut child: std::process::Child,
+        input_json: &str,
+        timeout_ms: u64,
+        enforcer: &PermissionEnforcer,
+        sandbox_mode: SandboxMode,
+    ) -> Result<ExecutionArtifacts, OpenSkillError> {
         if let Some(mut stdin) = child.stdin.take() {
-            let input_clone = input_json.clone();
+            let input_clone = input_json.to_string();
             thread::spawn(move || {
                 let _ = stdin.write_all(input_clone.as_bytes());
             });
@@ -914,7 +1014,6 @@ mod linux {
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        // Use panic-safe thread spawning
         let stdout_handle = thread::spawn(move || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stdout)))
                 .unwrap_or_else(|_| Vec::new())
@@ -938,7 +1037,6 @@ mod linux {
             thread::sleep(Duration::from_millis(10));
         };
 
-        // Safely join threads with timeout
         let stdout_bytes = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
             .unwrap_or_else(|_| Vec::new());
         let stderr_bytes = join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
@@ -960,7 +1058,6 @@ mod linux {
                 };
                 (ExecutionStatus::Success, output)
             } else {
-                // Check for sandbox violations (SIGSYS from seccomp, SIGKILL, etc.)
                 let message = if let Some(signal) = status.signal() {
                     match signal {
                         libc::SIGSYS => "Sandbox violation: blocked system call".to_string(),
@@ -996,6 +1093,7 @@ mod linux {
             stderr,
             permissions_used: enforcer.permissions_used(),
             exit_status,
+            sandbox_mode,
         })
     }
 
@@ -1180,19 +1278,256 @@ mod linux {
 pub use linux::execute_native;
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn execute_native(
-    _skill: &Skill,
-    _script_path: &Path,
-    _script_type: ScriptType,
-    _input: Value,
-    _timeout_ms: u64,
-    _enforcer: &PermissionEnforcer,
-    _allowed_tools: &[String],
-    _workspace_dir: Option<&Path>,
-    _script_args: &[String],
-    _native_config: Option<&NativeRunnerConfig>,
-) -> Result<ExecutionArtifacts, OpenSkillError> {
-    Err(OpenSkillError::UnsupportedPlatform(
-        "Native execution requires macOS (seatbelt) or Linux (Landlock)".to_string(),
-    ))
+mod direct {
+    use super::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+
+    pub fn execute_native(
+        skill: &Skill,
+        script_path: &Path,
+        script_type: ScriptType,
+        input: Value,
+        timeout_ms: u64,
+        enforcer: &PermissionEnforcer,
+        _allowed_tools: &[String],
+        workspace_dir: Option<&Path>,
+        script_args: &[String],
+        native_config: Option<&NativeRunnerConfig>,
+    ) -> Result<ExecutionArtifacts, OpenSkillError> {
+        if !script_path.exists() {
+            return Err(OpenSkillError::NativeExecutionError(format!(
+                "Script not found: {}",
+                script_path.display()
+            )));
+        }
+
+        let sandbox_mode = native_config
+            .map(|c| c.sandbox_mode)
+            .unwrap_or(SandboxMode::Enforce);
+        if sandbox_mode == SandboxMode::Enforce {
+            return Err(OpenSkillError::UnsupportedPlatform(
+                "Native sandboxed execution requires macOS (seatbelt) or Linux (Landlock)"
+                    .to_string(),
+            ));
+        }
+
+        let input_json = serde_json::to_string(&input)?;
+        let skill_root = skill
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| skill.root.clone());
+        let (program, args) = command_for_script(script_type, script_path, native_config)?;
+
+        let mut cmd = Command::new(&program);
+        cmd.args(&args);
+        if !script_args.is_empty() {
+            cmd.args(script_args);
+        }
+        cmd.current_dir(&skill_root);
+        cmd.stdin(Stdio::piped());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        apply_environment(
+            &mut cmd,
+            skill,
+            &input_json,
+            timeout_ms,
+            enforcer,
+            script_type,
+            workspace_dir,
+            native_config,
+        );
+
+        let mut child = cmd.spawn().map_err(|e| {
+            OpenSkillError::NativeExecutionError(format!(
+                "Failed to execute without sandbox: {e}"
+            ))
+        })?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let input_clone = input_json.clone();
+            thread::spawn(move || {
+                let _ = stdin.write_all(input_clone.as_bytes());
+            });
+        }
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let stdout_handle = thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stdout)))
+                .unwrap_or_else(|_| Vec::new())
+        });
+        let stderr_handle = thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream(stderr)))
+                .unwrap_or_else(|_| Vec::new())
+        });
+
+        let start = Instant::now();
+        let mut timed_out = false;
+        let status = loop {
+            if let Some(status) = child.try_wait().map_err(OpenSkillError::Io)? {
+                break Some(status);
+            }
+            if start.elapsed() >= Duration::from_millis(timeout_ms) {
+                timed_out = true;
+                let _ = child.kill();
+                break child.wait().ok();
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+
+        let stdout_bytes = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
+            .unwrap_or_else(|_| Vec::new());
+        let stderr_bytes = join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
+            .unwrap_or_else(|_| Vec::new());
+        let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+        let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+
+        let (exit_status, output) = if timed_out {
+            (
+                ExecutionStatus::Timeout,
+                serde_json::json!({ "status": "error", "error": "execution timeout" }),
+            )
+        } else if let Some(status) = status {
+            if status.success() {
+                let output = if let Ok(json) = serde_json::from_str::<Value>(&stdout) {
+                    json
+                } else {
+                    serde_json::json!({ "status": "success", "output": stdout.trim() })
+                };
+                (ExecutionStatus::Success, output)
+            } else {
+                let message = if !stderr.trim().is_empty() {
+                    stderr.trim().to_string()
+                } else {
+                    format!("Process exited with status {}", status)
+                };
+                (
+                    ExecutionStatus::Failed(message.clone()),
+                    serde_json::json!({ "status": "error", "error": message }),
+                )
+            }
+        } else {
+            (
+                ExecutionStatus::Failed("Process failed to start".to_string()),
+                serde_json::json!({ "status": "error", "error": "Process failed to start" }),
+            )
+        };
+
+        Ok(ExecutionArtifacts {
+            output,
+            stdout,
+            stderr,
+            permissions_used: enforcer.permissions_used(),
+            exit_status,
+            sandbox_mode,
+        })
+    }
+
+    fn command_for_script(
+        script_type: ScriptType,
+        script_path: &Path,
+        native_config: Option<&NativeRunnerConfig>,
+    ) -> Result<(String, Vec<String>), OpenSkillError> {
+        match script_type {
+            ScriptType::Python => {
+                let resolved = if let Some(cfg) = native_config {
+                    if let Some(ref path) = cfg.python_interpreter {
+                        if path.exists() {
+                            path.to_string_lossy().to_string()
+                        } else {
+                            return Err(OpenSkillError::NativeExecutionError(format!(
+                                "Configured python_interpreter not found: {}",
+                                path.display()
+                            )));
+                        }
+                    } else {
+                        resolve_executable("python3")
+                            .or_else(|| resolve_executable("python"))
+                            .map(|p| p.to_string_lossy().to_string())
+                            .ok_or_else(|| {
+                                OpenSkillError::NativeExecutionError(
+                                    "python3 not found".to_string(),
+                                )
+                            })?
+                    }
+                } else {
+                    resolve_executable("python3")
+                        .or_else(|| resolve_executable("python"))
+                        .map(|p| p.to_string_lossy().to_string())
+                        .ok_or_else(|| {
+                            OpenSkillError::NativeExecutionError("python3 not found".to_string())
+                        })?
+                };
+                Ok((
+                    resolved,
+                    vec![script_path.to_string_lossy().to_string()],
+                ))
+            }
+            ScriptType::Shell => {
+                #[cfg(windows)]
+                {
+                    let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+                    Ok((
+                        shell,
+                        vec![
+                            "/C".to_string(),
+                            script_path.to_string_lossy().to_string(),
+                        ],
+                    ))
+                }
+                #[cfg(not(windows))]
+                Ok((
+                    "/bin/bash".to_string(),
+                    vec![script_path.to_string_lossy().to_string()],
+                ))
+            }
+        }
+    }
+
+    fn apply_environment(
+        cmd: &mut Command,
+        skill: &Skill,
+        input_json: &str,
+        timeout_ms: u64,
+        enforcer: &PermissionEnforcer,
+        script_type: ScriptType,
+        workspace_dir: Option<&Path>,
+        native_config: Option<&NativeRunnerConfig>,
+    ) {
+        if let Ok(path) = std::env::var("PATH") {
+            cmd.env("PATH", path);
+        }
+        cmd.env("COREPACK_ENABLE_AUTO_PIN", "0");
+        cmd.env("CI", "true");
+        if let Ok(lang) = std::env::var("LANG") {
+            cmd.env("LANG", lang);
+        }
+        cmd.env("SKILL_ID", &skill.id);
+        cmd.env("SKILL_NAME", &skill.manifest.name);
+        cmd.env("SKILL_INPUT", input_json);
+        cmd.env("TIMEOUT_MS", timeout_ms.to_string());
+        cmd.env("SKILL_ROOT", skill.root.to_string_lossy().to_string());
+        if let Some(workspace) = workspace_dir {
+            cmd.env("SKILL_WORKSPACE", workspace.to_string_lossy().to_string());
+        }
+        for key in enforcer.env_allowlist() {
+            if let Ok(val) = std::env::var(key) {
+                cmd.env(key, val);
+            }
+        }
+        if script_type == ScriptType::Python {
+            cmd.env("PYTHONUNBUFFERED", "1");
+            cmd.env("PYTHONDONTWRITEBYTECODE", "1");
+            let allow_user_site = native_config.map(|c| c.python_allow_user_site).unwrap_or(false);
+            if !allow_user_site {
+                cmd.env("PYTHONNOUSERSITE", "1");
+            }
+        }
+    }
 }
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub use direct::execute_native;

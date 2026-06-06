@@ -44,6 +44,7 @@ mod native_runner;
 mod permission_callback;
 mod permissions;
 mod registry;
+mod sandbox_mode;
 mod skill_parser;
 mod validator;
 #[cfg(feature = "wasm")]
@@ -110,6 +111,7 @@ pub use validator::{analyze_skill_tokens, validate_skill_path, TokenAnalysis, Va
 // Re-export execution target types for public API
 pub use executor::{ExecutionTarget, TargetExecutionOptions};
 pub use native_runner::NativeRunnerConfig;
+pub use sandbox_mode::SandboxMode;
 
 // Re-export sandboxed command execution API
 pub use executor::{CommandPermissions, CommandResult, run_sandboxed_command};
@@ -1008,6 +1010,11 @@ Example response:
             exit_status,
             stdout: stdout.clone(),
             stderr: stderr.clone(),
+            sandbox_mode: self
+                .native_runner_config
+                .as_ref()
+                .map(|c| c.sandbox_mode)
+                .unwrap_or(SandboxMode::Enforce),
         };
 
         self.audit_sink.record(&audit);
@@ -1257,6 +1264,11 @@ Example response:
             exit_status: execution.exit_status.clone(),
             stdout: execution.stdout.clone(),
             stderr: execution.stderr.clone(),
+            sandbox_mode: self
+                .native_runner_config
+                .as_ref()
+                .map(|c| c.sandbox_mode)
+                .unwrap_or(SandboxMode::Enforce),
         };
 
         self.audit_sink.record(&audit);
@@ -1386,6 +1398,11 @@ Example response:
             exit_status: execution.exit_status.clone(),
             stdout: execution.stdout.clone(),
             stderr: execution.stderr.clone(),
+            sandbox_mode: self
+                .native_runner_config
+                .as_ref()
+                .map(|c| c.sandbox_mode)
+                .unwrap_or(SandboxMode::Enforce),
         };
 
         self.audit_sink.record(&audit);

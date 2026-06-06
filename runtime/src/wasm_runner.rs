@@ -6,6 +6,7 @@
 use crate::audit::ExecutionStatus;
 use crate::errors::OpenSkillError;
 use crate::executor::ExecutionArtifacts;
+use crate::sandbox_mode::SandboxMode;
 use crate::permissions::PermissionEnforcer;
 use crate::registry::Skill;
 use serde_json::Value;
@@ -414,6 +415,7 @@ OpenSkills runtime does not support legacy core-module WASM artifacts."
         stderr,
         permissions_used: enforcer.permissions_used(),
         exit_status,
+        sandbox_mode: SandboxMode::Enforce,
     })
 }
 

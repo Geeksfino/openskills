@@ -3,7 +3,7 @@
 //! Tests for the run_sandboxed_command API.
 //! Verifies permission controls, timeout enforcement, and security restrictions.
 
-use openskills_runtime::{run_sandboxed_command, CommandPermissions};
+use openskills_runtime::{run_sandboxed_command, CommandPermissions, SandboxMode};
 use std::fs;
 use tempfile::TempDir;
 
@@ -447,4 +447,37 @@ fn test_command_permissions_default() {
     // Verify default values are safe (restrictive by default)
     assert!(!perms.allow_network, "Network access should be denied by default");
     assert!(!perms.allow_process, "Process spawning should be denied by default");
+    assert_eq!(
+        perms.sandbox_mode,
+        SandboxMode::Enforce,
+        "OS sandbox should be enforced by default"
+    );
+}
+
+#[test]
+fn test_sandbox_mode_defaults_to_enforce() {
+    let perms = CommandPermissions::default();
+    assert_eq!(perms.sandbox_mode, SandboxMode::Enforce);
+}
+
+#[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn test_sandbox_disabled_runs_without_os_sandbox() {
+    if !std::path::Path::new("/etc/passwd").exists() {
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let permissions = CommandPermissions {
+        sandbox_mode: SandboxMode::Disabled,
+        ..Default::default()
+    };
+
+    let result = run_sandboxed_command("cat /etc/passwd", temp_dir.path(), permissions).unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(
+        result.stdout.contains("root:"),
+        "Disabled sandbox mode should read /etc/passwd without OS sandbox"
+    );
 }

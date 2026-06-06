@@ -13,6 +13,7 @@
 use crate::audit::ExecutionStatus;
 use crate::errors::OpenSkillError;
 use crate::native_runner::{detect_script_type, execute_native, NativeRunnerConfig, ScriptType};
+use crate::sandbox_mode::SandboxMode;
 use crate::permissions::{map_tools_to_capabilities, PermissionEnforcer};
 use crate::registry::Skill;
 #[cfg(feature = "wasm")]
@@ -34,6 +35,8 @@ pub struct ExecutionArtifacts {
     pub permissions_used: Vec<String>,
     /// Exit status.
     pub exit_status: ExecutionStatus,
+    /// Effective OS sandbox mode for this execution.
+    pub sandbox_mode: SandboxMode,
 }
 
 /// Options for skill execution.
@@ -734,6 +737,8 @@ pub struct CommandPermissions {
     pub env_vars: Vec<(String, String)>,
     /// Timeout in milliseconds.
     pub timeout_ms: u64,
+    /// OS sandbox enforcement for this command (default: enforce).
+    pub sandbox_mode: SandboxMode,
 }
 
 /// Result from sandboxed command execution.
@@ -777,17 +782,112 @@ pub struct CommandResult {
 /// )?;
 /// println!("Output: {}", result.stdout);
 /// ```
+/// Run a shell command without OS sandboxing (host owns the boundary).
+pub fn run_command_direct(
+    command: &str,
+    working_dir: &Path,
+    permissions: &CommandPermissions,
+) -> Result<CommandResult, OpenSkillError> {
+    use std::process::{Command, Stdio};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    if !working_dir.exists() {
+        return Err(OpenSkillError::NativeExecutionError(format!(
+            "Working directory does not exist: {}",
+            working_dir.display()
+        )));
+    }
+
+    let canonical_working_dir = working_dir.canonicalize().map_err(|e| {
+        OpenSkillError::NativeExecutionError(format!(
+            "Failed to canonicalize working directory: {}",
+            e
+        ))
+    })?;
+
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("cmd.exe");
+        c.args(["/C", command]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = Command::new("/bin/bash");
+        c.arg("-c").arg(command);
+        c
+    };
+
+    cmd.current_dir(&canonical_working_dir);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    cmd.env_clear();
+    if let Ok(path) = std::env::var("PATH") {
+        cmd.env("PATH", path);
+    }
+    for (key, value) in &permissions.env_vars {
+        cmd.env(key, value);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        OpenSkillError::NativeExecutionError(format!("Failed to execute command: {e}"))
+    })?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdout_handle = thread::spawn(move || read_stream_to_string(stdout));
+    let stderr_handle = thread::spawn(move || read_stream_to_string(stderr));
+
+    let timeout_ms = if permissions.timeout_ms > 0 {
+        permissions.timeout_ms
+    } else {
+        30_000
+    };
+    let start = Instant::now();
+    let mut timed_out = false;
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(OpenSkillError::Io)? {
+            break Some(status);
+        }
+        if start.elapsed() >= Duration::from_millis(timeout_ms) {
+            timed_out = true;
+            let _ = child.kill();
+            break child.wait().ok();
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    let stdout_content = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
+        .unwrap_or_else(|_| String::new());
+    let stderr_content = join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
+        .unwrap_or_else(|_| String::new());
+
+    let exit_code = status
+        .and_then(|s| s.code())
+        .unwrap_or(if timed_out { -1 } else { 1 });
+
+    Ok(CommandResult {
+        exit_code,
+        stdout: stdout_content,
+        stderr: stderr_content,
+        timed_out,
+    })
+}
+
 #[cfg(target_os = "macos")]
 pub fn run_sandboxed_command(
     command: &str,
     working_dir: &Path,
     permissions: CommandPermissions,
 ) -> Result<CommandResult, OpenSkillError> {
-    use std::process::{Command, Stdio};
-    use std::thread;
-    use std::time::{Duration, Instant};
+    if permissions.sandbox_mode == SandboxMode::Disabled {
+        return run_command_direct(command, working_dir, &permissions);
+    }
 
-    // Validate working directory exists
+    use std::process::{Command, Stdio};
+
     if !working_dir.exists() {
         return Err(OpenSkillError::NativeExecutionError(format!(
             "Working directory does not exist: {}",
@@ -843,138 +943,29 @@ pub fn run_sandboxed_command(
     }
 
     // Spawn the process
-    let mut child = match cmd.spawn() {
+    let child = match cmd.spawn() {
         Ok(child) => child,
         Err(_e) => {
             let _ = std::fs::remove_file(&profile_path);
             // Fall back to running without sandbox if sandbox-exec fails
-            return run_command_fallback(command, working_dir, permissions);
+            return run_command_direct(command, working_dir, &permissions);
         }
     };
 
-    // Read stdout/stderr in separate threads with panic handling
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdout_handle = thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stdout)))
-            .unwrap_or_else(|_| String::new())
-    });
-    let stderr_handle = thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_stream_to_string(stderr)))
-            .unwrap_or_else(|_| String::new())
-    });
-
-    // Wait with timeout
-    let timeout_ms = if permissions.timeout_ms > 0 {
-        permissions.timeout_ms
-    } else {
-        30000 // 30 second default
-    };
-    let start = Instant::now();
-    let mut timed_out = false;
-    let status = loop {
-        if let Some(status) = child.try_wait().map_err(OpenSkillError::Io)? {
-            break Some(status);
-        }
-        if start.elapsed() >= Duration::from_millis(timeout_ms) {
-            timed_out = true;
-            let _ = child.kill();
-            break child.wait().ok();
-        }
-        thread::sleep(Duration::from_millis(10));
-    };
-
-    // Clean up profile
-    let _ = std::fs::remove_file(&profile_path);
-
-    // Collect output with timeout to prevent indefinite blocking
-    let stdout_content = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
-        .unwrap_or_else(|_| String::new());
-    let stderr_content = join_thread_with_timeout(stderr_handle, Duration::from_secs(5))
-        .unwrap_or_else(|_| String::new());
-
-    let exit_code = status
-        .and_then(|s| s.code())
-        .unwrap_or(if timed_out { -1 } else { 1 });
-
-    // Check if sandbox-exec crashed (e.g., SIGABRT = 134, SIGSEGV = 139)
-    // OR if the exit code is 1 which often indicates sandbox restriction issues
-    // In these cases, fall back to running without sandbox
-    if exit_code == 134 || exit_code == 139 || exit_code == 136 || exit_code == 1 {
-        // Clean up profile and fall back
-        let _ = std::fs::remove_file(&profile_path);
-        return run_command_fallback(command, working_dir, permissions);
+    let result = wait_for_command_child(child, &permissions, Some(profile_path))?;
+    if result.exit_code == 134 || result.exit_code == 139 || result.exit_code == 136 || result.exit_code == 1 {
+        return run_command_direct(command, working_dir, &permissions);
     }
-
-    Ok(CommandResult {
-        exit_code,
-        stdout: stdout_content,
-        stderr: stderr_content,
-        timed_out,
-    })
+    Ok(result)
 }
 
-/// Fallback command execution when sandbox-exec is not available.
-/// This runs the command directly without sandboxing.
-#[cfg(target_os = "macos")]
-fn run_command_fallback(
-    command: &str,
-    working_dir: &Path,
-    permissions: CommandPermissions,
+fn wait_for_command_child(
+    mut child: std::process::Child,
+    permissions: &CommandPermissions,
+    profile_path: Option<PathBuf>,
 ) -> Result<CommandResult, OpenSkillError> {
-    use std::process::{Command, Stdio};
-    use std::thread;
     use std::time::{Duration, Instant};
 
-    if !working_dir.exists() {
-        return Err(OpenSkillError::NativeExecutionError(format!(
-            "Working directory does not exist: {}",
-            working_dir.display()
-        )));
-    }
-
-    let canonical_working_dir = working_dir.canonicalize().map_err(|e| {
-        OpenSkillError::NativeExecutionError(format!(
-            "Failed to canonicalize working directory: {}",
-            e
-        ))
-    })?;
-
-    // Run command directly without sandbox
-    let mut cmd = Command::new("/bin/bash");
-    cmd.arg("-c").arg(command);
-    cmd.current_dir(&canonical_working_dir);
-    cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    // Set up environment
-    cmd.env_clear();
-    if let Ok(path) = std::env::var("PATH") {
-        cmd.env("PATH", path);
-    } else {
-        cmd.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin");
-    }
-    if let Ok(lang) = std::env::var("LANG") {
-        cmd.env("LANG", lang);
-    }
-    if let Ok(tmpdir) = std::env::var("TMPDIR") {
-        cmd.env("TMPDIR", tmpdir);
-    }
-    // Pass through user-specified environment variables
-    for (key, value) in &permissions.env_vars {
-        cmd.env(key, value);
-    }
-
-    // Spawn the process
-    let mut child = cmd.spawn().map_err(|e| {
-        OpenSkillError::NativeExecutionError(format!(
-            "Failed to execute command: {}",
-            e
-        ))
-    })?;
-
-    // Read stdout/stderr
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let stdout_handle = thread::spawn(move || {
@@ -986,7 +977,6 @@ fn run_command_fallback(
             .unwrap_or_else(|_| String::new())
     });
 
-    // Wait with timeout
     let timeout_ms = if permissions.timeout_ms > 0 {
         permissions.timeout_ms
     } else {
@@ -1005,6 +995,10 @@ fn run_command_fallback(
         }
         thread::sleep(Duration::from_millis(10));
     };
+
+    if let Some(path) = profile_path {
+        let _ = std::fs::remove_file(path);
+    }
 
     let stdout_content = join_thread_with_timeout(stdout_handle, Duration::from_secs(5))
         .unwrap_or_else(|_| String::new());
@@ -1200,6 +1194,10 @@ pub fn run_sandboxed_command(
     working_dir: &Path,
     permissions: CommandPermissions,
 ) -> Result<CommandResult, OpenSkillError> {
+    if permissions.sandbox_mode == SandboxMode::Disabled {
+        return run_command_direct(command, working_dir, &permissions);
+    }
+
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     use std::time::Instant;
@@ -1383,12 +1381,17 @@ pub fn run_sandboxed_command(
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn run_sandboxed_command(
-    _command: &str,
-    _working_dir: &Path,
-    _permissions: CommandPermissions,
+    command: &str,
+    working_dir: &Path,
+    permissions: CommandPermissions,
 ) -> Result<CommandResult, OpenSkillError> {
+    if permissions.sandbox_mode == SandboxMode::Disabled {
+        return run_command_direct(command, working_dir, &permissions);
+    }
     Err(OpenSkillError::UnsupportedPlatform(
-        "Sandboxed command execution requires macOS (seatbelt) or Linux (Landlock)".to_string(),
+        "Sandboxed command execution requires macOS (seatbelt) or Linux (Landlock); \
+         set sandbox_mode=disabled when the host provides an outer sandbox"
+            .to_string(),
     ))
 }
 
@@ -1418,5 +1421,46 @@ mod tests {
 
         let found = find_native_script(&skill_root.to_path_buf());
         assert_eq!(found.unwrap(), script_path);
+    }
+
+    #[test]
+    fn sandbox_mode_enforce_rejects_unsupported_platform() {
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            let temp = TempDir::new().unwrap();
+            let result = run_sandboxed_command(
+                "echo hello",
+                temp.path(),
+                CommandPermissions {
+                    sandbox_mode: SandboxMode::Enforce,
+                    ..Default::default()
+                },
+            );
+            assert!(matches!(result, Err(OpenSkillError::UnsupportedPlatform(_))));
+        }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            // Enforce path exists on supported platforms; default is Enforce.
+            assert_eq!(SandboxMode::default(), SandboxMode::Enforce);
+        }
+    }
+
+    #[test]
+    fn sandbox_mode_disabled_runs_command_direct() {
+        let temp = TempDir::new().unwrap();
+        let result = run_sandboxed_command(
+            #[cfg(windows)]
+            "echo hello",
+            #[cfg(not(windows))]
+            "echo hello",
+            temp.path(),
+            CommandPermissions {
+                sandbox_mode: SandboxMode::Disabled,
+                ..Default::default()
+            },
+        )
+        .expect("disabled sandbox should run command directly");
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.contains("hello"));
     }
 }
