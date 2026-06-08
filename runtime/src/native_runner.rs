@@ -366,7 +366,7 @@ mod macos {
             native_config,
         );
 
-        let mut child = match cmd.spawn() {
+        let child = match cmd.spawn() {
             Ok(child) => child,
             Err(e) => {
                 let _ = std::fs::remove_file(&profile_path);
