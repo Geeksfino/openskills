@@ -35,7 +35,8 @@ pub struct ExecutionArtifacts {
     pub permissions_used: Vec<String>,
     /// Exit status.
     pub exit_status: ExecutionStatus,
-    /// Effective OS sandbox mode for this execution.
+    /// Effective OS sandbox mode for this execution (public API for callers/bindings).
+    #[allow(dead_code)]
     pub sandbox_mode: SandboxMode,
 }
 
@@ -959,6 +960,7 @@ pub fn run_sandboxed_command(
     Ok(result)
 }
 
+#[cfg(target_os = "macos")]
 fn wait_for_command_child(
     mut child: std::process::Child,
     permissions: &CommandPermissions,
@@ -1309,10 +1311,8 @@ pub fn run_sandboxed_command(
             })();
 
             if result.is_err() {
-                // Fallback: apply NO_NEW_PRIVS at minimum
-                unsafe {
-                    libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-                }
+                // Fallback: apply NO_NEW_PRIVS at minimum (already inside pre_exec unsafe).
+                libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
             }
             Ok(())
         });
