@@ -17,7 +17,7 @@ echo ""
 
 # Rust tests (fastest)
 echo -e "${BLUE}[1/3] Rust tests...${NC}"
-cargo test --lib --test skill_session_tests 2>&1 | grep -E "(test result|Running|passed|failed)" || true
+cargo test --lib --test skill_session_tests 2>&1 | grep -E "(test result|Running|passed|failed)"
 echo ""
 
 # TypeScript tests
