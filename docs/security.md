@@ -133,7 +133,7 @@ All native scripts receive these base permissions:
 ### File Write Access
 
 **Allowed:**
-- `/dev/null` - Output redirection
+- `/dev/null`, `/dev/zero` - Output redirection (Landlock RW / Seatbelt write literals). Do **not** grant Landlock read-only on `/dev` itself: nested rules take the intersection and would strip write from these nodes.
 - Temporary directories:
   - `/tmp`
   - `/private/tmp`
@@ -317,7 +317,7 @@ Skills with `context: fork` execute in isolated contexts:
 ✅ **System Libraries** - Read access for interpreter execution  
 ✅ **Skill Directory** - Read/write access to skill root  
 ✅ **Temporary Files** - Write access to `/tmp` and variants  
-✅ **Standard Input/Output** - `/dev/null` for redirection  
+✅ **Standard Input/Output** - `/dev/null` and `/dev/zero` for redirection  
 
 ---
 

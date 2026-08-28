@@ -622,8 +622,8 @@ mod macos {
         // Claude Code uses this approach: allow reads broadly, deny writes specifically.
         profile.push_str("(allow file-read*)\n");
 
-        // Allow /dev/null writes (needed for output redirection)
-        profile.push_str("(allow file-write* (literal \"/dev/null\"))\n");
+        // Shell redirects (`>/dev/null`). Same table as Linux Landlock RW.
+        crate::sandbox_devices::append_seatbelt_write_device_rules(&mut profile, escape_path);
 
         // Allow writes to temp directories
         for temp_path in TEMP_PATHS {
@@ -729,7 +729,10 @@ mod linux {
         Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
     };
 
-    // System paths that should be readable for interpreter execution
+    // System paths that should be readable for interpreter execution.
+    // Device nodes come from `sandbox_devices`. Do **not** add `/dev` as a
+    // read-only parent: Landlock nested rules take the intersection and
+    // would strip write from `/dev/null`.
     const SYSTEM_READ_PATHS: &[&str] = &[
         "/usr/lib",
         "/usr/lib64",
@@ -744,9 +747,6 @@ mod linux {
         "/lib64",
         "/etc",
         "/proc/self",
-        "/dev/null",
-        "/dev/urandom",
-        "/dev/zero",
     ];
 
     // Python interpreter locations on Linux
@@ -826,12 +826,17 @@ mod linux {
         // --- Collect Landlock path sets ---
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
 
-        // Read-only paths: system paths + skill root + enforcer read paths
+        use crate::sandbox_devices::{
+            DEVICE_READ_ONLY_PATHS, DEVICE_READ_WRITE_PATHS, extend_existing_paths,
+        };
+
+        // Read-only paths: system paths + PRNG devices + skill root + enforcer read paths
         let mut ro_paths: Vec<PathBuf> = SYSTEM_READ_PATHS
             .iter()
             .map(PathBuf::from)
             .filter(|p| p.exists())
             .collect();
+        extend_existing_paths(&mut ro_paths, DEVICE_READ_ONLY_PATHS);
         ro_paths.push(skill_root.clone());
         for p in &read_paths {
             if p.exists() && !ro_paths.contains(p) {
@@ -839,12 +844,13 @@ mod linux {
             }
         }
 
-        // Read-write paths: temp dirs + skill root + enforcer write paths + workspace
+        // Read-write paths: temp dirs + redirect devices + skill root + enforcer write paths + workspace
         let mut rw_paths: Vec<PathBuf> = TEMP_PATHS
             .iter()
             .map(PathBuf::from)
             .filter(|p| p.exists())
             .collect();
+        extend_existing_paths(&mut rw_paths, DEVICE_READ_WRITE_PATHS);
         rw_paths.push(skill_root.clone());
         for p in &write_paths {
             if !rw_paths.contains(p) {

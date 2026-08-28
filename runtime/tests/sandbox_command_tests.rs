@@ -30,6 +30,33 @@ fn test_sandbox_basic_command() {
 
 #[test]
 #[cfg(target_os = "macos")]
+fn test_sandbox_allows_dev_null_redirect() {
+    let temp_dir = TempDir::new().unwrap();
+
+    // Seatbelt exec previously granted file-read* on /dev but no write
+    // literals, so `>/dev/null` failed. Same table as Linux Landlock RW.
+    let result = run_sandboxed_command(
+        "ls /tmp >/dev/null 2>/dev/null; echo redirected-ok",
+        temp_dir.path(),
+        CommandPermissions::default(),
+    )
+    .unwrap();
+
+    assert_eq!(result.exit_code, 0, "stderr={}", result.stderr);
+    assert!(
+        result.stdout.contains("redirected-ok"),
+        "stdout={}",
+        result.stdout
+    );
+    assert!(
+        !result.stderr.contains("/dev/null"),
+        "stderr={}",
+        result.stderr
+    );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
 fn test_sandbox_command_with_args() {
     let temp_dir = TempDir::new().unwrap();
 
