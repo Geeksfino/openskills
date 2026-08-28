@@ -411,3 +411,95 @@ fn test_run_sandboxed_command() {
         }
     }
 }
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_run_sandboxed_command_allows_dev_null_redirect() {
+    use openskills_runtime::{run_sandboxed_command, CommandPermissions};
+
+    let temp_dir = TempDir::new().unwrap();
+    let working_dir = temp_dir.path();
+
+    let permissions = CommandPermissions {
+        allow_network: false,
+        allow_process: true,
+        read_paths: vec![working_dir.to_path_buf()],
+        write_paths: vec![working_dir.to_path_buf()],
+        env_vars: vec![],
+        timeout_ms: 10000,
+    };
+
+    // Same idiom agents emit (`ls … 2>/dev/null`). A read-only Landlock grant
+    // on /dev/null makes bash fail the whole command with Permission denied.
+    let result = run_sandboxed_command(
+        "ls /tmp >/dev/null 2>/dev/null; echo redirected-ok",
+        working_dir,
+        permissions,
+    )
+    .expect("sandboxed command should run");
+
+    assert_eq!(result.exit_code, 0, "stderr={}", result.stderr);
+    assert!(
+        result.stdout.contains("redirected-ok"),
+        "stdout={}",
+        result.stdout
+    );
+    assert!(
+        !result.stderr.contains("/dev/null: Permission denied"),
+        "stderr={}",
+        result.stderr
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_native_linux_allows_dev_null_redirect() {
+    if !is_landlock_supported() {
+        println!("Skipping test: Landlock not supported on this kernel");
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let skill_dir = temp_dir.path().join("dev-null-redirect-skill");
+    fs::create_dir(&skill_dir).unwrap();
+
+    let manifest = r#"---
+name: dev-null-redirect-skill
+description: Native skill that redirects to /dev/null
+user_invocable: true
+allowed_tools: []
+---
+"#;
+    fs::write(skill_dir.join("SKILL.md"), manifest).unwrap();
+
+    // Same idiom as exec: a read-only Landlock grant on /dev/null makes bash
+    // fail the whole command with Permission denied before the echo.
+    let script_content = r#"#!/bin/bash
+ls /tmp >/dev/null 2>/dev/null
+echo '{"status": "success", "message": "redirected-ok"}'
+"#;
+    let script_path = skill_dir.join("script.sh");
+    fs::write(&script_path, script_content).unwrap();
+
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut runtime = OpenSkillRuntime::from_directory(temp_dir.path());
+    runtime.discover_skills().unwrap();
+
+    let result = runtime
+        .execute_skill("dev-null-redirect-skill", Default::default())
+        .expect("native skill should run");
+
+    assert!(
+        matches!(result.audit.exit_status, RuntimeExecutionStatus::Success),
+        "stderr={}",
+        result.stderr
+    );
+    assert_eq!(result.output["message"], "redirected-ok");
+    assert!(
+        !result.stderr.contains("/dev/null: Permission denied"),
+        "stderr={}",
+        result.stderr
+    );
+}

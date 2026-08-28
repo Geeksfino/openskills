@@ -1052,6 +1052,8 @@ fn build_command_seatbelt_profile(
         "/Library",
         "/etc",
         "/private/etc",
+        // Seatbelt is not Landlock: `file-read*` on `/dev` does not strip
+        // later `file-write*` literals. Keep the directory readable.
         "/dev",
     ];
     for path in system_read_paths {
@@ -1060,6 +1062,12 @@ fn build_command_seatbelt_profile(
             escape_seatbelt_path(path)
         ));
     }
+
+    // Shell redirects (`>/dev/null`) need write. Same table as Linux Landlock RW.
+    crate::sandbox_devices::append_seatbelt_write_device_rules(
+        &mut profile,
+        escape_seatbelt_path,
+    );
 
     // Temp directories - read and write
     let temp_paths = ["/tmp", "/private/tmp", "/private/var/tmp", "/private/var/folders"];
@@ -1225,13 +1233,19 @@ pub fn run_sandboxed_command(
     })?;
 
     // --- Collect Landlock path sets ---
-    // System paths needed for basic command execution
+    // System paths needed for basic command execution.
+    // Do **not** add `/dev` as a read-only parent: Landlock nested rules
+    // take the intersection and would strip write from `/dev/null`.
+    // Device nodes come from `sandbox_devices` (RO PRNG, RW redirect).
+    use crate::sandbox_devices::{
+        DEVICE_READ_ONLY_PATHS, DEVICE_READ_WRITE_PATHS, extend_existing_paths,
+    };
+
     let system_ro_paths: &[&str] = &[
         "/usr/lib", "/usr/lib64", "/usr/libexec",
         "/usr/bin", "/usr/sbin", "/usr/share", "/usr/local",
         "/bin", "/sbin", "/lib", "/lib64",
         "/etc", "/proc/self",
-        "/dev/null", "/dev/urandom", "/dev/zero",
     ];
 
     let mut ro_paths: Vec<PathBuf> = system_ro_paths
@@ -1239,6 +1253,7 @@ pub fn run_sandboxed_command(
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .collect();
+    extend_existing_paths(&mut ro_paths, DEVICE_READ_ONLY_PATHS);
     ro_paths.push(canonical_working_dir.clone());
     for p in &permissions.read_paths {
         if p.exists() && !ro_paths.contains(p) {
@@ -1250,6 +1265,7 @@ pub fn run_sandboxed_command(
         PathBuf::from("/tmp"),
         PathBuf::from("/var/tmp"),
     ];
+    extend_existing_paths(&mut rw_paths, DEVICE_READ_WRITE_PATHS);
     for p in &permissions.write_paths {
         if !rw_paths.contains(p) {
             rw_paths.push(p.clone());

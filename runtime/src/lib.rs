@@ -44,6 +44,7 @@ mod native_runner;
 mod permission_callback;
 mod permissions;
 mod registry;
+mod sandbox_devices;
 mod sandbox_mode;
 mod skill_parser;
 mod validator;
