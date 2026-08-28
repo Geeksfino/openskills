@@ -71,6 +71,8 @@ export interface CommandPermissionsJs {
   envVars?: Array<Array<string>>
   /** Timeout in milliseconds. */
   timeoutMs?: number
+  /** OS sandbox mode: `"enforce"` (default) or `"disabled"`. */
+  sandboxMode?: string
 }
 /** Result from sandboxed command execution. */
 export interface CommandResultJs {
@@ -96,6 +98,8 @@ export interface AuditRecord {
   exitStatus: string
   stdout: string
   stderr: string
+  /** Effective OS sandbox mode (`enforce` or `disabled`). */
+  sandboxMode: string
 }
 export interface ExecutionResult {
   outputJson: string

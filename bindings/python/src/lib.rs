@@ -1,7 +1,7 @@
 use openskills_runtime::{
     CommandPermissions, ExecutionContext, ExecutionOptions, ExecutionTarget, Fallback, HostPolicy,
     OpenSkillRuntime, OutputType, PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus,
-    SkillExecutionSession, SkillLocation, run_sandboxed_command,
+    SandboxMode, SkillExecutionSession, SkillLocation, run_sandboxed_command,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -21,6 +21,13 @@ fn safe_timeout_ms(timeout: Option<i64>) -> Option<u64> {
             u64::try_from(t).ok()
         }
     })
+}
+
+fn parse_sandbox_mode(mode: Option<&str>) -> SandboxMode {
+    match mode.map(str::to_ascii_lowercase) {
+        Some(ref s) if s == "disabled" => SandboxMode::Disabled,
+        _ => SandboxMode::Enforce,
+    }
 }
 
 #[pyclass]
@@ -229,6 +236,10 @@ impl OpenSkillRuntimeWrapper {
         audit.set_item("exit_status", exit_status.as_str())?;
         audit.set_item("stdout", result.audit.stdout)?;
         audit.set_item("stderr", result.audit.stderr)?;
+        audit.set_item(
+            "sandbox_mode",
+            result.audit.sandbox_mode.as_audit_str(),
+        )?;
         let out = PyDict::new(py);
         out.set_item("output", output)?;
         out.set_item("stdout", result.stdout)?;
@@ -336,6 +347,10 @@ impl OpenSkillRuntimeWrapper {
         audit.set_item("exit_status", exit_status)?;
         audit.set_item("stdout", result.audit.stdout)?;
         audit.set_item("stderr", result.audit.stderr)?;
+        audit.set_item(
+            "sandbox_mode",
+            result.audit.sandbox_mode.as_audit_str(),
+        )?;
 
         let response = PyDict::new(py);
         response.set_item("output", output)?;
@@ -449,6 +464,10 @@ impl OpenSkillRuntimeWrapper {
         audit.set_item("exit_status", exit_status)?;
         audit.set_item("stdout", result.audit.stdout)?;
         audit.set_item("stderr", result.audit.stderr)?;
+        audit.set_item(
+            "sandbox_mode",
+            result.audit.sandbox_mode.as_audit_str(),
+        )?;
 
         let response = PyDict::new(py);
         response.set_item("output", output_obj)?;
@@ -642,6 +661,10 @@ impl OpenSkillRuntimeWrapper {
         audit.set_item("exit_status", exit_status)?;
         audit.set_item("stdout", result.audit.stdout)?;
         audit.set_item("stderr", result.audit.stderr)?;
+        audit.set_item(
+            "sandbox_mode",
+            result.audit.sandbox_mode.as_audit_str(),
+        )?;
 
         let response = PyDict::new(py);
         response.set_item("output", output)?;
@@ -773,11 +796,12 @@ impl ExecutionContextWrapper {
 ///     write_paths: List of paths the command can write to
 ///     env_vars: Dict of environment variables to pass through
 ///     timeout_ms: Timeout in milliseconds (default: 30000)
+///     sandbox_mode: OS sandbox mode - `"enforce"` (default) or `"disabled"`
 ///
 /// Returns:
 ///     Dict with exit_code, stdout, stderr, timed_out
 #[pyfunction]
-#[pyo3(signature = (command, working_dir, *, allow_network = false, allow_process = false, read_paths = None, write_paths = None, env_vars = None, timeout_ms = 30000))]
+#[pyo3(signature = (command, working_dir, *, allow_network = false, allow_process = false, read_paths = None, write_paths = None, env_vars = None, timeout_ms = 30000, sandbox_mode = None))]
 fn run_sandboxed_shell_command(
     py: Python<'_>,
     command: String,
@@ -788,6 +812,7 @@ fn run_sandboxed_shell_command(
     write_paths: Option<Vec<String>>,
     env_vars: Option<&Bound<'_, PyDict>>,
     timeout_ms: u64,
+    sandbox_mode: Option<&str>,
 ) -> PyResult<Py<PyAny>> {
     // Convert env_vars from Python dict to Vec<(String, String)>
     let env_vec: Vec<(String, String)> = if let Some(env_dict) = env_vars {
@@ -818,6 +843,7 @@ fn run_sandboxed_shell_command(
             .collect(),
         env_vars: env_vec,
         timeout_ms,
+        sandbox_mode: parse_sandbox_mode(sandbox_mode),
     };
 
     let result = run_sandboxed_command(&command, &PathBuf::from(&working_dir), perms)

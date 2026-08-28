@@ -1,6 +1,7 @@
-use sha2::{Digest, Sha256};
-use serde_json::Value;
 use crate::errors::OpenSkillError;
+use crate::sandbox_mode::SandboxMode;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
 pub enum ExecutionStatus {
@@ -22,6 +23,8 @@ pub struct AuditRecord {
     pub exit_status: ExecutionStatus,
     pub stdout: String,
     pub stderr: String,
+    /// Effective OS sandbox mode for this execution (`enforce` or `disabled`).
+    pub sandbox_mode: SandboxMode,
 }
 
 pub trait AuditSink {

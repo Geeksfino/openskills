@@ -3,7 +3,7 @@ use napi_derive::napi;
 use openskills_runtime::{
     CliPermissionCallback, CommandPermissions, DenyAllCallback, ExecutionContext, ExecutionOptions,
     ExecutionTarget, Fallback, HostPolicy, OpenSkillRuntime, OutputType, PermissionCallback,
-    PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus,
+    PermissionsConfig, RuntimeConfig, RuntimeExecutionStatus, SandboxMode,
     SkillExecutionSession, SkillLocation, run_sandboxed_command,
 };
 use std::path::PathBuf;
@@ -104,6 +104,8 @@ pub struct CommandPermissionsJs {
     /// Timeout in milliseconds.
     #[napi(ts_type = "number")]
     pub timeout_ms: Option<i64>,
+    /// OS sandbox mode: `"enforce"` (default) or `"disabled"`.
+    pub sandbox_mode: Option<String>,
 }
 
 /// Result from sandboxed command execution.
@@ -135,6 +137,8 @@ pub struct AuditRecord {
     pub exit_status: String,
     pub stdout: String,
     pub stderr: String,
+    /// Effective OS sandbox mode (`enforce` or `disabled`).
+    pub sandbox_mode: String,
 }
 
 #[napi(object)]
@@ -192,6 +196,13 @@ fn safe_timeout_ms(timeout: Option<i64>) -> Option<u64> {
 /// Expose millisecond values as decimal strings so callers get exact audit values.
 fn u64_ms_to_audit_string(v: u64) -> String {
     v.to_string()
+}
+
+fn parse_sandbox_mode(mode: Option<&str>) -> SandboxMode {
+    match mode.map(str::to_ascii_lowercase) {
+        Some(ref s) if s == "disabled" => SandboxMode::Disabled,
+        _ => SandboxMode::Enforce,
+    }
 }
 
 // Define all #[napi] structs before their impl blocks (required for NAPI macro expansion)
@@ -513,6 +524,7 @@ impl OpenSkillRuntimeWrapper {
                 exit_status,
                 stdout: result.audit.stdout,
                 stderr: result.audit.stderr,
+                sandbox_mode: result.audit.sandbox_mode.as_audit_str().to_string(),
             },
         })
     }
@@ -612,6 +624,7 @@ impl OpenSkillRuntimeWrapper {
                 exit_status,
                 stdout: result.audit.stdout,
                 stderr: result.audit.stderr,
+                sandbox_mode: result.audit.sandbox_mode.as_audit_str().to_string(),
             },
         })
     }
@@ -692,6 +705,7 @@ impl OpenSkillRuntimeWrapper {
                 exit_status,
                 stdout: result.audit.stdout,
                 stderr: result.audit.stderr,
+                sandbox_mode: result.audit.sandbox_mode.as_audit_str().to_string(),
             },
         })
     }
@@ -864,6 +878,7 @@ impl OpenSkillRuntimeWrapper {
                 exit_status,
                 stdout: result.audit.stdout,
                 stderr: result.audit.stderr,
+                sandbox_mode: result.audit.sandbox_mode.as_audit_str().to_string(),
             },
         })
     }
@@ -951,6 +966,7 @@ pub fn run_sandboxed_shell_command(
             })
             .collect(),
         timeout_ms: safe_timeout_ms(perms.timeout_ms).unwrap_or(30000),
+        sandbox_mode: parse_sandbox_mode(perms.sandbox_mode.as_deref()),
     };
 
     let result = run_sandboxed_command(&command, &PathBuf::from(&working_dir), rust_perms)
@@ -973,6 +989,7 @@ impl Default for CommandPermissionsJs {
             write_paths: None,
             env_vars: None,
             timeout_ms: None,
+            sandbox_mode: None,
         }
     }
 }
