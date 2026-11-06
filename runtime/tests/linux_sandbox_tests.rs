@@ -394,6 +394,7 @@ fn test_run_sandboxed_command() {
         write_paths: vec![working_dir.to_path_buf()],
         env_vars: vec![],
         timeout_ms: 10000,
+        ..Default::default()
     };
 
     let result = run_sandboxed_command("echo 'hello from sandbox'", working_dir, permissions);
@@ -427,6 +428,7 @@ fn test_run_sandboxed_command_allows_dev_null_redirect() {
         write_paths: vec![working_dir.to_path_buf()],
         env_vars: vec![],
         timeout_ms: 10000,
+        ..Default::default()
     };
 
     // Same idiom agents emit (`ls … 2>/dev/null`). A read-only Landlock grant
